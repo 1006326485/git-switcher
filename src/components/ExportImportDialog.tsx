@@ -1,6 +1,8 @@
 import { useState, useCallback, memo } from "react";
 import * as api from "../lib/tauri";
 import { Modal, Tabs } from "./ui/primitives";
+import { save, open as openFileDialog } from "@tauri-apps/plugin-dialog";
+import { writeTextFile, readTextFile } from "@tauri-apps/plugin-fs";
 
 interface ExportImportDialogProps {
   open: boolean;
@@ -40,6 +42,25 @@ export const ExportImportDialog = memo(function ExportImportDialog({
     }
   }, [onSuccess, onError]);
 
+  const handleExportToFile = useCallback(async () => {
+    setLoading(true);
+    try {
+      const json = await api.exportProjects();
+      const filePath = await save({
+        filters: [{ name: "JSON", extensions: ["json"] }],
+        defaultPath: "git-switcher-projects.json",
+      });
+      if (filePath) {
+        await writeTextFile(filePath, json);
+        onSuccess(`Exported to ${filePath}`);
+      }
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, [onSuccess, onError]);
+
   const handleImportJson = useCallback(async () => {
     if (!importJson.trim()) return;
     setLoading(true);
@@ -60,6 +81,25 @@ export const ExportImportDialog = memo(function ExportImportDialog({
       setLoading(false);
     }
   }, [importJson, activeGroup, onSuccess, onError, onImportDone, onClose]);
+
+  const handleImportFromFile = useCallback(async () => {
+    setLoading(true);
+    try {
+      const filePath = await openFileDialog({
+        filters: [{ name: "JSON", extensions: ["json"] }],
+        multiple: false,
+      });
+      if (filePath) {
+        const json = await readTextFile(filePath as string);
+        setImportJson(json);
+        onSuccess("File loaded — click Import to proceed");
+      }
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, [onSuccess, onError]);
 
   return (
     <Modal open={open} onClose={onClose} title="Export / Import Projects" maxWidth="max-w-lg">
@@ -85,6 +125,13 @@ export const ExportImportDialog = memo(function ExportImportDialog({
             >
               {loading ? "Exporting..." : "Export to Clipboard"}
             </button>
+            <button
+              onClick={handleExportToFile}
+              disabled={loading}
+              className="w-full px-4 py-2.5 rounded-lg bg-gray-600 hover:bg-gray-700 disabled:bg-gray-400 text-white font-medium text-sm transition-colors"
+            >
+              {loading ? "Exporting..." : "Save to File"}
+            </button>
           </div>
         )}
 
@@ -93,6 +140,13 @@ export const ExportImportDialog = memo(function ExportImportDialog({
             <p className="text-sm text-gray-600 dark:text-gray-400">
               Paste exported JSON below to import projects. Existing projects are skipped.
             </p>
+            <button
+              onClick={handleImportFromFile}
+              disabled={loading}
+              className="w-full px-4 py-2.5 rounded-lg bg-gray-600 hover:bg-gray-700 disabled:bg-gray-400 text-white font-medium text-sm transition-colors"
+            >
+              {loading ? "Loading..." : "Load from File"}
+            </button>
             <textarea
               value={importJson}
               onChange={(e) => setImportJson(e.target.value)}
