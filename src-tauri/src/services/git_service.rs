@@ -1,7 +1,7 @@
 use git2::{Repository, Status, StatusOptions, BranchType, build::CheckoutBuilder};
 
 use crate::AppError;
-use crate::models::{BranchInfo, CommitInfo, FileStatus, GitFileEntry, GitStatus, MergeResult, ProjectDetail, GitProject, Group};
+use crate::models::{BranchInfo, CommitInfo, FileStatus, GitFileEntry, GitStatus, MergeResult, ProjectDetail, GitProject, Group, StashInfo};
 
 pub struct GitService;
 
@@ -363,6 +363,61 @@ impl GitService {
         let mut cmd = Self::git_cmd(path);
         cmd.args(["stash", "pop"]);
         Self::run_with_timeout(cmd, 60)
+    }
+
+    pub fn stash_pop_at(path: &str, index: usize) -> Result<String, AppError> {
+        let mut cmd = Self::git_cmd(path);
+        cmd.args(["stash", "pop", &format!("stash@{{{}}}", index)]);
+        Self::run_with_timeout(cmd, 60)
+    }
+
+    pub fn get_stash_list(path: &str) -> Result<Vec<StashInfo>, AppError> {
+        let output = std::process::Command::new("git")
+            .args(["stash", "list", "--format=%H %gd %s"])
+            .current_dir(path)
+            .output()
+            .map_err(|e| AppError::Git(format!("Failed to get stash list: {}", e)))?;
+
+        if !output.status.success() {
+            return Ok(vec![]);
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stashes: Vec<StashInfo> = stdout
+            .lines()
+            .enumerate()
+            .filter_map(|(i, line)| {
+                let parts: Vec<&str> = line.splitn(2, ' ').collect();
+                if parts.len() >= 2 {
+                    let rest = parts[1];
+                    let msg_start = rest.find(' ').map(|p| p + 1).unwrap_or(0);
+                    let message = rest[msg_start..].trim().to_string();
+                    Some(StashInfo {
+                        index: i,
+                        message,
+                        oid: parts[0].to_string(),
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        Ok(stashes)
+    }
+
+    pub fn stash_drop(path: &str, index: usize) -> Result<(), AppError> {
+        let output = std::process::Command::new("git")
+            .args(["stash", "drop", &format!("stash@{{{}}}", index)])
+            .current_dir(path)
+            .output()
+            .map_err(|e| AppError::Git(format!("Failed to drop stash: {}", e)))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(AppError::Git(format!("Failed to drop stash: {}", stderr.trim())));
+        }
+        Ok(())
     }
 
     /// Build a git Command with env vars that prevent interactive prompts from hanging.

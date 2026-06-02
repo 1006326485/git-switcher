@@ -202,3 +202,10 @@ pub struct ReviewResult {
     pub model: String,
     pub created_at: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StashInfo {
+    pub index: usize,
+    pub message: String,
+    pub oid: String,
+}

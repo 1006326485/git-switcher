@@ -57,6 +57,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::git_fetch,
             commands::git_stash,
             commands::git_stash_pop,
+            commands::git_stash_list,
+            commands::git_stash_drop,
             // Branch management
             commands::create_branch,
             commands::delete_branch,

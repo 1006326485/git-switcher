@@ -2,7 +2,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::AppError;
 use crate::db::Database;
-use crate::models::{BatchResult, BranchInfo, CommitInfo, GitFileEntry, GitStatus, MergeResult, ProjectDetail};
+use crate::models::{BatchResult, BranchInfo, CommitInfo, GitFileEntry, GitStatus, MergeResult, ProjectDetail, StashInfo};
 use crate::services::GitService;
 
 use super::{emit_op_done, emit_op_error, emit_op_start, next_op_id, try_update_activity};
@@ -288,7 +288,7 @@ pub async fn git_fetch(path: String, app: AppHandle) -> Result<String, AppError>
 }
 
 #[tauri::command]
-pub async fn git_stash_pop(path: String, app: AppHandle) -> Result<String, AppError> {
+pub async fn git_stash_pop(path: String, index: Option<usize>, app: AppHandle) -> Result<String, AppError> {
     let op_id = next_op_id();
     emit_op_start(&app, op_id, "stash_pop", &path);
 
@@ -296,7 +296,10 @@ pub async fn git_stash_pop(path: String, app: AppHandle) -> Result<String, AppEr
     let app_clone = app.clone();
 
     let result = tokio::task::spawn_blocking(move || -> Result<String, AppError> {
-        GitService::stash_pop(&path_clone)
+        match index {
+            Some(i) => GitService::stash_pop_at(&path_clone, i),
+            None => GitService::stash_pop(&path_clone),
+        }
     })
     .await
     .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?;
@@ -304,6 +307,29 @@ pub async fn git_stash_pop(path: String, app: AppHandle) -> Result<String, AppEr
     match &result {
         Ok(_) => emit_op_done(&app_clone, op_id, "stash_pop", &path),
         Err(e) => emit_op_error(&app_clone, op_id, "stash_pop", &path, &e.to_string()),
+    }
+    result
+}
+
+#[tauri::command]
+pub async fn git_stash_list(path: String) -> Result<Vec<StashInfo>, AppError> {
+    tokio::task::spawn_blocking(move || GitService::get_stash_list(&path))
+        .await
+        .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
+}
+
+#[tauri::command]
+pub async fn git_stash_drop(path: String, index: usize, app: AppHandle) -> Result<(), AppError> {
+    let op_id = next_op_id();
+    emit_op_start(&app, op_id, "stash_drop", &path);
+    let path_clone = path.clone();
+    let app_clone = app.clone();
+    let result = tokio::task::spawn_blocking(move || GitService::stash_drop(&path_clone, index))
+        .await
+        .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?;
+    match &result {
+        Ok(_) => emit_op_done(&app_clone, op_id, "stash_drop", &path),
+        Err(e) => emit_op_error(&app_clone, op_id, "stash_drop", &path, &e.to_string()),
     }
     result
 }

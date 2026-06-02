@@ -8,6 +8,7 @@ import type {
   GitFileEntry,
   MergeResult,
   ReviewResult,
+  StashInfo,
 } from "./types";
 
 // ── Projects ────────────────────────────────────────────────────────────
@@ -86,8 +87,16 @@ export async function gitStash(path: string): Promise<string> {
   return invoke("git_stash", { path });
 }
 
-export async function gitStashPop(path: string): Promise<string> {
-  return invoke("git_stash_pop", { path });
+export async function gitStashPop(path: string, index?: number): Promise<string> {
+  return invoke("git_stash_pop", { path, index: index ?? null });
+}
+
+export async function gitStashList(path: string): Promise<StashInfo[]> {
+  return invoke("git_stash_list", { path });
+}
+
+export async function gitStashDrop(path: string, index: number): Promise<void> {
+  return invoke("git_stash_drop", { path, index });
 }
 
 export async function cancelGitOp(id: number): Promise<void> {
