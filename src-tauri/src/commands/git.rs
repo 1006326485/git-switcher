@@ -85,9 +85,9 @@ pub async fn refresh_project(
 }
 
 #[tauri::command]
-pub async fn git_get_log(path: String, limit: Option<usize>) -> Result<Vec<CommitInfo>, String> {
+pub async fn git_get_log(path: String, limit: Option<usize>, offset: Option<usize>) -> Result<Vec<CommitInfo>, String> {
     tokio::task::spawn_blocking(move || -> Result<Vec<CommitInfo>, String> {
-        GitService::get_log(&path, limit.unwrap_or(50))
+        GitService::get_log(&path, offset.unwrap_or(0), limit.unwrap_or(50))
     })
     .await
     .map_err(|e| format!("Task failed: {}", e))?

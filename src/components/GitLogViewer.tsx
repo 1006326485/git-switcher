@@ -3,6 +3,8 @@ import * as api from "../lib/tauri";
 import type { CommitInfo } from "../lib/types";
 import { Modal } from "./ui/primitives";
 
+const LIMIT = 50;
+
 interface GitLogViewerProps {
   path: string;
   projectName: string;
@@ -13,20 +15,42 @@ interface GitLogViewerProps {
 export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open, onClose }: GitLogViewerProps) {
   const [commits, setCommits] = useState<CommitInfo[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(true);
 
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setHasMore(true);
     api
-      .gitGetLog(path, 100)
-      .then((data) => { if (!cancelled) setCommits(data); })
+      .gitGetLog(path, LIMIT, 0)
+      .then((data) => {
+        if (!cancelled) {
+          setCommits(data);
+          setHasMore(data.length >= LIMIT);
+        }
+      })
       .catch((e) => { if (!cancelled) setError(String(e)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [open, path]);
+
+  const handleLoadMore = useCallback(async () => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    try {
+      const more = await api.gitGetLog(path, LIMIT, commits.length);
+      setCommits((prev) => [...prev, ...more]);
+      setHasMore(more.length >= LIMIT);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [path, commits.length, loadingMore, hasMore]);
 
   const formatDate = useCallback((ts: number) => {
     const d = new Date(ts * 1000);
@@ -61,30 +85,43 @@ export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open
             No commits yet
           </div>
         ) : (
-          <ul className="divide-y divide-gray-100 dark:divide-gray-700/50 list-none m-0 p-0">
-            {commits.map((c) => (
-              <li
-                key={c.hash}
-                className="px-6 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
-              >
-                <div className="flex items-start gap-3">
-                  <div className="shrink-0 mt-1">
-                    <div className="w-2 h-2 rounded-full bg-blue-500 dark:bg-blue-400" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-                      {c.message}
-                    </p>
-                    <div className="flex items-center gap-3 mt-1 text-xs text-gray-500 dark:text-gray-400">
-                      <span className="font-mono">{c.short_hash}</span>
-                      <span>{c.author}</span>
-                      <span>{formatDate(c.timestamp)}</span>
+          <>
+            <ul className="divide-y divide-gray-100 dark:divide-gray-700/50 list-none m-0 p-0">
+              {commits.map((c) => (
+                <li
+                  key={c.hash}
+                  className="px-6 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="shrink-0 mt-1">
+                      <div className="w-2 h-2 rounded-full bg-blue-500 dark:bg-blue-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                        {c.message}
+                      </p>
+                      <div className="flex items-center gap-3 mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        <span className="font-mono">{c.short_hash}</span>
+                        <span>{c.author}</span>
+                        <span>{formatDate(c.timestamp)}</span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              </li>
-            ))}
-          </ul>
+                </li>
+              ))}
+            </ul>
+            {hasMore && (
+              <div className="px-6 py-3">
+                <button
+                  onClick={handleLoadMore}
+                  disabled={loadingMore}
+                  className="w-full px-4 py-2 rounded-lg bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-sm text-gray-700 dark:text-gray-300 transition-colors"
+                >
+                  {loadingMore ? "Loading..." : "Load More"}
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
     </Modal>
