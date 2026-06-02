@@ -1,0 +1,199 @@
+import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
+import type {
+  ProjectDetail,
+  AppSettings,
+  CommitInfo,
+  Group,
+  GitFileEntry,
+  MergeResult,
+  ReviewResult,
+} from "./types";
+
+// ── Projects ────────────────────────────────────────────────────────────
+
+export async function addProject(path: string, groupId: string): Promise<ProjectDetail> {
+  return invoke("add_project", { path, groupId });
+}
+
+export async function removeProject(id: string): Promise<void> {
+  return invoke("remove_project", { id });
+}
+
+export async function listProjects(): Promise<ProjectDetail[]> {
+  return invoke("list_projects");
+}
+
+export async function importWorkspace(filePath: string, groupId: string): Promise<ProjectDetail[]> {
+  return invoke("import_workspace", { filePath, groupId });
+}
+
+export async function initGitProject(path: string, name: string, groupId: string): Promise<ProjectDetail> {
+  return invoke("init_git_project", { path, name, groupId });
+}
+
+export async function exportProjects(): Promise<string> {
+  return invoke("export_projects");
+}
+
+export async function importProjects(json: string, groupId: string): Promise<ProjectDetail[]> {
+  return invoke("import_projects", { json, groupId });
+}
+
+// ── Git Operations ──────────────────────────────────────────────────────
+
+export async function switchBranch(path: string, branch: string): Promise<ProjectDetail> {
+  return invoke("switch_branch", { path, branch });
+}
+
+export async function refreshProject(path: string): Promise<ProjectDetail> {
+  return invoke("refresh_project", { path });
+}
+
+export async function gitGetLog(path: string, limit?: number): Promise<CommitInfo[]> {
+  return invoke("git_get_log", { path, limit });
+}
+
+export async function gitGetFiles(path: string): Promise<GitFileEntry[]> {
+  return invoke("git_get_files", { path });
+}
+
+export async function gitStageFile(path: string, file: string): Promise<void> {
+  return invoke("git_stage_file", { path, file });
+}
+
+export async function gitUnstageFile(path: string, file: string): Promise<void> {
+  return invoke("git_unstage_file", { path, file });
+}
+
+export async function gitCommit(path: string, message: string): Promise<string> {
+  return invoke("git_commit", { path, message });
+}
+
+export async function gitPush(path: string, branch?: string): Promise<string> {
+  return invoke("git_push", { path, branch });
+}
+
+export async function gitPull(path: string): Promise<string> {
+  return invoke("git_pull", { path });
+}
+
+export async function gitFetch(path: string): Promise<string> {
+  return invoke("git_fetch", { path });
+}
+
+export async function gitStash(path: string): Promise<string> {
+  return invoke("git_stash", { path });
+}
+
+export async function gitStashPop(path: string): Promise<string> {
+  return invoke("git_stash_pop", { path });
+}
+
+export async function cancelGitOp(id: number): Promise<void> {
+  return invoke("cancel_git_op", { id });
+}
+
+// ── Branch Management ───────────────────────────────────────────────────
+
+export async function createBranch(path: string, name: string, fromBranch?: string): Promise<void> {
+  return invoke("create_branch", { path, name, fromBranch });
+}
+
+export async function deleteBranch(path: string, name: string): Promise<void> {
+  return invoke("delete_branch", { path, name });
+}
+
+export async function mergeBranch(path: string, branch: string): Promise<MergeResult> {
+  return invoke("merge_branch", { path, branch });
+}
+
+// ── Batch Operations ────────────────────────────────────────────────────
+
+export async function fetchAll(): Promise<void> {
+  return invoke("fetch_all");
+}
+
+export async function pullAll(): Promise<void> {
+  return invoke("pull_all");
+}
+
+// ── Groups ──────────────────────────────────────────────────────────────
+
+export async function createGroup(name: string, color?: string): Promise<Group> {
+  return invoke("create_group", { name, color });
+}
+
+export async function listGroups(): Promise<Group[]> {
+  return invoke("list_groups");
+}
+
+export async function deleteGroup(id: string): Promise<void> {
+  return invoke("delete_group", { id });
+}
+
+export async function assignToGroup(projectId: string, groupId: string): Promise<void> {
+  return invoke("assign_to_group", { projectId, groupId });
+}
+
+export async function listProjectsInGroup(groupId: string): Promise<ProjectDetail[]> {
+  return invoke("list_projects_in_group", { groupId });
+}
+
+export async function updateGroup(group: Group): Promise<Group> {
+  return invoke("update_group", { group });
+}
+
+export async function setProjectAlias(id: string, alias: string): Promise<void> {
+  return invoke("set_project_alias", { id, alias });
+}
+
+export async function reorderProjects(orderedIds: string[]): Promise<void> {
+  return invoke("reorder_projects", { orderedIds });
+}
+
+// ── Terminal / Open ─────────────────────────────────────────────────────
+
+export async function openInTerminal(path: string): Promise<void> {
+  return invoke("open_in_terminal", { path });
+}
+
+export async function openInFinder(path: string): Promise<void> {
+  return invoke("open_in_finder", { path });
+}
+
+export async function openInVscode(path: string): Promise<void> {
+  return invoke("open_in_vscode", { path });
+}
+
+// ── Settings ────────────────────────────────────────────────────────────
+
+export async function getSettings(): Promise<AppSettings> {
+  return invoke("get_settings");
+}
+
+export async function updateSettings(settings: AppSettings): Promise<AppSettings> {
+  return invoke("update_settings", { newSettings: settings });
+}
+
+// ── File Dialog ─────────────────────────────────────────────────────────
+
+export async function pickDirectory(): Promise<string | null> {
+  return open({ directory: true });
+}
+
+export async function pickWorkspaceFile(): Promise<string | null> {
+  return open({
+    filters: [{ name: "Workspace", extensions: ["code-workspace"] }],
+  });
+}
+
+// ── AI Code Review ────────────────────────────────────────────────────
+
+export async function aiReview(
+  path: string,
+  baseBranch: string,
+  headBranch: string
+): Promise<ReviewResult> {
+  return invoke("ai_review", { path, baseBranch, headBranch });
+}

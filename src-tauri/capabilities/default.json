@@ -1,0 +1,30 @@
+{
+  "identifier": "default",
+  "description": "Default capabilities for Git Switcher",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-set-focus",
+    "core:window:allow-center",
+    "core:window:allow-request-user-attention",
+    "core:window:allow-set-skip-taskbar",
+    "core:window:allow-set-always-on-top",
+    "core:window:allow-close",
+    "core:window:allow-minimize",
+    "core:window:allow-maximize",
+    "core:window:allow-unmaximize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-hide",
+    "core:window:allow-show",
+    "dialog:default",
+    "dialog:allow-open",
+    "dialog:allow-ask",
+    "dialog:allow-confirm",
+    "dialog:allow-save",
+    "dialog:allow-message",
+    "shell:default",
+    "shell:allow-open",
+    "shell:allow-execute"
+  ]
+}
