@@ -26,6 +26,7 @@ const viewOptions: { value: ViewMode; icon: string; label: string }[] = [
   { value: "list", icon: "☰", label: "List" },
   { value: "compact", icon: "≡", label: "Compact" },
   { value: "table", icon: "▦", label: "Table" },
+  { value: "dashboard", icon: "📊", label: "Dashboard" },
 ];
 
 const themeOptions: { value: Theme; icon: string; label: string }[] = [
