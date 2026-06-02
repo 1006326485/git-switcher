@@ -1,24 +1,24 @@
 use std::fs;
 use std::path::Path;
 
+use crate::AppError;
 use crate::models::{WorkspaceFile, WorkspaceFolder};
 
 pub struct WorkspaceService;
 
 impl WorkspaceService {
-    pub fn parse_workspace_file(file_path: &str) -> Result<Vec<WorkspaceFolder>, String> {
-        let content = fs::read_to_string(file_path)
-            .map_err(|e| format!("Failed to read workspace file: {}", e))?;
+    pub fn parse_workspace_file(file_path: &str) -> Result<Vec<WorkspaceFolder>, AppError> {
+        let content = fs::read_to_string(file_path)?;
 
         // Strip comments and trailing commas (VSCode workspace files are JSONC)
         let cleaned = Self::strip_jsonc(&content);
 
         let workspace: WorkspaceFile = serde_json::from_str(&cleaned)
-            .map_err(|e| format!("Failed to parse workspace file: {}", e))?;
+            .map_err(|e| AppError::Config(format!("Failed to parse workspace file: {}", e)))?;
 
         let workspace_dir = Path::new(file_path)
             .parent()
-            .ok_or_else(|| "Invalid workspace file path".to_string())?;
+            .ok_or_else(|| AppError::Config("Invalid workspace file path".to_string()))?;
 
         let mut resolved_folders = Vec::new();
         for folder in workspace.folders {

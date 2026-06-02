@@ -3,16 +3,17 @@ use tauri::State;
 use uuid::Uuid;
 use chrono::Utc;
 
+use crate::AppError;
 use crate::db::Database;
 use crate::models::{GitProject, ProjectDetail};
 use crate::services::{GitService, WorkspaceService};
 
 use super::try_update_activity;
 
-fn canonicalize_path(path: &str) -> Result<String, String> {
+fn canonicalize_path(path: &str) -> Result<String, AppError> {
     Path::new(path)
         .canonicalize()
-        .map_err(|e| format!("Invalid path: {}", e))
+        .map_err(|e| AppError::Other(format!("Invalid path: {}", e)))
         .map(|p| p.to_string_lossy().to_string())
 }
 
@@ -24,17 +25,17 @@ fn path_name(path: &str) -> String {
 }
 
 #[tauri::command]
-pub async fn add_project(path: String, group_id: String, db: State<'_, Database>) -> Result<ProjectDetail, String> {
+pub async fn add_project(path: String, group_id: String, db: State<'_, Database>) -> Result<ProjectDetail, AppError> {
     let db = db.inner().clone();
     tokio::task::spawn_blocking(move || {
         let path = canonicalize_path(&path)?;
 
         if !GitService::is_git_repo(&path) {
-            return Err("Not a git repository".to_string());
+            return Err(AppError::Other("Not a git repository".to_string()));
         }
 
         if db.project_exists(&path)? {
-            return Err("Project already exists".to_string());
+            return Err(AppError::Other("Project already exists".to_string()));
         }
 
         let group = db.get_group_by_id(&group_id)?;
@@ -47,30 +48,30 @@ pub async fn add_project(path: String, group_id: String, db: State<'_, Database>
         Ok(detail)
     })
     .await
-    .map_err(|e| format!("Task failed: {}", e))?
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
 }
 
 #[tauri::command]
-pub async fn remove_project(id: String, db: State<'_, Database>) -> Result<(), String> {
+pub async fn remove_project(id: String, db: State<'_, Database>) -> Result<(), AppError> {
     let db = db.inner().clone();
     tokio::task::spawn_blocking(move || db.delete_project(&id))
         .await
-        .map_err(|e| format!("Task failed: {}", e))?
+        .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
 }
 
 #[tauri::command]
-pub async fn list_projects(db: State<'_, Database>) -> Result<Vec<ProjectDetail>, String> {
+pub async fn list_projects(db: State<'_, Database>) -> Result<Vec<ProjectDetail>, AppError> {
     let db = db.inner().clone();
     tokio::task::spawn_blocking(move || {
         let projects = db.get_all_projects()?;
         Ok(super::fetch_project_details_batch(&db, projects))
     })
     .await
-    .map_err(|e| format!("Task failed: {}", e))?
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
 }
 
 #[tauri::command]
-pub async fn import_workspace(file_path: String, group_id: String, db: State<'_, Database>) -> Result<Vec<ProjectDetail>, String> {
+pub async fn import_workspace(file_path: String, group_id: String, db: State<'_, Database>) -> Result<Vec<ProjectDetail>, AppError> {
     let db = db.inner().clone();
     tokio::task::spawn_blocking(move || {
         let folders = WorkspaceService::parse_workspace_file(&file_path)?;
@@ -107,17 +108,17 @@ pub async fn import_workspace(file_path: String, group_id: String, db: State<'_,
         Ok(results)
     })
     .await
-    .map_err(|e| format!("Task failed: {}", e))?
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
 }
 
 #[tauri::command]
-pub async fn init_git_project(path: String, name: String, group_id: String, db: State<'_, Database>) -> Result<ProjectDetail, String> {
+pub async fn init_git_project(path: String, name: String, group_id: String, db: State<'_, Database>) -> Result<ProjectDetail, AppError> {
     let db = db.inner().clone();
     tokio::task::spawn_blocking(move || {
         let path = canonicalize_path(&path)?;
 
         if db.project_exists(&path)? {
-            return Err("Project already exists at this path".to_string());
+            return Err(AppError::Other("Project already exists at this path".to_string()));
         }
 
         GitService::init_repo(&path)?;
@@ -131,68 +132,68 @@ pub async fn init_git_project(path: String, name: String, group_id: String, db: 
         Ok(detail)
     })
     .await
-    .map_err(|e| format!("Task failed: {}", e))?
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
 }
 
 #[tauri::command]
-pub async fn set_project_alias(id: String, alias: String, db: State<'_, Database>) -> Result<(), String> {
+pub async fn set_project_alias(id: String, alias: String, db: State<'_, Database>) -> Result<(), AppError> {
     let db = db.inner().clone();
     tokio::task::spawn_blocking(move || db.update_project_alias(&id, &alias))
         .await
-        .map_err(|e| format!("Task failed: {}", e))?
+        .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
 }
 
 #[tauri::command]
-pub async fn reorder_projects(ordered_ids: Vec<String>, db: State<'_, Database>) -> Result<(), String> {
+pub async fn reorder_projects(ordered_ids: Vec<String>, db: State<'_, Database>) -> Result<(), AppError> {
     let db = db.inner().clone();
     tokio::task::spawn_blocking(move || db.reorder_projects(&ordered_ids))
         .await
-        .map_err(|e| format!("Task failed: {}", e))?
+        .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
 }
 
 #[tauri::command]
-pub async fn open_in_terminal(path: String) -> Result<(), String> {
+pub async fn open_in_terminal(path: String) -> Result<(), AppError> {
     tokio::task::spawn_blocking(move || {
         #[cfg(target_os = "macos")]
         {
             std::process::Command::new("open")
                 .args(["-a", "Terminal", &path])
                 .spawn()
-                .map_err(|e| format!("Failed to open terminal: {}", e))?;
+                .map_err(|e| AppError::Io(e))?;
         }
         #[cfg(target_os = "linux")]
         {
             std::process::Command::new("xdg-open")
                 .arg(&path)
                 .spawn()
-                .map_err(|e| format!("Failed to open terminal: {}", e))?;
+                .map_err(|e| AppError::Io(e))?;
         }
         #[cfg(target_os = "windows")]
         {
             if path.contains('"') {
-                return Err("Path contains characters that cannot be used in Windows command line".into());
+                return Err(AppError::Other("Path contains characters that cannot be used in Windows command line".into()));
             }
             std::process::Command::new("cmd")
                 .args(["/C", "start", "cmd", "/K", &format!("cd /d \"{}\"", path)])
                 .spawn()
-                .map_err(|e| format!("Failed to open terminal: {}", e))?;
+                .map_err(|e| AppError::Io(e))?;
         }
         Ok(())
     })
     .await
-    .map_err(|e| format!("Task failed: {}", e))?
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
 }
 
-fn spawn_command(program: &str, args: &[&str], label: &str) -> Result<(), String> {
+fn spawn_command(program: &str, args: &[&str], label: &str) -> Result<(), AppError> {
     std::process::Command::new(program)
         .args(args)
         .spawn()
-        .map_err(|e| format!("Failed to open {}: {}", label, e))?;
+        .map_err(|e| AppError::Other(format!("Failed to open {}: {}", label, e)))?;
     Ok(())
 }
 
 #[tauri::command]
-pub async fn open_in_finder(path: String) -> Result<(), String> {
+pub async fn open_in_finder(path: String) -> Result<(), AppError> {
     tokio::task::spawn_blocking(move || {
         #[cfg(target_os = "macos")]
         { spawn_command("open", &[&path], "Finder")?; }
@@ -203,11 +204,11 @@ pub async fn open_in_finder(path: String) -> Result<(), String> {
         Ok(())
     })
     .await
-    .map_err(|e| format!("Task failed: {}", e))?
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
 }
 
 #[tauri::command]
-pub async fn open_in_vscode(path: String) -> Result<(), String> {
+pub async fn open_in_vscode(path: String) -> Result<(), AppError> {
     tokio::task::spawn_blocking(move || {
         #[cfg(target_os = "macos")]
         { spawn_command("code", &[&path], "VS Code")?; }
@@ -218,27 +219,27 @@ pub async fn open_in_vscode(path: String) -> Result<(), String> {
         Ok(())
     })
     .await
-    .map_err(|e| format!("Task failed: {}", e))?
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
 }
 
 #[tauri::command]
-pub async fn export_projects(db: State<'_, Database>) -> Result<String, String> {
+pub async fn export_projects(db: State<'_, Database>) -> Result<String, AppError> {
     let db = db.inner().clone();
     tokio::task::spawn_blocking(move || {
         let projects = db.get_all_projects()?;
         serde_json::to_string_pretty(&projects)
-            .map_err(|e| format!("Failed to serialize: {}", e))
+            .map_err(|e| AppError::Other(format!("Failed to serialize: {}", e)))
     })
     .await
-    .map_err(|e| format!("Task failed: {}", e))?
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
 }
 
 #[tauri::command]
-pub async fn import_projects(json: String, group_id: String, db: State<'_, Database>) -> Result<Vec<ProjectDetail>, String> {
+pub async fn import_projects(json: String, group_id: String, db: State<'_, Database>) -> Result<Vec<ProjectDetail>, AppError> {
     let db = db.inner().clone();
     tokio::task::spawn_blocking(move || {
         let projects: Vec<GitProject> = serde_json::from_str(&json)
-            .map_err(|e| format!("Failed to parse JSON: {}", e))?;
+            .map_err(|e| AppError::Other(format!("Failed to parse JSON: {}", e)))?;
 
         let mut results = Vec::new();
         for mut project in projects {
@@ -275,5 +276,5 @@ pub async fn import_projects(json: String, group_id: String, db: State<'_, Datab
         Ok(results)
     })
     .await
-    .map_err(|e| format!("Task failed: {}", e))?
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
 }

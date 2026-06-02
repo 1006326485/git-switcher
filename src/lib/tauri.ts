@@ -110,12 +110,12 @@ export async function mergeBranch(path: string, branch: string): Promise<MergeRe
 
 // ── Batch Operations ────────────────────────────────────────────────────
 
-export async function fetchAll(): Promise<void> {
-  return invoke("fetch_all");
+export async function fetchAll(groupId?: string): Promise<void> {
+  return invoke("fetch_all", { groupId: groupId ?? null });
 }
 
-export async function pullAll(): Promise<void> {
-  return invoke("pull_all");
+export async function pullAll(groupId?: string): Promise<void> {
+  return invoke("pull_all", { groupId: groupId ?? null });
 }
 
 // ── Groups ──────────────────────────────────────────────────────────────
@@ -196,4 +196,8 @@ export async function aiReview(
   headBranch: string
 ): Promise<ReviewResult> {
   return invoke("ai_review", { path, baseBranch, headBranch });
+}
+
+export async function generateCommitMsg(path: string): Promise<string> {
+  return invoke("generate_commit_msg", { path });
 }

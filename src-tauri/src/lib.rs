@@ -1,7 +1,10 @@
 pub mod commands;
 pub mod db;
+pub mod error;
 pub mod models;
 pub mod services;
+
+pub use error::*;
 
 use commands::settings::SettingsStore;
 use commands::ActiveOps;
@@ -12,8 +15,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join("git-switcher");
 
-    let database = Database::new(&app_data_dir)
-        .map_err(|e| format!("Failed to initialize database: {}", e))?;
+    let database = Database::new(&app_data_dir)?;
 
     let settings_store = SettingsStore::new(&app_data_dir);
 
@@ -73,6 +75,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             // AI Review
             commands::get_branch_diff,
             commands::ai_review,
+            commands::generate_commit_msg,
         ])
         .run(tauri::generate_context!())?;
     Ok(())

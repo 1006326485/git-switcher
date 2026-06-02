@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::State;
 
+use crate::AppError;
 use crate::models::AppSettings;
 
 pub struct SettingsStore {
@@ -11,11 +12,11 @@ pub struct SettingsStore {
 }
 
 impl SettingsStore {
-    fn with_settings<F, T>(&self, f: F) -> Result<T, String>
+    fn with_settings<F, T>(&self, f: F) -> Result<T, AppError>
     where
-        F: FnOnce(&AppSettings) -> Result<T, String>,
+        F: FnOnce(&AppSettings) -> Result<T, AppError>,
     {
-        let settings = self.settings.lock().map_err(|e| format!("Lock poisoned: {}", e))?;
+        let settings = self.settings.lock().map_err(|e| AppError::Other(format!("Lock poisoned: {}", e)))?;
         f(&settings)
     }
 
@@ -45,34 +46,33 @@ impl SettingsStore {
         }
     }
 
-    pub fn get_all(&self) -> Result<AppSettings, String> {
+    pub fn get_all(&self) -> Result<AppSettings, AppError> {
         self.with_settings(|settings| Ok(settings.clone()))
     }
 
-    pub fn update_all(&self, new_settings: &AppSettings) -> Result<(), String> {
+    pub fn update_all(&self, new_settings: &AppSettings) -> Result<(), AppError> {
         // Write to disk first so in-memory and disk stay consistent on failure
         self.save(new_settings)?;
-        let mut settings = self.settings.lock().map_err(|e| format!("Lock poisoned: {}", e))?;
+        let mut settings = self.settings.lock().map_err(|e| AppError::Other(format!("Lock poisoned: {}", e)))?;
         *settings = new_settings.clone();
         Ok(())
     }
 
-    fn save(&self, settings: &AppSettings) -> Result<(), String> {
+    fn save(&self, settings: &AppSettings) -> Result<(), AppError> {
         let content = serde_json::to_string_pretty(settings)
-            .map_err(|e| format!("Failed to serialize settings: {}", e))?;
-        fs::write(&self.path, content)
-            .map_err(|e| format!("Failed to write settings: {}", e))?;
+            .map_err(|e| AppError::Config(format!("Failed to serialize settings: {}", e)))?;
+        fs::write(&self.path, content)?;
         Ok(())
     }
 }
 
 #[tauri::command]
-pub fn get_settings(store: State<'_, SettingsStore>) -> Result<AppSettings, String> {
+pub fn get_settings(store: State<'_, SettingsStore>) -> Result<AppSettings, AppError> {
     store.get_all()
 }
 
 #[tauri::command]
-pub fn update_settings(new_settings: AppSettings, store: State<'_, SettingsStore>) -> Result<AppSettings, String> {
+pub fn update_settings(new_settings: AppSettings, store: State<'_, SettingsStore>) -> Result<AppSettings, AppError> {
     store.update_all(&new_settings)?;
     Ok(new_settings)
 }

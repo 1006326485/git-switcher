@@ -1,12 +1,13 @@
 use tauri::{AppHandle, Emitter, State};
 
+use crate::AppError;
 use crate::db::Database;
 use crate::models::{BatchResult, BranchInfo, CommitInfo, GitFileEntry, GitStatus, MergeResult, ProjectDetail};
 use crate::services::GitService;
 
 use super::{emit_op_done, emit_op_error, emit_op_start, next_op_id, try_update_activity};
 
-fn get_project_detail_for_path(db: &Database, path: &str) -> Result<ProjectDetail, String> {
+fn get_project_detail_for_path(db: &Database, path: &str) -> Result<ProjectDetail, AppError> {
     let project = db.get_project_by_path(path)?;
     let group = db.get_project_group(&project.id)?;
     GitService::get_project_detail(&project, group)
@@ -15,14 +16,14 @@ fn get_project_detail_for_path(db: &Database, path: &str) -> Result<ProjectDetai
 // ── Libgit2-backed commands (async via spawn_blocking) ────────────────
 
 #[tauri::command]
-pub async fn get_branches(path: String) -> Result<Vec<BranchInfo>, String> {
-    tokio::task::spawn_blocking(move || -> Result<Vec<BranchInfo>, String> {
+pub async fn get_branches(path: String) -> Result<Vec<BranchInfo>, AppError> {
+    tokio::task::spawn_blocking(move || -> Result<Vec<BranchInfo>, AppError> {
         let repo = git2::Repository::open(&path)
-            .map_err(|e| format!("Failed to open repo: {}", e))?;
+            .map_err(|e| AppError::Git(format!("Failed to open repo: {}", e)))?;
         GitService::get_branches(&repo)
     })
     .await
-    .map_err(|e| format!("Task failed: {}", e))?
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
 }
 
 #[tauri::command]
@@ -31,7 +32,7 @@ pub async fn switch_branch(
     branch: String,
     db: State<'_, Database>,
     app: AppHandle,
-) -> Result<ProjectDetail, String> {
+) -> Result<ProjectDetail, AppError> {
     let op_id = next_op_id();
     emit_op_start(&app, op_id, "switch_branch", &path);
 
@@ -40,40 +41,40 @@ pub async fn switch_branch(
     let branch_clone = branch.clone();
     let app_clone = app.clone();
 
-    let result = tokio::task::spawn_blocking(move || -> Result<ProjectDetail, String> {
+    let result = tokio::task::spawn_blocking(move || -> Result<ProjectDetail, AppError> {
         GitService::switch_branch(&path_clone, &branch_clone)?;
         let detail = get_project_detail_for_path(&db, &path_clone)?;
         try_update_activity(&db, &detail.project.id, detail.project.last_commit_hash.as_deref());
         Ok(detail)
     })
     .await
-    .map_err(|e| format!("Task failed: {}", e))?;
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?;
 
     match &result {
         Ok(_) => emit_op_done(&app_clone, op_id, "switch_branch", &path),
-        Err(e) => emit_op_error(&app_clone, op_id, "switch_branch", &path, e),
+        Err(e) => emit_op_error(&app_clone, op_id, "switch_branch", &path, &e.to_string()),
     }
     result
 }
 
 #[tauri::command]
-pub async fn get_status(path: String) -> Result<GitStatus, String> {
-    tokio::task::spawn_blocking(move || -> Result<GitStatus, String> {
+pub async fn get_status(path: String) -> Result<GitStatus, AppError> {
+    tokio::task::spawn_blocking(move || -> Result<GitStatus, AppError> {
         let repo = git2::Repository::open(&path)
-            .map_err(|e| format!("Failed to open repo: {}", e))?;
+            .map_err(|e| AppError::Git(format!("Failed to open repo: {}", e)))?;
         GitService::get_status(&repo)
     })
     .await
-    .map_err(|e| format!("Task failed: {}", e))?
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
 }
 
 #[tauri::command]
 pub async fn refresh_project(
     path: String,
     db: State<'_, Database>,
-) -> Result<ProjectDetail, String> {
+) -> Result<ProjectDetail, AppError> {
     let db = db.inner().clone();
-    tokio::task::spawn_blocking(move || -> Result<ProjectDetail, String> {
+    tokio::task::spawn_blocking(move || -> Result<ProjectDetail, AppError> {
         let project = db.get_project_by_path(&path)?;
         let group = db.get_project_group(&project.id)?;
         let detail = GitService::get_project_detail(&project, group)?;
@@ -81,43 +82,43 @@ pub async fn refresh_project(
         Ok(detail)
     })
     .await
-    .map_err(|e| format!("Task failed: {}", e))?
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
 }
 
 #[tauri::command]
-pub async fn git_get_log(path: String, limit: Option<usize>) -> Result<Vec<CommitInfo>, String> {
-    tokio::task::spawn_blocking(move || -> Result<Vec<CommitInfo>, String> {
+pub async fn git_get_log(path: String, limit: Option<usize>) -> Result<Vec<CommitInfo>, AppError> {
+    tokio::task::spawn_blocking(move || -> Result<Vec<CommitInfo>, AppError> {
         GitService::get_log(&path, limit.unwrap_or(50))
     })
     .await
-    .map_err(|e| format!("Task failed: {}", e))?
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
 }
 
 #[tauri::command]
-pub async fn git_get_files(path: String) -> Result<Vec<GitFileEntry>, String> {
-    tokio::task::spawn_blocking(move || -> Result<Vec<GitFileEntry>, String> {
+pub async fn git_get_files(path: String) -> Result<Vec<GitFileEntry>, AppError> {
+    tokio::task::spawn_blocking(move || -> Result<Vec<GitFileEntry>, AppError> {
         GitService::get_file_list(&path)
     })
     .await
-    .map_err(|e| format!("Task failed: {}", e))?
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
 }
 
 #[tauri::command]
-pub async fn git_stage_file(path: String, file: String) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || -> Result<(), String> {
+pub async fn git_stage_file(path: String, file: String) -> Result<(), AppError> {
+    tokio::task::spawn_blocking(move || -> Result<(), AppError> {
         GitService::stage_file(&path, &file)
     })
     .await
-    .map_err(|e| format!("Task failed: {}", e))?
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
 }
 
 #[tauri::command]
-pub async fn git_unstage_file(path: String, file: String) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || -> Result<(), String> {
+pub async fn git_unstage_file(path: String, file: String) -> Result<(), AppError> {
+    tokio::task::spawn_blocking(move || -> Result<(), AppError> {
         GitService::unstage_file(&path, &file)
     })
     .await
-    .map_err(|e| format!("Task failed: {}", e))?
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
 }
 
 #[tauri::command]
@@ -126,7 +127,7 @@ pub async fn git_commit(
     message: String,
     db: State<'_, Database>,
     app: AppHandle,
-) -> Result<String, String> {
+) -> Result<String, AppError> {
     let op_id = next_op_id();
     emit_op_start(&app, op_id, "commit", &path);
 
@@ -134,7 +135,7 @@ pub async fn git_commit(
     let path_clone = path.clone();
     let app_clone = app.clone();
 
-    let result = tokio::task::spawn_blocking(move || -> Result<String, String> {
+    let result = tokio::task::spawn_blocking(move || -> Result<String, AppError> {
         let hash = GitService::commit(&path_clone, &message)?;
         if let Ok(project) = db.get_project_by_path(&path_clone) {
             try_update_activity(&db, &project.id, Some(hash.as_str()));
@@ -142,32 +143,32 @@ pub async fn git_commit(
         Ok(hash)
     })
     .await
-    .map_err(|e| format!("Task failed: {}", e))?;
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?;
 
     match &result {
         Ok(_) => emit_op_done(&app_clone, op_id, "commit", &path),
-        Err(e) => emit_op_error(&app_clone, op_id, "commit", &path, e),
+        Err(e) => emit_op_error(&app_clone, op_id, "commit", &path, &e.to_string()),
     }
     result
 }
 
 #[tauri::command]
-pub async fn git_stash(path: String, app: AppHandle) -> Result<String, String> {
+pub async fn git_stash(path: String, app: AppHandle) -> Result<String, AppError> {
     let op_id = next_op_id();
     emit_op_start(&app, op_id, "stash", &path);
 
     let path_clone = path.clone();
     let app_clone = app.clone();
 
-    let result = tokio::task::spawn_blocking(move || -> Result<String, String> {
+    let result = tokio::task::spawn_blocking(move || -> Result<String, AppError> {
         GitService::stash(&path_clone)
     })
     .await
-    .map_err(|e| format!("Task failed: {}", e))?;
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?;
 
     match &result {
         Ok(_) => emit_op_done(&app_clone, op_id, "stash", &path),
-        Err(e) => emit_op_error(&app_clone, op_id, "stash", &path, e),
+        Err(e) => emit_op_error(&app_clone, op_id, "stash", &path, &e.to_string()),
     }
     result
 }
@@ -177,25 +178,25 @@ pub async fn create_branch(
     path: String,
     name: String,
     from_branch: Option<String>,
-) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || -> Result<(), String> {
+) -> Result<(), AppError> {
+    tokio::task::spawn_blocking(move || -> Result<(), AppError> {
         GitService::create_branch(&path, &name, from_branch.as_deref())
     })
     .await
-    .map_err(|e| format!("Task failed: {}", e))?
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
 }
 
 #[tauri::command]
-pub async fn delete_branch(path: String, name: String) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || -> Result<(), String> {
+pub async fn delete_branch(path: String, name: String) -> Result<(), AppError> {
+    tokio::task::spawn_blocking(move || -> Result<(), AppError> {
         GitService::delete_branch(&path, &name)
     })
     .await
-    .map_err(|e| format!("Task failed: {}", e))?
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
 }
 
 #[tauri::command]
-pub async fn merge_branch(path: String, branch: String, app: AppHandle) -> Result<MergeResult, String> {
+pub async fn merge_branch(path: String, branch: String, app: AppHandle) -> Result<MergeResult, AppError> {
     let op_id = next_op_id();
     emit_op_start(&app, op_id, "merge", &path);
 
@@ -203,16 +204,16 @@ pub async fn merge_branch(path: String, branch: String, app: AppHandle) -> Resul
     let branch_clone = branch.clone();
     let app_clone = app.clone();
 
-    let result = tokio::task::spawn_blocking(move || -> Result<MergeResult, String> {
+    let result = tokio::task::spawn_blocking(move || -> Result<MergeResult, AppError> {
         GitService::merge_branch(&path_clone, &branch_clone)
     })
     .await
-    .map_err(|e| format!("Task failed: {}", e))?;
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?;
 
     match &result {
         Ok(r) if r.success => emit_op_done(&app_clone, op_id, "merge", &path),
         Ok(r) => emit_op_error(&app_clone, op_id, "merge", &path, &r.message),
-        Err(e) => emit_op_error(&app_clone, op_id, "merge", &path, e),
+        Err(e) => emit_op_error(&app_clone, op_id, "merge", &path, &e.to_string()),
     }
     result
 }
@@ -224,85 +225,85 @@ pub async fn git_push(
     path: String,
     branch: Option<String>,
     app: AppHandle,
-) -> Result<String, String> {
+) -> Result<String, AppError> {
     let op_id = next_op_id();
     emit_op_start(&app, op_id, "push", &path);
 
     let path_clone = path.clone();
     let app_clone = app.clone();
 
-    let result = tokio::task::spawn_blocking(move || -> Result<String, String> {
+    let result = tokio::task::spawn_blocking(move || -> Result<String, AppError> {
         GitService::push(&path_clone, branch.as_deref())
     })
     .await
-    .map_err(|e| format!("Task failed: {}", e))?;
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?;
 
     match &result {
         Ok(_) => emit_op_done(&app_clone, op_id, "push", &path),
-        Err(e) => emit_op_error(&app_clone, op_id, "push", &path, e),
+        Err(e) => emit_op_error(&app_clone, op_id, "push", &path, &e.to_string()),
     }
     result
 }
 
 #[tauri::command]
-pub async fn git_pull(path: String, app: AppHandle) -> Result<String, String> {
+pub async fn git_pull(path: String, app: AppHandle) -> Result<String, AppError> {
     let op_id = next_op_id();
     emit_op_start(&app, op_id, "pull", &path);
 
     let path_clone = path.clone();
     let app_clone = app.clone();
 
-    let result = tokio::task::spawn_blocking(move || -> Result<String, String> {
+    let result = tokio::task::spawn_blocking(move || -> Result<String, AppError> {
         GitService::pull(&path_clone)
     })
     .await
-    .map_err(|e| format!("Task failed: {}", e))?;
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?;
 
     match &result {
         Ok(_) => emit_op_done(&app_clone, op_id, "pull", &path),
-        Err(e) => emit_op_error(&app_clone, op_id, "pull", &path, e),
+        Err(e) => emit_op_error(&app_clone, op_id, "pull", &path, &e.to_string()),
     }
     result
 }
 
 #[tauri::command]
-pub async fn git_fetch(path: String, app: AppHandle) -> Result<String, String> {
+pub async fn git_fetch(path: String, app: AppHandle) -> Result<String, AppError> {
     let op_id = next_op_id();
     emit_op_start(&app, op_id, "fetch", &path);
 
     let path_clone = path.clone();
     let app_clone = app.clone();
 
-    let result = tokio::task::spawn_blocking(move || -> Result<String, String> {
+    let result = tokio::task::spawn_blocking(move || -> Result<String, AppError> {
         GitService::fetch(&path_clone)
     })
     .await
-    .map_err(|e| format!("Task failed: {}", e))?;
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?;
 
     match &result {
         Ok(_) => emit_op_done(&app_clone, op_id, "fetch", &path),
-        Err(e) => emit_op_error(&app_clone, op_id, "fetch", &path, e),
+        Err(e) => emit_op_error(&app_clone, op_id, "fetch", &path, &e.to_string()),
     }
     result
 }
 
 #[tauri::command]
-pub async fn git_stash_pop(path: String, app: AppHandle) -> Result<String, String> {
+pub async fn git_stash_pop(path: String, app: AppHandle) -> Result<String, AppError> {
     let op_id = next_op_id();
     emit_op_start(&app, op_id, "stash_pop", &path);
 
     let path_clone = path.clone();
     let app_clone = app.clone();
 
-    let result = tokio::task::spawn_blocking(move || -> Result<String, String> {
+    let result = tokio::task::spawn_blocking(move || -> Result<String, AppError> {
         GitService::stash_pop(&path_clone)
     })
     .await
-    .map_err(|e| format!("Task failed: {}", e))?;
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?;
 
     match &result {
         Ok(_) => emit_op_done(&app_clone, op_id, "stash_pop", &path),
-        Err(e) => emit_op_error(&app_clone, op_id, "stash_pop", &path, e),
+        Err(e) => emit_op_error(&app_clone, op_id, "stash_pop", &path, &e.to_string()),
     }
     result
 }
@@ -313,9 +314,13 @@ fn run_batch_sync(
     app: &AppHandle,
     db: &Database,
     label: &str,
-    op: fn(&[String]) -> Vec<(String, Result<String, String>)>,
-) -> Result<(), String> {
-    let projects = db.get_all_projects()?;
+    group_id: Option<&str>,
+    op: fn(&[String]) -> Vec<(String, Result<String, AppError>)>,
+) -> Result<(), AppError> {
+    let projects = match group_id {
+        Some(gid) => db.get_projects_in_group(gid)?,
+        None => db.get_all_projects()?,
+    };
     let paths: Vec<String> = projects.iter().map(|p| p.path.clone()).collect();
 
     let results = op(&paths);
@@ -323,7 +328,7 @@ fn run_batch_sync(
         let batch_result = BatchResult {
             project_name: name,
             success: result.is_ok(),
-            message: result.unwrap_or_else(|e| e),
+            message: result.unwrap_or_else(|e| e.to_string()),
         };
         if let Err(e) = app.emit("batch-result", &batch_result) {
             log::error!("failed to emit batch-result: {}", e);
@@ -337,25 +342,33 @@ fn run_batch_sync(
 }
 
 #[tauri::command]
-pub async fn fetch_all(app: AppHandle, db: State<'_, Database>) -> Result<(), String> {
+pub async fn fetch_all(
+    app: AppHandle,
+    db: State<'_, Database>,
+    group_id: Option<String>,
+) -> Result<(), AppError> {
     let db = db.inner().clone();
     let app_clone = app.clone();
-    tokio::task::spawn_blocking(move || -> Result<(), String> {
-        run_batch_sync(&app_clone, &db, "fetch", GitService::fetch_all_projects)
+    tokio::task::spawn_blocking(move || -> Result<(), AppError> {
+        run_batch_sync(&app_clone, &db, "fetch", group_id.as_deref(), GitService::fetch_all_projects)
     })
     .await
-    .map_err(|e| format!("Task failed: {}", e))?
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
 }
 
 #[tauri::command]
-pub async fn pull_all(app: AppHandle, db: State<'_, Database>) -> Result<(), String> {
+pub async fn pull_all(
+    app: AppHandle,
+    db: State<'_, Database>,
+    group_id: Option<String>,
+) -> Result<(), AppError> {
     let db = db.inner().clone();
     let app_clone = app.clone();
-    tokio::task::spawn_blocking(move || -> Result<(), String> {
-        run_batch_sync(&app_clone, &db, "pull", GitService::pull_all_projects)
+    tokio::task::spawn_blocking(move || -> Result<(), AppError> {
+        run_batch_sync(&app_clone, &db, "pull", group_id.as_deref(), GitService::pull_all_projects)
     })
     .await
-    .map_err(|e| format!("Task failed: {}", e))?
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
 }
 
 // ── Cancellation ──────────────────────────────────────────────────────
@@ -363,7 +376,7 @@ pub async fn pull_all(app: AppHandle, db: State<'_, Database>) -> Result<(), Str
 use crate::commands::ActiveOps;
 
 #[tauri::command]
-pub async fn cancel_git_op(id: u64, active_ops: State<'_, ActiveOps>) -> Result<(), String> {
+pub async fn cancel_git_op(id: u64, active_ops: State<'_, ActiveOps>) -> Result<(), AppError> {
     if let Some(flag) = active_ops.get(&id) {
         flag.store(false, std::sync::atomic::Ordering::SeqCst);
     }

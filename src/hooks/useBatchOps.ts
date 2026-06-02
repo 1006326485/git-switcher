@@ -8,10 +8,12 @@ interface ToastApi {
   error: (msg: string) => void;
 }
 
-export function useBatchOps(toast: ToastApi, onRefreshAll: () => void) {
+export function useBatchOps(toast: ToastApi, onRefreshAll: () => void, activeGroup: string | null) {
   const [loading, setLoading] = useState<string | null>(null);
   const callbacksRef = useRef({ toast, onRefreshAll });
   callbacksRef.current = { toast, onRefreshAll };
+  const groupRef = useRef(activeGroup);
+  groupRef.current = activeGroup;
 
   // Listen for batch events — must be at app level so events are received
   // even when the dropdown menu (which renders BatchOpsToolbar) is closed
@@ -54,7 +56,7 @@ export function useBatchOps(toast: ToastApi, onRefreshAll: () => void) {
     if (loading) return;
     setLoading("fetch");
     try {
-      await api.fetchAll();
+      await api.fetchAll(groupRef.current ?? undefined);
     } catch (e) {
       callbacksRef.current.toast.error(String(e));
       setLoading(null);
@@ -65,7 +67,7 @@ export function useBatchOps(toast: ToastApi, onRefreshAll: () => void) {
     if (loading) return;
     setLoading("pull");
     try {
-      await api.pullAll();
+      await api.pullAll(groupRef.current ?? undefined);
     } catch (e) {
       callbacksRef.current.toast.error(String(e));
       setLoading(null);

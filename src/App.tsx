@@ -47,7 +47,7 @@ export default function App() {
     refreshAll,
   } = useProjects(toast, activeGroup);
 
-  const { batchLoading, fetchAll, pullAll } = useBatchOps(toast, refreshAll);
+  const { batchLoading, fetchAll, pullAll } = useBatchOps(toast, refreshAll, activeGroup);
 
   const projectsRef = useRef(projects);
   projectsRef.current = projects;

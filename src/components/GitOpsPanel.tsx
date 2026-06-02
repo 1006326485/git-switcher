@@ -16,6 +16,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
   const [files, setFiles] = useState<GitFileEntry[]>([]);
   const [loadingOps, setLoadingOps] = useState<Set<string>>(new Set());
   const [stagingFiles, setStagingFiles] = useState<Set<string>>(new Set());
+  const [generatingMsg, setGeneratingMsg] = useState(false);
 
   const loadFiles = useCallback(async () => {
     try {
@@ -118,6 +119,18 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
   const handlePush = useCallback(() => handleAction("push", async () => { await api.gitPush(path); }, "Push completed"), [handleAction, path]);
   const handleStash = useCallback(() => handleAction("stash", async () => { await api.gitStash(path); }, "Stashed changes"), [handleAction, path]);
   const handlePop = useCallback(() => handleAction("pop", async () => { await api.gitStashPop(path); }, "Stash popped"), [handleAction, path]);
+
+  const handleGenerateMsg = useCallback(async () => {
+    setGeneratingMsg(true);
+    try {
+      const msg = await api.generateCommitMsg(path);
+      setCommitMsg(msg);
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setGeneratingMsg(false);
+    }
+  }, [path, onError]);
 
   const isLoading = (name: string) => loadingOps.has(name);
 
@@ -247,6 +260,21 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
               aria-label="Commit message"
               className="flex-1 px-3 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
+            <button
+              onClick={handleGenerateMsg}
+              disabled={generatingMsg}
+              title="Generate commit message with AI"
+              aria-label="Generate commit message with AI"
+              className="px-2 py-1.5 rounded-md text-xs font-medium bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 hover:bg-purple-200 dark:hover:bg-purple-900/50 disabled:opacity-50 transition-colors"
+            >
+              {generatingMsg ? (
+                <span className="animate-spin inline-block">&#x21BB;</span>
+              ) : (
+                <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M8 0a8 8 0 110 16A8 8 0 018 0zm3.28 5.78a.75.75 0 00-1.06-1.06L7 7.94 5.78 6.72a.75.75 0 00-1.06 1.06l1.75 1.75a.75.75 0 001.06 0l3.75-3.75z" />
+                </svg>
+              )}
+            </button>
             <button
               onClick={handleCommit}
               disabled={!commitMsg.trim() || isLoading("commit")}
