@@ -1,6 +1,6 @@
 import { useState, useCallback, memo } from "react";
 import * as api from "../lib/tauri";
-import type { GitFileEntry } from "../lib/types";
+import type { GitFileEntry, StashInfo } from "../lib/types";
 
 interface GitOpsPanelProps {
   path: string;
@@ -16,6 +16,8 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
   const [files, setFiles] = useState<GitFileEntry[]>([]);
   const [loadingOps, setLoadingOps] = useState<Set<string>>(new Set());
   const [stagingFiles, setStagingFiles] = useState<Set<string>>(new Set());
+  const [stashList, setStashList] = useState<StashInfo[]>([]);
+  const [showStashList, setShowStashList] = useState(false);
 
   const loadFiles = useCallback(async () => {
     try {
@@ -26,23 +28,32 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
     }
   }, [path, onError]);
 
+  const loadStashList = useCallback(async () => {
+    try {
+      const list = await api.gitStashList(path);
+      setStashList(list);
+    } catch (e) {
+      onError(`Failed to load stash list: ${e}`);
+    }
+  }, [path, onError]);
+
   const handleToggle = useCallback(async () => {
     const next = !expanded;
     setExpanded(next);
     if (next) {
-      await loadFiles();
+      await Promise.all([loadFiles(), loadStashList()]);
     }
-  }, [expanded, loadFiles]);
+  }, [expanded, loadFiles, loadStashList]);
 
   const handleAction = useCallback(
     async (name: string, fn: () => Promise<void>, successMsg?: string) => {
       setLoadingOps((prev) => new Set(prev).add(name));
-      const label = { fetch: "Fetching", pull: "Pulling", push: "Pushing", stash: "Stashing", pop: "Popping" }[name] ?? name;
+      const label = { fetch: "Fetching", pull: "Pulling", push: "Pushing", stash: "Stashing", pop: "Popping", stash_drop: "Dropping" }[name] ?? name;
       onInfo?.(`${label}...`);
       try {
         await fn();
         if (successMsg) onSuccess(successMsg);
-        await Promise.all([onRefresh(), loadFiles()]);
+        await Promise.all([onRefresh(), loadFiles(), loadStashList()]);
       } catch (e) {
         onError(String(e));
       } finally {
@@ -53,7 +64,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
         });
       }
     },
-    [onRefresh, onSuccess, onError, loadFiles]
+    [onRefresh, onSuccess, onError, loadFiles, loadStashList]
   );
 
   const handleCommit = useCallback(async () => {
@@ -119,6 +130,23 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
   const handleStash = useCallback(() => handleAction("stash", async () => { await api.gitStash(path); }, "Stashed changes"), [handleAction, path]);
   const handlePop = useCallback(() => handleAction("pop", async () => { await api.gitStashPop(path); }, "Stash popped"), [handleAction, path]);
 
+  const handleStashPopAt = useCallback(
+    (index: number) => handleAction("pop", async () => { await api.gitStashPop(path, index); }, `Stash@{${index}} popped`),
+    [handleAction, path]
+  );
+  const handleStashDrop = useCallback(
+    (index: number) => handleAction("stash_drop", async () => { await api.gitStashDrop(path, index); }, `Stash@{${index}} dropped`),
+    [handleAction, path]
+  );
+
+  const handleToggleStashList = useCallback(async () => {
+    const next = !showStashList;
+    setShowStashList(next);
+    if (next) {
+      await loadStashList();
+    }
+  }, [showStashList, loadStashList]);
+
   const isLoading = (name: string) => loadingOps.has(name);
 
   return (
@@ -177,7 +205,53 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
             >
               {isLoading("pop") ? "Popping..." : "Pop"}
             </button>
+            <button
+              onClick={handleToggleStashList}
+              aria-label="Toggle stash list"
+              aria-expanded={showStashList}
+              className="px-2.5 py-1.5 rounded-md text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+            >
+              Stash List {stashList.length > 0 ? `(${stashList.length})` : ""}
+            </button>
           </div>
+
+          {/* Stash list */}
+          {showStashList && (
+            <div className="space-y-1 max-h-32 overflow-y-auto">
+              {stashList.length === 0 ? (
+                <p className="text-xs text-gray-400 dark:text-gray-500 italic">No stash entries</p>
+              ) : (
+                stashList.map((s) => (
+                  <div key={s.index} className="flex items-center gap-2 text-xs">
+                    <span className="w-8 text-center px-1.5 py-0.5 rounded font-mono bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300">
+                      {s.index}
+                    </span>
+                    <span className="flex-1 truncate text-gray-700 dark:text-gray-300 font-mono">
+                      {s.message}
+                    </span>
+                    <button
+                      onClick={() => handleStashPopAt(s.index)}
+                      disabled={isLoading("pop")}
+                      className="px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 hover:bg-purple-200 dark:hover:bg-purple-900/50 disabled:opacity-50"
+                      aria-label={`Pop stash@{${s.index}}`}
+                      title="Pop"
+                    >
+                      Pop
+                    </button>
+                    <button
+                      onClick={() => handleStashDrop(s.index)}
+                      disabled={isLoading("stash_drop")}
+                      className="px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 hover:bg-red-200 dark:hover:bg-red-900/50 disabled:opacity-50"
+                      aria-label={`Drop stash@{${s.index}}`}
+                      title="Drop"
+                    >
+                      Drop
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
 
           {/* File list with stage/unstage */}
           {files.length > 0 && (

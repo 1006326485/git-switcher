@@ -135,3 +135,9 @@ export interface GitOpEvent {
   error?: string;
 }
 
+export interface StashInfo {
+  index: number;
+  message: string;
+  oid: string;
+}
+
