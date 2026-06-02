@@ -34,7 +34,7 @@ export interface ProjectDetail {
 }
 
 export type Theme = "light" | "dark" | "system";
-export type ViewMode = "card" | "list" | "compact" | "table";
+export type ViewMode = "card" | "list" | "compact" | "table" | "dashboard";
 
 export interface LlmConfig {
   enabled: boolean;

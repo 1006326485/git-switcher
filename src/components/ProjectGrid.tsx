@@ -4,6 +4,7 @@ import { ProjectCard } from "./ProjectCard";
 import { ProjectList } from "./ProjectList";
 import { ProjectCompact } from "./ProjectCompact";
 import { ProjectTable } from "./ProjectTable";
+import { DashboardView } from "./DashboardView";
 
 interface ProjectGridProps extends ProjectRowCallbacks {
   projects: ProjectDetail[];
@@ -52,6 +53,16 @@ export const ProjectGrid = memo(function ProjectGrid({
   }
 
   switch (viewMode) {
+    case "dashboard":
+      return (
+        <DashboardView
+          projects={projects}
+          onSwitchBranch={onSwitchBranch}
+          onRefresh={onRefresh}
+          onSuccess={onSuccess}
+          onError={onError}
+        />
+      );
     case "list":
       return (
         <ProjectList
