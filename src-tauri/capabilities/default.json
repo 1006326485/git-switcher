@@ -23,6 +23,9 @@
     "dialog:allow-confirm",
     "dialog:allow-save",
     "dialog:allow-message",
+    "fs:default",
+    "fs:allow-read-text-file",
+    "fs:allow-write-text-file",
     "shell:default",
     "shell:allow-open",
     "shell:allow-execute"
