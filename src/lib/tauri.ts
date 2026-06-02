@@ -51,8 +51,8 @@ export async function refreshProject(path: string): Promise<ProjectDetail> {
   return invoke("refresh_project", { path });
 }
 
-export async function gitGetLog(path: string, limit?: number): Promise<CommitInfo[]> {
-  return invoke("git_get_log", { path, limit });
+export async function gitGetLog(path: string, limit?: number, offset?: number): Promise<CommitInfo[]> {
+  return invoke("git_get_log", { path, limit, offset });
 }
 
 export async function gitGetFiles(path: string): Promise<GitFileEntry[]> {

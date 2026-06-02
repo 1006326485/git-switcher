@@ -667,7 +667,7 @@ impl GitService {
 
     // ── Git Log ─────────────────────────────────────────────────────────
 
-    pub fn get_log(path: &str, limit: usize) -> Result<Vec<CommitInfo>, AppError> {
+    pub fn get_log(path: &str, offset: usize, limit: usize) -> Result<Vec<CommitInfo>, AppError> {
         let repo = Self::open_repo(path)?;
 
         // Empty repo with no commits — return empty log instead of error
@@ -691,7 +691,8 @@ impl GitService {
 
         let mut commits = Vec::new();
         for (i, oid_result) in revwalk.enumerate() {
-            if i >= limit { break; }
+            if i < offset { continue; }
+            if commits.len() >= limit { break; }
             let oid = oid_result.map_err(|e| AppError::Git(format!("Failed to get oid: {}", e)))?;
             let commit = repo.find_commit(oid)
                 .map_err(|e| AppError::Git(format!("Failed to find commit: {}", e)))?;
