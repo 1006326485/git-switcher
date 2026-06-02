@@ -26,6 +26,12 @@ impl Database {
         let conn = Connection::open(&db_path)
             .map_err(|e| format!("Failed to open database: {}", e))?;
 
+        conn.execute_batch(
+            "PRAGMA foreign_keys = ON;
+             PRAGMA journal_mode = WAL;
+             PRAGMA busy_timeout = 5000;"
+        ).map_err(|e| format!("Failed to set PRAGMA: {}", e))?;
+
         // Step 1: Create tables with original columns (safe for both fresh and existing DBs)
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS groups (
