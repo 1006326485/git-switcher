@@ -102,15 +102,23 @@ pub(crate) fn fetch_project_details_batch(
         return Vec::new();
     }
 
-    // Pre-fetch groups for all projects
+    // Pre-fetch groups for all projects, fixing orphaned ones
     let project_groups: Vec<(GitProject, Group)> = projects
         .into_iter()
         .filter_map(|p| {
             match db.get_project_group(&p.id) {
                 Ok(group) => Some((p, group)),
-                Err(e) => {
-                    log::warn!("skipping project {} (no group): {}", p.name, e);
-                    None
+                Err(_) => {
+                    // Project references a non-existent group — reassign to first available group
+                    let groups = db.get_all_groups().unwrap_or_default();
+                    if let Some(fallback_group) = groups.first() {
+                        let _ = db.assign_project_to_group(&p.id, &fallback_group.id);
+                        let mut fixed = p;
+                        fixed.group_id = fallback_group.id.clone();
+                        Some((fixed, fallback_group.clone()))
+                    } else {
+                        None
+                    }
                 }
             }
         })

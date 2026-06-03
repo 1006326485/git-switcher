@@ -30,7 +30,7 @@ impl Database {
             "PRAGMA foreign_keys = ON;
              PRAGMA journal_mode = WAL;
              PRAGMA busy_timeout = 5000;"
-        ).map_err(|e| format!("Failed to set PRAGMA: {}", e))?;
+        ).map_err(|e| AppError::Database(format!("Failed to set PRAGMA: {}", e)))?;
 
         // Step 1: Create tables with original columns (safe for both fresh and existing DBs)
         conn.execute_batch(
@@ -121,6 +121,13 @@ impl Database {
             "UPDATE projects SET group_id = (SELECT id FROM groups ORDER BY sort_order, name LIMIT 1) WHERE group_id IS NULL",
             [],
         ).map_err(|e| AppError::Database(format!("Failed to assign default group: {}", e)))?;
+
+        // Fix orphaned projects: group_id references a non-existent group
+        conn.execute(
+            "UPDATE projects SET group_id = (SELECT id FROM groups ORDER BY sort_order, name LIMIT 1)
+             WHERE group_id NOT IN (SELECT id FROM groups)",
+            [],
+        ).map_err(|e| AppError::Database(format!("Failed to fix orphaned projects: {}", e)))?;
 
         // Drop the junction table
         conn.execute("DROP TABLE IF EXISTS project_groups", [])

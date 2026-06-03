@@ -84,7 +84,12 @@ export function useProjects(toast?: ToastApi, activeGroup?: string | null) {
         toastRef.current?.success(`Imported ${newProjects.length} project(s)`);
         return newProjects;
       } catch (e) {
-        toastRef.current?.error(`Failed to import workspace: ${e}`);
+        const msg = String(e);
+        if (msg.includes("already exist")) {
+          toastRef.current?.info(msg);
+        } else {
+          toastRef.current?.error(`Failed to import workspace: ${msg}`);
+        }
         throw e;
       }
     },

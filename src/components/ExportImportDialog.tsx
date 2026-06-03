@@ -76,7 +76,15 @@ export const ExportImportDialog = memo(function ExportImportDialog({
       onImportDone();
       onClose();
     } catch (e) {
-      onError(String(e));
+      const msg = String(e);
+      if (msg.includes("already exist")) {
+        onSuccess(msg);
+        setImportJson("");
+        onImportDone();
+        onClose();
+      } else {
+        onError(msg);
+      }
     } finally {
       setLoading(false);
     }
