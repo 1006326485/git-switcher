@@ -58,6 +58,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::git_fetch,
             commands::git_stash,
             commands::git_stash_pop,
+            commands::git_stash_apply,
             commands::git_stash_list,
             commands::git_stash_drop,
             // Branch management
@@ -81,6 +82,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             // AI Review
             commands::get_branch_diff,
             commands::ai_review,
+            commands::ai_review_streaming,
             commands::generate_commit_msg,
         ])
         .run(tauri::generate_context!())?;

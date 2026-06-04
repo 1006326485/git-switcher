@@ -1,4 +1,5 @@
 use git2::{Delta, DiffOptions, Patch, Repository};
+use tauri::{AppHandle, Emitter};
 
 use crate::AppError;
 use crate::models::{
@@ -502,17 +503,7 @@ One paragraph overall assessment of this diff.
     }
 
     async fn call_llm_api(config: &LlmConfig, prompt: &str) -> Result<String, AppError> {
-        if !config.endpoint.starts_with("https://") {
-            return Err(AppError::Llm("LLM endpoint must use HTTPS to protect your API key".to_string()));
-        }
-
-        // Auto-append /chat/completions if endpoint is a base URL (e.g. https://api.example.com/v1)
-        let url = if config.endpoint.ends_with("/chat/completions") {
-            config.endpoint.clone()
-        } else {
-            format!("{}/chat/completions", config.endpoint.trim_end_matches('/'))
-        };
-
+        let url = Self::build_chat_url(&config.endpoint)?;
         let client = Self::get_client()?;
 
         let request_body = serde_json::json!({
@@ -534,15 +525,7 @@ One paragraph overall assessment of this diff.
             .json(&request_body)
             .send()
             .await
-            .map_err(|e| {
-                if e.is_timeout() {
-                    AppError::Llm("LLM API request timed out after 120s".to_string())
-                } else if e.is_connect() {
-                    AppError::Llm(format!("Cannot connect to LLM endpoint: {}", e))
-                } else {
-                    AppError::Llm(format!("LLM API request failed: {}", e))
-                }
-            })?;
+            .map_err(Self::map_reqwest_error)?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -560,5 +543,138 @@ One paragraph overall assessment of this diff.
             .ok_or_else(|| AppError::Llm("No content in LLM response".to_string()))?;
 
         Ok(content.to_string())
+    }
+
+    // ── LLM Streaming ─────────────────────────────────────────────────
+
+    pub async fn review_diff_streaming(
+        diff: &BranchDiff,
+        config: &LlmConfig,
+        app: &AppHandle,
+    ) -> Result<ReviewResult, AppError> {
+        if config.api_key.is_empty() {
+            return Err(AppError::Llm("API key is not configured. Go to Settings to set up LLM.".to_string()));
+        }
+
+        let diff_text = Self::format_diff_for_llm(diff);
+        let prompt = Self::build_review_prompt(&diff_text);
+
+        let response = Self::call_llm_api_streaming(config, &prompt, app).await?;
+        let findings = Self::parse_findings(&response);
+
+        Ok(ReviewResult {
+            id: Uuid::new_v4().to_string(),
+            base_branch: diff.base_branch.clone(),
+            head_branch: diff.head_branch.clone(),
+            summary: response,
+            findings,
+            stats: diff.stats,
+            model: config.model.clone(),
+            created_at: Utc::now().to_rfc3339(),
+        })
+    }
+
+    /// Build the chat/completions URL from a config endpoint.
+    fn build_chat_url(endpoint: &str) -> Result<String, AppError> {
+        if !endpoint.starts_with("https://") {
+            return Err(AppError::Llm("LLM endpoint must use HTTPS to protect your API key".to_string()));
+        }
+        Ok(if endpoint.ends_with("/chat/completions") {
+            endpoint.to_string()
+        } else {
+            format!("{}/chat/completions", endpoint.trim_end_matches('/'))
+        })
+    }
+
+    /// Map a reqwest error to an AppError with a user-friendly message.
+    fn map_reqwest_error(e: reqwest::Error) -> AppError {
+        if e.is_timeout() {
+            AppError::Llm("LLM API request timed out after 120s".to_string())
+        } else if e.is_connect() {
+            AppError::Llm(format!("Cannot connect to LLM endpoint: {}", e))
+        } else {
+            AppError::Llm(format!("LLM API request failed: {}", e))
+        }
+    }
+
+    /// Extract content text from an SSE `data:` line. Returns `Some(text)` if the
+    /// line contained a content delta, `None` otherwise (including for `[DONE]`).
+    fn extract_sse_content(line: &str) -> Option<String> {
+        let data = line.strip_prefix("data: ")?;
+        if data == "[DONE]" {
+            return None;
+        }
+        let json: serde_json::Value = serde_json::from_str(data).ok()?;
+        let content = json["choices"][0]["delta"]["content"].as_str()?;
+        Some(content.to_string())
+    }
+
+    async fn call_llm_api_streaming(
+        config: &LlmConfig,
+        prompt: &str,
+        app: &AppHandle,
+    ) -> Result<String, AppError> {
+        let url = Self::build_chat_url(&config.endpoint)?;
+        let client = Self::get_client()?;
+
+        let request_body = serde_json::json!({
+            "model": config.model,
+            "temperature": config.temperature,
+            "max_tokens": config.max_tokens,
+            "stream": true,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ]
+        });
+
+        let response = client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", config.api_key))
+            .header("Content-Type", "application/json")
+            .json(&request_body)
+            .send()
+            .await
+            .map_err(Self::map_reqwest_error)?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(AppError::Llm(format!("LLM API error ({}): {}", status, body)));
+        }
+
+        use futures_util::StreamExt;
+        let mut stream = response.bytes_stream();
+        let mut full_text = String::new();
+        let mut buffer = String::new();
+
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result
+                .map_err(|e| AppError::Llm(format!("Stream read error: {}", e)))?;
+
+            buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+            // Process complete SSE lines
+            while let Some(line_end) = buffer.find('\n') {
+                let line = buffer[..line_end].trim().to_string();
+                buffer = buffer[line_end + 1..].to_string();
+
+                if let Some(content) = Self::extract_sse_content(&line) {
+                    full_text.push_str(&content);
+                    let _ = app.emit("ai-review-chunk", content);
+                }
+            }
+        }
+
+        // Process any remaining data in the buffer
+        let remaining = buffer.trim().to_string();
+        if let Some(content) = Self::extract_sse_content(&remaining) {
+            full_text.push_str(&content);
+            let _ = app.emit("ai-review-chunk", content);
+        }
+
+        Ok(full_text)
     }
 }

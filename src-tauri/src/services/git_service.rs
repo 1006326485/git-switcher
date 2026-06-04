@@ -360,63 +360,45 @@ impl GitService {
     }
 
     pub fn stash_pop(path: &str) -> Result<String, AppError> {
-        let mut cmd = Self::git_cmd(path);
-        cmd.args(["stash", "pop"]);
-        Self::run_with_timeout(cmd, 60)
+        let mut repo = Self::open_repo(path)?;
+        repo.stash_pop(0, None)
+            .map_err(|e| AppError::Git(format!("Failed to pop stash: {}", e)))?;
+        Ok("Stash popped".to_string())
     }
 
     pub fn stash_pop_at(path: &str, index: usize) -> Result<String, AppError> {
-        let mut cmd = Self::git_cmd(path);
-        cmd.args(["stash", "pop", &format!("stash@{{{}}}", index)]);
-        Self::run_with_timeout(cmd, 60)
+        let mut repo = Self::open_repo(path)?;
+        repo.stash_pop(index, None)
+            .map_err(|e| AppError::Git(format!("Failed to pop stash@{{{}}}: {}", index, e)))?;
+        Ok(format!("Stash@{{{}}} popped", index))
+    }
+
+    pub fn stash_apply(path: &str, index: usize) -> Result<String, AppError> {
+        let mut repo = Self::open_repo(path)?;
+        repo.stash_apply(index, None)
+            .map_err(|e| AppError::Git(format!("Failed to apply stash@{{{}}}: {}", index, e)))?;
+        Ok(format!("Stash@{{{}}} applied", index))
     }
 
     pub fn get_stash_list(path: &str) -> Result<Vec<StashInfo>, AppError> {
-        let output = std::process::Command::new("git")
-            .args(["stash", "list", "--format=%H %gd %s"])
-            .current_dir(path)
-            .output()
-            .map_err(|e| AppError::Git(format!("Failed to get stash list: {}", e)))?;
-
-        if !output.status.success() {
-            return Ok(vec![]);
-        }
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stashes: Vec<StashInfo> = stdout
-            .lines()
-            .enumerate()
-            .filter_map(|(i, line)| {
-                let parts: Vec<&str> = line.splitn(2, ' ').collect();
-                if parts.len() >= 2 {
-                    let rest = parts[1];
-                    let msg_start = rest.find(' ').map(|p| p + 1).unwrap_or(0);
-                    let message = rest[msg_start..].trim().to_string();
-                    Some(StashInfo {
-                        index: i,
-                        message,
-                        oid: parts[0].to_string(),
-                    })
-                } else {
-                    None
-                }
-            })
-            .collect();
-
+        let mut repo = Self::open_repo(path)?;
+        let mut stashes = Vec::new();
+        repo.stash_foreach(|index, name, oid| {
+            stashes.push(StashInfo {
+                index,
+                message: name.to_string(),
+                oid: oid.to_string(),
+            });
+            true // continue iteration
+        })
+        .map_err(|e| AppError::Git(format!("Failed to list stashes: {}", e)))?;
         Ok(stashes)
     }
 
     pub fn stash_drop(path: &str, index: usize) -> Result<(), AppError> {
-        let output = std::process::Command::new("git")
-            .args(["stash", "drop", &format!("stash@{{{}}}", index)])
-            .current_dir(path)
-            .output()
-            .map_err(|e| AppError::Git(format!("Failed to drop stash: {}", e)))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(AppError::Git(format!("Failed to drop stash: {}", stderr.trim())));
-        }
+        let mut repo = Self::open_repo(path)?;
+        repo.stash_drop(index)
+            .map_err(|e| AppError::Git(format!("Failed to drop stash@{{{}}}: {}", index, e)))?;
         Ok(())
     }
 

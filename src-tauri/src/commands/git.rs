@@ -174,6 +174,27 @@ pub async fn git_stash(path: String, app: AppHandle) -> Result<String, AppError>
 }
 
 #[tauri::command]
+pub async fn git_stash_apply(path: String, index: usize, app: AppHandle) -> Result<String, AppError> {
+    let op_id = next_op_id();
+    emit_op_start(&app, op_id, "stash_apply", &path);
+
+    let path_clone = path.clone();
+    let app_clone = app.clone();
+
+    let result = tokio::task::spawn_blocking(move || -> Result<String, AppError> {
+        GitService::stash_apply(&path_clone, index)
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?;
+
+    match &result {
+        Ok(_) => emit_op_done(&app_clone, op_id, "stash_apply", &path),
+        Err(e) => emit_op_error(&app_clone, op_id, "stash_apply", &path, &e.to_string()),
+    }
+    result
+}
+
+#[tauri::command]
 pub async fn create_branch(
     path: String,
     name: String,
