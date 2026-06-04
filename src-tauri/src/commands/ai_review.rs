@@ -13,7 +13,7 @@ fn validate_review(
     base_branch: &str,
     head_branch: &str,
 ) -> Result<(LlmConfig, BranchDiff), AppError> {
-    let config = store.get_all()?.llm;
+    let config = store.get_llm_config_with_key()?;
 
     if !config.enabled {
         return Err(AppError::Llm("AI review is not enabled. Go to Settings to configure LLM.".to_string()));
@@ -29,12 +29,16 @@ fn validate_review(
 }
 
 #[tauri::command]
-pub fn get_branch_diff(
+pub async fn get_branch_diff(
     path: String,
     base_branch: String,
     head_branch: String,
 ) -> Result<BranchDiff, AppError> {
-    LlmService::get_branch_diff(&path, &base_branch, &head_branch)
+    tokio::task::spawn_blocking(move || {
+        LlmService::get_branch_diff(&path, &base_branch, &head_branch)
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
 }
 
 #[tauri::command]
@@ -71,7 +75,7 @@ pub async fn generate_commit_msg(
     path: String,
     store: State<'_, SettingsStore>,
 ) -> Result<String, AppError> {
-    let config = store.get_all()?.llm;
+    let config = store.get_llm_config_with_key()?;
 
     if !config.enabled {
         return Err(AppError::Llm(

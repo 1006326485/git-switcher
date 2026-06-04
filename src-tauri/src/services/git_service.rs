@@ -97,32 +97,48 @@ impl GitService {
         let current = Self::get_current_branch(repo).unwrap_or_default();
         let mut branches = Vec::new();
 
-        if let Ok(local_branches) = repo.branches(Some(BranchType::Local)) {
-            for branch_result in local_branches {
-                if let Ok((branch, _)) = branch_result {
-                    if let Ok(Some(name)) = branch.name() {
-                        branches.push(BranchInfo {
-                            name: name.to_string(),
-                            is_current: name == current,
-                            is_remote: false,
-                        });
+        match repo.branches(Some(BranchType::Local)) {
+            Ok(local_branches) => {
+                for branch_result in local_branches {
+                    match branch_result {
+                        Ok((branch, _)) => match branch.name() {
+                            Ok(Some(name)) => {
+                                branches.push(BranchInfo {
+                                    name: name.to_string(),
+                                    is_current: name == current,
+                                    is_remote: false,
+                                });
+                            }
+                            Ok(None) => log::warn!("Local branch with no UTF-8 name, skipping"),
+                            Err(e) => log::warn!("Failed to get local branch name: {}", e),
+                        },
+                        Err(e) => log::warn!("Failed to read local branch: {}", e),
                     }
                 }
             }
+            Err(e) => log::warn!("Failed to list local branches: {}", e),
         }
 
-        if let Ok(remote_branches) = repo.branches(Some(BranchType::Remote)) {
-            for branch_result in remote_branches {
-                if let Ok((branch, _)) = branch_result {
-                    if let Ok(Some(name)) = branch.name() {
-                        branches.push(BranchInfo {
-                            name: name.to_string(),
-                            is_current: false,
-                            is_remote: true,
-                        });
+        match repo.branches(Some(BranchType::Remote)) {
+            Ok(remote_branches) => {
+                for branch_result in remote_branches {
+                    match branch_result {
+                        Ok((branch, _)) => match branch.name() {
+                            Ok(Some(name)) => {
+                                branches.push(BranchInfo {
+                                    name: name.to_string(),
+                                    is_current: false,
+                                    is_remote: true,
+                                });
+                            }
+                            Ok(None) => log::warn!("Remote branch with no UTF-8 name, skipping"),
+                            Err(e) => log::warn!("Failed to get remote branch name: {}", e),
+                        },
+                        Err(e) => log::warn!("Failed to read remote branch: {}", e),
                     }
                 }
             }
+            Err(e) => log::warn!("Failed to list remote branches: {}", e),
         }
 
         branches.sort_by(|a, b| a.name.cmp(&b.name));
@@ -172,6 +188,15 @@ impl GitService {
             };
             repo.set_head(&head_ref)
                 .map_err(|e| AppError::Git(format!("Failed to set HEAD: {}", e)))?;
+            {
+                let mut status_opts = StatusOptions::new();
+                status_opts.include_untracked(false);
+                if let Ok(statuses) = repo.statuses(Some(&mut status_opts)) {
+                    if !statuses.is_empty() {
+                        log::warn!("Working tree has {} uncommitted change(s), force checkout will discard them", statuses.len());
+                    }
+                }
+            }
             repo.checkout_head(Some(&mut CheckoutBuilder::new().force()))
                 .map_err(|e| AppError::Git(format!("Failed to checkout: {}", e)))?;
         } else {
@@ -558,7 +583,7 @@ impl GitService {
                         let _ = child.wait();
                         return Err(AppError::Git(format!("Timed out after {}s", timeout_secs)));
                     }
-                    std::thread::sleep(std::time::Duration::from_millis(10));
+                    std::thread::sleep(std::time::Duration::from_millis(100));
                 }
                 Err(e) => {
                     let _ = child.kill();
@@ -879,7 +904,17 @@ impl GitService {
                 let tx = tx.clone();
                 std::thread::spawn(move || {
                     let result = catch_unwind(std::panic::AssertUnwindSafe(|| op(path)))
-                        .unwrap_or_else(|_| Err(AppError::Other("Thread panicked".to_string())));
+                        .unwrap_or_else(|e| {
+                            let msg = if let Some(s) = e.downcast_ref::<String>() {
+                                s.clone()
+                            } else if let Some(s) = e.downcast_ref::<&str>() {
+                                s.to_string()
+                            } else {
+                                "unknown panic".to_string()
+                            };
+                            log::error!("Thread panicked during batch operation: {}", msg);
+                            Err(AppError::Other(format!("Thread panicked: {}", msg)))
+                        });
                     let _ = tx.send((name, result));
                 })
             }).collect();
@@ -962,4 +997,31 @@ impl GitService {
             .map_err(|e| AppError::Git(format!("Failed to delete tag '{}': {}", name, e)))?;
         Ok(())
     }
+}
+
+use super::git_backend::GitBackend;
+
+impl GitBackend for GitService {
+    fn is_git_repo(path: &str) -> bool { Self::is_git_repo(path) }
+    fn init_repo(path: &str) -> Result<(), AppError> { Self::init_repo(path) }
+    fn get_project_detail(project: &GitProject, group: Group) -> Result<ProjectDetail, AppError> { Self::get_project_detail(project, group) }
+    fn switch_branch(path: &str, branch_name: &str) -> Result<(), AppError> { Self::switch_branch(path, branch_name) }
+    fn create_branch(path: &str, name: &str, from_branch: Option<&str>) -> Result<(), AppError> { Self::create_branch(path, name, from_branch) }
+    fn delete_branch(path: &str, name: &str) -> Result<(), AppError> { Self::delete_branch(path, name) }
+    fn merge_branch(path: &str, branch_name: &str) -> Result<MergeResult, AppError> { Self::merge_branch(path, branch_name) }
+    fn get_file_list(path: &str) -> Result<Vec<GitFileEntry>, AppError> { Self::get_file_list(path) }
+    fn stage_file(path: &str, file_path: &str) -> Result<(), AppError> { Self::stage_file(path, file_path) }
+    fn unstage_file(path: &str, file_path: &str) -> Result<(), AppError> { Self::unstage_file(path, file_path) }
+    fn commit(path: &str, message: &str) -> Result<String, AppError> { Self::commit(path, message) }
+    fn push(path: &str, branch: Option<&str>) -> Result<String, AppError> { Self::push(path, branch) }
+    fn pull(path: &str) -> Result<String, AppError> { Self::pull(path) }
+    fn fetch(path: &str) -> Result<String, AppError> { Self::fetch(path) }
+    fn stash(path: &str) -> Result<String, AppError> { Self::stash(path) }
+    fn stash_pop(path: &str) -> Result<String, AppError> { Self::stash_pop(path) }
+    fn stash_pop_at(path: &str, index: usize) -> Result<String, AppError> { Self::stash_pop_at(path, index) }
+    fn get_stash_list(path: &str) -> Result<Vec<StashInfo>, AppError> { Self::get_stash_list(path) }
+    fn stash_drop(path: &str, index: usize) -> Result<(), AppError> { Self::stash_drop(path, index) }
+    fn get_log(path: &str, offset: usize, limit: usize) -> Result<Vec<CommitInfo>, AppError> { Self::get_log(path, offset, limit) }
+    fn fetch_all_projects(paths: &[String]) -> Vec<(String, Result<String, AppError>)> { Self::fetch_all_projects(paths) }
+    fn pull_all_projects(paths: &[String]) -> Vec<(String, Result<String, AppError>)> { Self::pull_all_projects(paths) }
 }

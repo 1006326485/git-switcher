@@ -24,12 +24,30 @@ pub enum AppError {
     Other(String),
 }
 
+impl AppError {
+    fn error_type(&self) -> &'static str {
+        match self {
+            Self::NotFound(_) => "not_found",
+            Self::Git(_) => "git",
+            Self::Database(_) => "database",
+            Self::Io(_) => "io",
+            Self::Config(_) => "config",
+            Self::Llm(_) => "llm",
+            Self::Other(_) => "other",
+        }
+    }
+}
+
 // Tauri requires errors to implement Serialize
 impl Serialize for AppError {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        serializer.serialize_str(&self.to_string())
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(2))?;
+        map.serialize_entry("type", self.error_type())?;
+        map.serialize_entry("message", &self.to_string())?;
+        map.end()
     }
 }

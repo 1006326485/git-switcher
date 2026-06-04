@@ -172,6 +172,26 @@ export async function pullAll(groupId?: string): Promise<void> {
   return invoke("pull_all", { groupId: groupId ?? null });
 }
 
+// ── Stash ─────────────────────────────────────────────────────────────────
+
+export async function getStashList(path: string): Promise<StashInfo[]> {
+  return invoke("get_stash_list", { path });
+}
+
+export async function stashPopAt(path: string, index: number): Promise<string> {
+  return invoke("stash_pop_at", { path, index });
+}
+
+export async function stashDrop(path: string, index: number): Promise<void> {
+  return invoke("stash_drop", { path, index });
+}
+
+// ── Diff ──────────────────────────────────────────────────────────────────
+
+export async function getFileDiff(path: string, filePath: string): Promise<string> {
+  return invoke("get_file_diff", { path, filePath });
+}
+
 // ── Groups ──────────────────────────────────────────────────────────────
 
 export async function createGroup(name: string, color?: string): Promise<Group> {

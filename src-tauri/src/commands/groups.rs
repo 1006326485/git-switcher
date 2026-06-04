@@ -7,42 +7,66 @@ use crate::db::Database;
 use crate::models::{Group, ProjectDetail};
 
 #[tauri::command]
-pub fn create_group(name: String, color: Option<String>, db: State<'_, Database>) -> Result<Group, AppError> {
-    let now = Utc::now().to_rfc3339();
-    let group = Group {
-        id: Uuid::new_v4().to_string(),
-        name,
-        color,
-        sort_order: 0,
-        created_at: now,
-    };
-    db.insert_group(&group)?;
-    Ok(group)
+pub async fn create_group(name: String, color: Option<String>, db: State<'_, Database>) -> Result<Group, AppError> {
+    let db = db.inner().clone();
+    tokio::task::spawn_blocking(move || {
+        let now = Utc::now().to_rfc3339();
+        let group = Group {
+            id: Uuid::new_v4().to_string(),
+            name,
+            color,
+            sort_order: 0,
+            created_at: now,
+        };
+        db.insert_group(&group)?;
+        Ok(group)
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
 }
 
 #[tauri::command]
-pub fn list_groups(db: State<'_, Database>) -> Result<Vec<Group>, AppError> {
-    db.get_all_groups()
+pub async fn list_groups(db: State<'_, Database>) -> Result<Vec<Group>, AppError> {
+    let db = db.inner().clone();
+    tokio::task::spawn_blocking(move || db.get_all_groups())
+        .await
+        .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
 }
 
 #[tauri::command]
-pub fn update_group(group: Group, db: State<'_, Database>) -> Result<Group, AppError> {
-    db.update_group(&group)?;
-    Ok(group)
+pub async fn update_group(group: Group, db: State<'_, Database>) -> Result<Group, AppError> {
+    let db = db.inner().clone();
+    tokio::task::spawn_blocking(move || {
+        db.update_group(&group)?;
+        Ok(group)
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
 }
 
 #[tauri::command]
-pub fn delete_group(id: String, db: State<'_, Database>) -> Result<(), AppError> {
-    db.delete_group(&id)
+pub async fn delete_group(id: String, db: State<'_, Database>) -> Result<(), AppError> {
+    let db = db.inner().clone();
+    tokio::task::spawn_blocking(move || db.delete_group(&id))
+        .await
+        .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
 }
 
 #[tauri::command]
-pub fn assign_to_group(project_id: String, group_id: String, db: State<'_, Database>) -> Result<(), AppError> {
-    db.assign_project_to_group(&project_id, &group_id)
+pub async fn assign_to_group(project_id: String, group_id: String, db: State<'_, Database>) -> Result<(), AppError> {
+    let db = db.inner().clone();
+    tokio::task::spawn_blocking(move || db.assign_project_to_group(&project_id, &group_id))
+        .await
+        .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
 }
 
 #[tauri::command]
-pub fn list_projects_in_group(group_id: String, db: State<'_, Database>) -> Result<Vec<ProjectDetail>, AppError> {
-    let projects = db.get_projects_in_group(&group_id)?;
-    Ok(super::fetch_project_details_batch(&db, projects))
+pub async fn list_projects_in_group(group_id: String, db: State<'_, Database>) -> Result<Vec<ProjectDetail>, AppError> {
+    let db = db.inner().clone();
+    tokio::task::spawn_blocking(move || {
+        let projects = db.get_projects_in_group(&group_id)?;
+        Ok(super::fetch_project_details_batch(&db, projects))
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
 }

@@ -1,6 +1,7 @@
 import { useState, useCallback, memo } from "react";
 import * as api from "../lib/tauri";
 import type { GitFileEntry, StashInfo } from "../lib/types";
+import { DiffViewer } from "./DiffViewer";
 
 interface GitOpsPanelProps {
   path: string;
@@ -23,6 +24,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
   const [showDiff, setShowDiff] = useState(false);
   const [stagedDiff, setStagedDiff] = useState<string | null>(null);
   const [loadingDiff, setLoadingDiff] = useState(false);
+  const [diffFile, setDiffFile] = useState<string | null>(null);
 
   const loadFiles = useCallback(async () => {
     try {
@@ -365,37 +367,50 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
                         ? "M"
                         : f.status === "deleted"
                         ? "D"
-                        : f.status === "renamed"
-                        ? "R"
-                        : "A"}
-                    </span>
-                    <span className="flex-1 truncate text-gray-700 dark:text-gray-300 font-mono">
-                      {f.path}
-                    </span>
-                    {f.status === "untracked" ? (
-                      <button
-                        onClick={() => handleStage(f.path)}
-                        disabled={stagingFiles.has(f.path)}
-                        className="px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/50 disabled:opacity-50"
-                        aria-label={`Stage ${f.path}`}
-                        title="Stage"
-                      >
-                        {stagingFiles.has(f.path) ? "..." : "+"}
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => handleUnstage(f.path)}
-                        disabled={stagingFiles.has(f.path)}
-                        className="px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 hover:bg-red-200 dark:hover:bg-red-900/50 disabled:opacity-50"
-                        aria-label={`Unstage ${f.path}`}
-                        title="Unstage"
-                      >
-                        {stagingFiles.has(f.path) ? "..." : "-"}
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
+                        ? "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
+                        : "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300"
+                    }`}
+                  >
+                    {f.status === "untracked"
+                      ? "??"
+                      : f.status === "modified"
+                      ? "M"
+                      : f.status === "deleted"
+                      ? "D"
+                      : f.status === "renamed"
+                      ? "R"
+                      : "A"}
+                  </span>
+                  <button
+                    onClick={() => setDiffFile(f.path)}
+                    className="flex-1 truncate text-gray-700 dark:text-gray-300 font-mono text-left hover:underline hover:text-blue-600 dark:hover:text-blue-400"
+                    title="View diff"
+                  >
+                    {f.path}
+                  </button>
+                  {f.status === "untracked" ? (
+                    <button
+                      onClick={() => handleStage(f.path)}
+                      disabled={stagingFiles.has(f.path)}
+                      className="px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/50 disabled:opacity-50"
+                      aria-label={`Stage ${f.path}`}
+                      title="Stage"
+                    >
+                      {stagingFiles.has(f.path) ? "..." : "+"}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => handleUnstage(f.path)}
+                      disabled={stagingFiles.has(f.path)}
+                      className="px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 hover:bg-red-200 dark:hover:bg-red-900/50 disabled:opacity-50"
+                      aria-label={`Unstage ${f.path}`}
+                      title="Unstage"
+                    >
+                      {stagingFiles.has(f.path) ? "..." : "-"}
+                    </button>
+                  )}
+                </div>
+              ))}
             </div>
           )}
 
@@ -486,6 +501,8 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
           )}
         </div>
       )}
+
+      {diffFile && <DiffViewer path={path} filePath={diffFile} onClose={() => setDiffFile(null)} />}
     </div>
   );
 });

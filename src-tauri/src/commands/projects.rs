@@ -1,7 +1,5 @@
 use std::path::Path;
 use tauri::State;
-use uuid::Uuid;
-use chrono::Utc;
 
 use crate::AppError;
 use crate::db::Database;
@@ -22,6 +20,66 @@ fn path_name(path: &str) -> String {
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "Unknown".to_string())
+}
+
+/// Core import logic shared by import_workspace and import_projects.
+/// Takes an iterator of (Option<name>, raw_path) pairs.
+fn import_projects_core(
+    entries: impl IntoIterator<Item = (Option<String>, String)>,
+    group_id: &str,
+    db: &Database,
+) -> Result<Vec<ProjectDetail>, AppError> {
+    let group = db.get_group_by_id(group_id)?;
+    let mut results = Vec::new();
+    let mut errors = Vec::new();
+    let mut skipped = 0usize;
+
+    for (name, raw_path) in entries {
+        let path = match canonicalize_path(&raw_path) {
+            Ok(p) => p,
+            Err(_) => {
+                errors.push(format!("'{}': path not found", raw_path));
+                continue;
+            }
+        };
+        if !GitService::is_git_repo(&path) {
+            errors.push(format!("'{}': not a git repository", path));
+            continue;
+        }
+        if db.project_exists(&path).unwrap_or(false) {
+            skipped += 1;
+            continue;
+        }
+        let project_name = name.unwrap_or_else(|| path_name(&path));
+        let project = GitProject::new(project_name, path, group_id.to_string());
+
+        if let Err(e) = db.insert_project(&project) {
+            errors.push(format!("'{}': {}", project.name, e));
+            continue;
+        }
+        match GitService::get_project_detail(&project, group.clone()) {
+            Ok(detail) => results.push(detail),
+            Err(e) => {
+                log::warn!("failed to get detail for '{}': {}", project.path, e);
+                results.push(ProjectDetail::fallback(project, group.clone()));
+            }
+        }
+    }
+
+    if results.is_empty() {
+        if !errors.is_empty() {
+            return Err(AppError::Other(format!("Import failed: {}", errors.join("; "))));
+        }
+        if skipped > 0 {
+            return Err(AppError::Other(format!("All {} project(s) already exist", skipped)));
+        }
+    }
+
+    if !errors.is_empty() {
+        log::warn!("import partial failures: {}", errors.join("; "));
+    }
+
+    Ok(results)
 }
 
 #[tauri::command]
@@ -75,66 +133,11 @@ pub async fn import_workspace(file_path: String, group_id: String, db: State<'_,
     let db = db.inner().clone();
     tokio::task::spawn_blocking(move || {
         let folders = WorkspaceService::parse_workspace_file(&file_path)?;
-
         if folders.is_empty() {
             return Err(AppError::Other("No folders found in workspace file".to_string()));
         }
-
-        let group = db.get_group_by_id(&group_id)?;
-        let mut results = Vec::new();
-        let mut errors = Vec::new();
-        let mut skipped = 0usize;
-
-        for folder in folders {
-            let path = match canonicalize_path(&folder.path) {
-                Ok(p) => p,
-                Err(_) => {
-                    errors.push(format!("'{}': path not found", folder.path));
-                    continue;
-                }
-            };
-            if !GitService::is_git_repo(&path) {
-                errors.push(format!("'{}': not a git repository", path));
-                continue;
-            }
-            if db.project_exists(&path).unwrap_or(false) {
-                skipped += 1;
-                continue;
-            }
-            let name = folder.name.unwrap_or_else(|| path_name(&path));
-            let project = GitProject::new(name, path, group_id.clone());
-
-            if let Err(e) = db.insert_project(&project) {
-                errors.push(format!("'{}': {}", project.name, e));
-                continue;
-            }
-            match GitService::get_project_detail(&project, group.clone()) {
-                Ok(detail) => results.push(detail),
-                Err(e) => {
-                    log::warn!("failed to get detail for '{}': {}", project.path, e);
-                    results.push(ProjectDetail::fallback(project, group.clone()));
-                }
-            }
-        }
-
-        if results.is_empty() {
-            if !errors.is_empty() {
-                return Err(AppError::Other(format!(
-                    "Import failed: {}", errors.join("; ")
-                )));
-            }
-            if skipped > 0 {
-                return Err(AppError::Other(format!(
-                    "All {} project(s) already exist", skipped
-                )));
-            }
-        }
-
-        if !errors.is_empty() {
-            log::warn!("import partial failures: {}", errors.join("; "));
-        }
-
-        Ok(results)
+        let entries = folders.into_iter().map(|f| (f.name, f.path));
+        import_projects_core(entries, &group_id, &db)
     })
     .await
     .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
@@ -199,8 +202,12 @@ pub async fn open_in_terminal(path: String) -> Result<(), AppError> {
         }
         #[cfg(target_os = "windows")]
         {
-            if path.contains('"') {
-                return Err(AppError::Other("Path contains characters that cannot be used in Windows command line".into()));
+            // Reject paths containing cmd.exe metacharacters to prevent injection
+            const FORBIDDEN: &[char] = &['"', '&', '|', '>', '<', '^', '%', ';', '(', ')'];
+            if let Some(c) = path.chars().find(|c| FORBIDDEN.contains(c)) {
+                return Err(AppError::Other(format!(
+                    "Path contains forbidden character '{}' for Windows command line", c
+                )));
             }
             std::process::Command::new("cmd")
                 .args(["/C", "start", "cmd", "/K", &format!("cd /d \"{}\"", path)])
@@ -269,70 +276,11 @@ pub async fn import_projects(json: String, group_id: String, db: State<'_, Datab
     tokio::task::spawn_blocking(move || {
         let projects: Vec<GitProject> = serde_json::from_str(&json)
             .map_err(|e| AppError::Other(format!("Failed to parse JSON: {}", e)))?;
-
         if projects.is_empty() {
             return Err(AppError::Other("No projects found in JSON".to_string()));
         }
-
-        let group = db.get_group_by_id(&group_id)?;
-
-        let mut results = Vec::new();
-        let mut errors = Vec::new();
-        let mut skipped = 0usize;
-        for mut project in projects {
-            let path = match canonicalize_path(&project.path) {
-                Ok(p) => p,
-                Err(_) => {
-                    errors.push(format!("'{}': path not found", project.path));
-                    continue;
-                }
-            };
-            if !GitService::is_git_repo(&path) {
-                errors.push(format!("'{}': not a git repository", path));
-                continue;
-            }
-            if db.project_exists(&path).unwrap_or(false) {
-                skipped += 1;
-                continue;
-            }
-            project.id = Uuid::new_v4().to_string();
-            project.path = path;
-            project.group_id = group_id.clone();
-            let now = Utc::now().to_rfc3339();
-            project.created_at = now.clone();
-            project.updated_at = now;
-
-            if let Err(e) = db.insert_project(&project) {
-                errors.push(format!("'{}': {}", project.name, e));
-                continue;
-            }
-            match GitService::get_project_detail(&project, group.clone()) {
-                Ok(detail) => results.push(detail),
-                Err(e) => {
-                    log::warn!("failed to get detail for '{}': {}", project.path, e);
-                    results.push(ProjectDetail::fallback(project, group.clone()));
-                }
-            }
-        }
-
-        if results.is_empty() {
-            if !errors.is_empty() {
-                return Err(AppError::Other(format!(
-                    "Import failed: {}", errors.join("; ")
-                )));
-            }
-            if skipped > 0 {
-                return Err(AppError::Other(format!(
-                    "All {} project(s) already exist", skipped
-                )));
-            }
-        }
-
-        if !errors.is_empty() {
-            log::warn!("import partial failures: {}", errors.join("; "));
-        }
-
-        Ok(results)
+        let entries = projects.into_iter().map(|p| (Some(p.name), p.path));
+        import_projects_core(entries, &group_id, &db)
     })
     .await
     .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?

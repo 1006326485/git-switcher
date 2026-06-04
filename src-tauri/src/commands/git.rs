@@ -5,7 +5,19 @@ use crate::db::Database;
 use crate::models::{BatchResult, BranchInfo, CommitInfo, GitFileEntry, GitStatus, MergeResult, ProjectDetail, StashInfo, TagInfo};
 use crate::services::GitService;
 
-use super::{emit_op_done, emit_op_error, emit_op_start, next_op_id, try_update_activity};
+use super::events::{emit_op_done, emit_op_error, emit_op_start};
+use super::op_tracker::next_op_id;
+use super::try_update_activity;
+
+/// Validate and canonicalize a repository path, ensuring it is a git repo.
+fn validate_repo_path(path: &str) -> Result<std::path::PathBuf, AppError> {
+    let canonical = std::fs::canonicalize(path)
+        .map_err(|e| AppError::NotFound(format!("Invalid path '{}': {}", path, e)))?;
+    if !GitService::is_git_repo(&canonical.to_string_lossy()) {
+        return Err(AppError::NotFound(format!("Not a git repository: {}", canonical.display())));
+    }
+    Ok(canonical)
+}
 
 fn get_project_detail_for_path(db: &Database, path: &str) -> Result<ProjectDetail, AppError> {
     let project = db.get_project_by_path(path)?;
@@ -42,6 +54,7 @@ pub async fn switch_branch(
     let app_clone = app.clone();
 
     let result = tokio::task::spawn_blocking(move || -> Result<ProjectDetail, AppError> {
+        let _canonical = validate_repo_path(&path_clone)?;
         GitService::switch_branch(&path_clone, &branch_clone)?;
         let detail = get_project_detail_for_path(&db, &path_clone)?;
         try_update_activity(&db, &detail.project.id, detail.project.last_commit_hash.as_deref());
@@ -326,6 +339,7 @@ pub async fn git_push(
     let app_clone = app.clone();
 
     let result = tokio::task::spawn_blocking(move || -> Result<String, AppError> {
+        let _canonical = validate_repo_path(&path_clone)?;
         GitService::push(&path_clone, branch.as_deref())
     })
     .await
@@ -347,6 +361,7 @@ pub async fn git_pull(path: String, app: AppHandle) -> Result<String, AppError> 
     let app_clone = app.clone();
 
     let result = tokio::task::spawn_blocking(move || -> Result<String, AppError> {
+        let _canonical = validate_repo_path(&path_clone)?;
         GitService::pull(&path_clone)
     })
     .await
@@ -368,6 +383,7 @@ pub async fn git_fetch(path: String, app: AppHandle) -> Result<String, AppError>
     let app_clone = app.clone();
 
     let result = tokio::task::spawn_blocking(move || -> Result<String, AppError> {
+        let _canonical = validate_repo_path(&path_clone)?;
         GitService::fetch(&path_clone)
     })
     .await
@@ -523,4 +539,18 @@ pub async fn cancel_git_op(id: u64, active_ops: State<'_, ActiveOps>) -> Result<
         flag.store(false, std::sync::atomic::Ordering::SeqCst);
     }
     Ok(())
+}
+
+#[tauri::command]
+pub async fn get_file_diff(path: String, file_path: String) -> Result<String, AppError> {
+    tokio::task::spawn_blocking(move || {
+        let output = std::process::Command::new("git")
+            .args(["diff", "--", &file_path])
+            .current_dir(&path)
+            .output()
+            .map_err(|e| AppError::Git(format!("Failed to get diff: {}", e)))?;
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
 }

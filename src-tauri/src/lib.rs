@@ -79,6 +79,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::git_list_tags,
             commands::git_create_tag,
             commands::git_delete_tag,
+            commands::get_file_diff,
             // Groups
             commands::create_group,
             commands::list_groups,

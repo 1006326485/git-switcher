@@ -4,7 +4,7 @@ use std::sync::Mutex;
 use tauri::State;
 
 use crate::AppError;
-use crate::models::AppSettings;
+use crate::models::{AppSettings, LlmConfig};
 
 const KEYCHAIN_SERVICE: &str = "git-switcher";
 const KEYCHAIN_USER: &str = "llm-api-key";
@@ -51,6 +51,21 @@ impl SettingsStore {
 
     pub fn get_all(&self) -> Result<AppSettings, AppError> {
         self.with_settings(|settings| Ok(settings.clone()))
+    }
+
+    /// Get LLM config with API key resolved from keyring if flagged.
+    pub fn get_llm_config_with_key(&self) -> Result<LlmConfig, AppError> {
+        let mut config = self.with_settings(|settings| Ok(settings.llm.clone()))?;
+        if config.key_in_keychain {
+            let entry = keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_USER)
+                .map_err(|e| AppError::Other(format!("Keychain error: {}", e)))?;
+            match entry.get_password() {
+                Ok(key) => config.api_key = key,
+                Err(keyring::Error::NoEntry) => config.api_key = String::new(),
+                Err(e) => return Err(AppError::Other(format!("Failed to read key: {}", e))),
+            }
+        }
+        Ok(config)
     }
 
     pub fn update_all(&self, new_settings: &AppSettings) -> Result<(), AppError> {
@@ -101,11 +116,16 @@ pub fn update_settings_partial(
 }
 
 #[tauri::command]
-pub fn set_llm_api_key(key: String) -> Result<(), AppError> {
+pub fn set_llm_api_key(key: String, store: State<'_, SettingsStore>) -> Result<(), AppError> {
     let entry = keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_USER)
         .map_err(|e| AppError::Other(format!("Keychain error: {}", e)))?;
     entry.set_password(&key)
         .map_err(|e| AppError::Other(format!("Failed to store key: {}", e)))?;
+    // Mark key as stored in keyring and clear plaintext from settings
+    let mut settings = store.get_all()?;
+    settings.llm.key_in_keychain = true;
+    settings.llm.api_key = String::new();
+    store.update_all(&settings)?;
     Ok(())
 }
 

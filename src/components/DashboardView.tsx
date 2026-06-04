@@ -35,6 +35,19 @@ export const DashboardView = memo(function DashboardView({ projects }: Dashboard
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5);
 
+    // Stale projects: no activity in 30+ days
+    const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    const stale = projects.filter((p) => {
+      if (!p.project.last_active_at) return true;
+      const lastActive = new Date(p.project.last_active_at).getTime();
+      return lastActive < thirtyDaysAgo;
+    });
+
+    // Potential conflicts: behind remote with local changes
+    const conflictRisk = projects.filter(
+      (p) => p.status.behind > 0 && (p.status.modified > 0 || p.status.staged > 0)
+    );
+
     return {
       total: projects.length,
       withChanges: withChanges.length,
@@ -50,6 +63,8 @@ export const DashboardView = memo(function DashboardView({ projects }: Dashboard
       withChangesList: withChanges,
       aheadList: ahead,
       behindList: behind,
+      stale,
+      conflictRisk,
     };
   }, [projects]);
 
@@ -106,6 +121,45 @@ export const DashboardView = memo(function DashboardView({ projects }: Dashboard
               <div key={branch} className="flex items-center justify-between text-sm">
                 <span className="font-mono text-gray-700 dark:text-gray-300">{branch}</span>
                 <span className="text-gray-500">{count} project{count !== 1 ? "s" : ""}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Conflict risk */}
+      {stats.conflictRisk.length > 0 && (
+        <div className="bg-white dark:bg-gray-900 rounded-lg border border-red-200 dark:border-red-900 p-4">
+          <h3 className="text-sm font-semibold text-red-600 dark:text-red-400 mb-3">Conflict Risk</h3>
+          <div className="space-y-1">
+            {stats.conflictRisk.map((p) => (
+              <div key={p.project.id} className="flex items-center justify-between text-sm py-1">
+                <span className="text-gray-700 dark:text-gray-300">{p.project.alias || p.project.name}</span>
+                <div className="flex gap-2 text-xs">
+                  <span className="text-red-600">behind {p.status.behind}</span>
+                  {p.status.modified > 0 && <span className="text-yellow-600">{p.status.modified}M</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Stale projects */}
+      {stats.stale.length > 0 && (
+        <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-4">
+          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
+            Inactive Projects ({stats.stale.length})
+          </h3>
+          <div className="space-y-1">
+            {stats.stale.slice(0, 10).map((p) => (
+              <div key={p.project.id} className="flex items-center justify-between text-sm py-1">
+                <span className="text-gray-700 dark:text-gray-300">{p.project.alias || p.project.name}</span>
+                <span className="text-xs text-gray-500">
+                  {p.project.last_active_at
+                    ? `${Math.floor((Date.now() - new Date(p.project.last_active_at).getTime()) / (1000 * 60 * 60 * 24))}d ago`
+                    : "never"}
+                </span>
               </div>
             ))}
           </div>
