@@ -485,12 +485,6 @@ impl GitService {
         Ok(stash_oid.to_string())
     }
 
-    pub fn stash_apply(path: &str, index: usize) -> Result<String, AppError> {
-        let mut cmd = Self::git_cmd(path);
-        cmd.args(["stash", "apply", &format!("stash@{{{}}}", index)]);
-        Self::run_with_timeout(cmd, 60)
-    }
-
     pub fn stash_pop(path: &str) -> Result<String, AppError> {
         let mut repo = Self::open_repo(path)?;
         repo.stash_pop(0, None)
@@ -1065,12 +1059,12 @@ impl GitBackend for GitService {
     fn push(path: &str, branch: Option<&str>) -> Result<String, AppError> { Self::push(path, branch) }
     fn pull(path: &str) -> Result<String, AppError> { Self::pull(path) }
     fn fetch(path: &str) -> Result<String, AppError> { Self::fetch(path) }
-    fn stash(path: &str) -> Result<String, AppError> { Self::stash(path) }
+    fn stash(path: &str, message: Option<&str>) -> Result<String, AppError> { Self::stash(path, message) }
     fn stash_pop(path: &str) -> Result<String, AppError> { Self::stash_pop(path) }
     fn stash_pop_at(path: &str, index: usize) -> Result<String, AppError> { Self::stash_pop_at(path, index) }
     fn get_stash_list(path: &str) -> Result<Vec<StashInfo>, AppError> { Self::get_stash_list(path) }
     fn stash_drop(path: &str, index: usize) -> Result<(), AppError> { Self::stash_drop(path, index) }
-    fn get_log(path: &str, offset: usize, limit: usize) -> Result<Vec<CommitInfo>, AppError> { Self::get_log(path, offset, limit) }
+    fn get_log(path: &str, offset: usize, limit: usize, author: Option<&str>, message_contains: Option<&str>, since: Option<i64>, until: Option<i64>) -> Result<Vec<CommitInfo>, AppError> { Self::get_log(path, offset, limit, author, message_contains, since, until) }
     fn fetch_all_projects(paths: &[String]) -> Vec<(String, Result<String, AppError>)> { Self::fetch_all_projects(paths) }
     fn pull_all_projects(paths: &[String]) -> Vec<(String, Result<String, AppError>)> { Self::pull_all_projects(paths) }
 }

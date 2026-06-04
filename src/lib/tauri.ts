@@ -136,10 +136,6 @@ export async function gitStashDrop(path: string, index: number): Promise<void> {
   return invoke("git_stash_drop", { path, index });
 }
 
-export async function gitStashApply(path: string, index: number): Promise<string> {
-  return invoke("git_stash_apply", { path, index });
-}
-
 export async function cancelGitOp(id: number): Promise<void> {
   return invoke("cancel_git_op", { id });
 }
