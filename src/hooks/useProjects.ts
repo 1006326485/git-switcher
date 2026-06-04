@@ -18,6 +18,7 @@ export function useProjects(toast?: ToastApi, activeGroup?: string | null) {
   toastRef.current = toast;
   const groupRef = useRef(activeGroup);
   groupRef.current = activeGroup;
+  const defaultGroupIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -38,8 +39,10 @@ export function useProjects(toast?: ToastApi, activeGroup?: string | null) {
   const resolveGroupId = useCallback(async (): Promise<string> => {
     const gid = groupRef.current;
     if (gid) return gid;
+    if (defaultGroupIdRef.current) return defaultGroupIdRef.current;
     const groups = await api.listGroups();
     if (groups.length === 0) throw new Error("No groups exist");
+    defaultGroupIdRef.current = groups[0].id;
     return groups[0].id;
   }, []);
 
