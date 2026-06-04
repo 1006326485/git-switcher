@@ -171,8 +171,10 @@ export default function App() {
       onSuccess: toast.success,
       onError: toast.error,
       onInfo: toast.info,
+      onReorder: handleReorder,
+      onAliasChange: updateAlias,
     }),
-    [switchBranch, refreshProject, handleRemoveRequest, toast]
+    [switchBranch, refreshProject, handleRemoveRequest, toast, handleReorder, updateAlias]
   );
 
   return (
@@ -227,16 +229,9 @@ export default function App() {
               loading={loading}
               viewMode={viewMode}
               isFiltered={searchQuery.trim().length > 0}
-              onSwitchBranch={switchBranch}
-              onRefresh={refreshProject}
-              onRemove={handleRemoveRequest}
-              onSuccess={toast.success}
-              onError={toast.error}
-              onInfo={toast.info}
-              onReorder={handleReorder}
-              onAliasChange={updateAlias}
             />
           </main>
+        </div>
         </div>
       </ProjectProvider>
 

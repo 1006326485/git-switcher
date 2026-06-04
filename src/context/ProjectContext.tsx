@@ -13,6 +13,8 @@ export interface ProjectActions {
   onSuccess: (msg: string) => void;
   onError: (msg: string) => void;
   onInfo: (msg: string) => void;
+  onReorder?: (orderedIds: string[]) => Promise<void>;
+  onAliasChange?: (id: string, alias: string) => Promise<void>;
 }
 
 const ProjectContext = createContext<ProjectActions | null>(null);

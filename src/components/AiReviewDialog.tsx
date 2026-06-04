@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import type { BranchInfo, ReviewResult } from "../lib/types";
 import * as api from "../lib/tauri";
 import { Modal, Tabs } from "./ui/primitives";
-import { AiGenerateIcon, ArrowRightIcon } from "./ui/icons";
+import { AiGenerateIcon } from "./ui/icons";
 import { BranchDropdown } from "./BranchDropdown";
 import { MarkdownViewer } from "./MarkdownViewer";
 
