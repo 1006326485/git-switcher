@@ -78,6 +78,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             // Settings
             commands::get_settings,
             commands::update_settings,
+            commands::update_settings_partial,
+            commands::set_llm_api_key,
+            commands::get_llm_api_key,
             // AI Review
             commands::get_branch_diff,
             commands::ai_review,

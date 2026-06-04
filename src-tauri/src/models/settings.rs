@@ -43,6 +43,8 @@ pub struct LlmConfig {
     pub temperature: f32,
     #[serde(default = "default_max_tokens")]
     pub max_tokens: u32,
+    #[serde(default)]
+    pub key_in_keychain: bool,
 }
 
 impl Default for LlmConfig {
@@ -54,6 +56,7 @@ impl Default for LlmConfig {
             model: default_model(),
             temperature: default_temperature(),
             max_tokens: default_max_tokens(),
+            key_in_keychain: false,
         }
     }
 }

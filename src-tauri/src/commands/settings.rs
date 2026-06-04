@@ -6,6 +6,9 @@ use tauri::State;
 use crate::AppError;
 use crate::models::AppSettings;
 
+const KEYCHAIN_SERVICE: &str = "git-switcher";
+const KEYCHAIN_USER: &str = "llm-api-key";
+
 pub struct SettingsStore {
     path: PathBuf,
     settings: Mutex<AppSettings>,
@@ -75,4 +78,44 @@ pub fn get_settings(store: State<'_, SettingsStore>) -> Result<AppSettings, AppE
 pub fn update_settings(new_settings: AppSettings, store: State<'_, SettingsStore>) -> Result<AppSettings, AppError> {
     store.update_all(&new_settings)?;
     Ok(new_settings)
+}
+
+#[tauri::command]
+pub fn update_settings_partial(
+    patch: serde_json::Value,
+    store: State<'_, SettingsStore>,
+) -> Result<AppSettings, AppError> {
+    let current = store.get_all()?;
+    let mut current_json = serde_json::to_value(&current)
+        .map_err(|e| AppError::Config(format!("Failed to serialize: {}", e)))?;
+    // Merge patch into current
+    if let (Some(obj), Some(patch_obj)) = (current_json.as_object_mut(), patch.as_object()) {
+        for (k, v) in patch_obj {
+            obj.insert(k.clone(), v.clone());
+        }
+    }
+    let new_settings: AppSettings = serde_json::from_value(current_json)
+        .map_err(|e| AppError::Config(format!("Failed to deserialize: {}", e)))?;
+    store.update_all(&new_settings)?;
+    Ok(new_settings)
+}
+
+#[tauri::command]
+pub fn set_llm_api_key(key: String) -> Result<(), AppError> {
+    let entry = keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_USER)
+        .map_err(|e| AppError::Other(format!("Keychain error: {}", e)))?;
+    entry.set_password(&key)
+        .map_err(|e| AppError::Other(format!("Failed to store key: {}", e)))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_llm_api_key() -> Result<String, AppError> {
+    let entry = keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_USER)
+        .map_err(|e| AppError::Other(format!("Keychain error: {}", e)))?;
+    match entry.get_password() {
+        Ok(key) => Ok(key),
+        Err(keyring::Error::NoEntry) => Ok(String::new()),
+        Err(e) => Err(AppError::Other(format!("Failed to read key: {}", e))),
+    }
 }
