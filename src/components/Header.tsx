@@ -16,6 +16,7 @@ interface HeaderProps {
   onToggleSidebar: () => void;
   onExportImport: () => void;
   onSettings: () => void;
+  onToggleCommandPalette: () => void;
   batchLoading: string | null;
   onFetchAll: () => void;
   onPullAll: () => void;
@@ -48,6 +49,7 @@ export const Header = memo(function Header({
   onToggleSidebar,
   onExportImport,
   onSettings,
+  onToggleCommandPalette,
   batchLoading,
   onFetchAll,
   onPullAll,
@@ -106,6 +108,14 @@ export const Header = memo(function Header({
 
         {/* ── Right: Actions ─────────────────────────────────────────── */}
         <div className="flex items-center gap-1.5">
+          {/* Command palette */}
+          <IconButton onClick={onToggleCommandPalette} title="Command palette (⌘K)">
+            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M8 1.5a.5.5 0 01.5.5v2.5h2.5a.5.5 0 010 1H8.5v2.5a.5.5 0 01-1 0V5.5H5a.5.5 0 010-1h2.5V2a.5.5 0 01.5-.5z" />
+              <path fillRule="evenodd" d="M1.5 3A1.5 1.5 0 013 1.5h10A1.5 1.5 0 0114.5 3v10a1.5 1.5 0 01-1.5 1.5H3A1.5 1.5 0 011.5 13V3zM3 0a3 3 0 00-3 3v10a3 3 0 003 3h10a3 3 0 003-3V3a3 3 0 00-3-3H3z" />
+            </svg>
+          </IconButton>
+
           {/* Primary action */}
           <button
             onClick={onAddProject}
