@@ -132,6 +132,16 @@ export async function gitDeleteTag(path: string, name: string): Promise<void> {
   return invoke("git_delete_tag", { path, name });
 }
 
+// ── Cherry-pick / Rebase ──────────────────────────────────────────────
+
+export async function gitCherryPick(path: string, commitHash: string): Promise<MergeResult> {
+  return invoke("git_cherry_pick", { path, commitHash });
+}
+
+export async function gitRebase(path: string, ontoBranch: string): Promise<string> {
+  return invoke("git_rebase", { path, ontoBranch });
+}
+
 // ── Batch Operations ────────────────────────────────────────────────────
 
 export async function fetchAll(groupId?: string): Promise<void> {

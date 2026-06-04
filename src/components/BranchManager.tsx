@@ -26,13 +26,17 @@ export const BranchManager = memo(function BranchManager({
   onSuccess,
   onError,
 }: BranchManagerProps) {
-  const [tab, setTab] = useState<"create" | "delete" | "merge">("create");
+  const [tab, setTab] = useState<"create" | "delete" | "merge" | "cherrypick">("create");
   const [newBranchName, setNewBranchName] = useState("");
   const [fromBranch, setFromBranch] = useState("");
   const [selectedBranch, setSelectedBranch] = useState("");
+  const [commitHash, setCommitHash] = useState("");
+  const [rebaseBranch, setRebaseBranch] = useState("");
   const [loading, setLoading] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmMerge, setConfirmMerge] = useState(false);
+  const [confirmCherryPick, setConfirmCherryPick] = useState(false);
+  const [confirmRebase, setConfirmRebase] = useState(false);
 
   const localBranches = branches.filter((b) => !b.is_remote);
 
@@ -95,6 +99,40 @@ export const BranchManager = memo(function BranchManager({
     }
   }, [path, selectedBranch, currentBranch, onRefresh, onSuccess, onError]);
 
+  const handleCherryPick = useCallback(async () => {
+    if (!commitHash.trim()) return;
+    setLoading(true);
+    try {
+      const result: MergeResult = await api.gitCherryPick(path, commitHash.trim());
+      if (result.success) {
+        onSuccess(result.message);
+      } else {
+        onError(`${result.message}: ${result.conflicts?.join(", ") || "unknown conflicts"}`);
+      }
+      setCommitHash("");
+      await onRefresh();
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, [path, commitHash, onRefresh, onSuccess, onError]);
+
+  const handleRebase = useCallback(async () => {
+    if (!rebaseBranch) return;
+    setLoading(true);
+    try {
+      const result = await api.gitRebase(path, rebaseBranch);
+      onSuccess(result || `Rebased onto "${rebaseBranch}"`);
+      setRebaseBranch("");
+      await onRefresh();
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, [path, rebaseBranch, onRefresh, onSuccess, onError]);
+
   const handleConfirmDelete = useCallback(() => {
     setConfirmDelete(false);
     handleDelete();
@@ -111,6 +149,22 @@ export const BranchManager = memo(function BranchManager({
   const openConfirmDelete = useCallback(() => setConfirmDelete(true), []);
   const openConfirmMerge = useCallback(() => setConfirmMerge(true), []);
 
+  const handleConfirmCherryPick = useCallback(() => {
+    setConfirmCherryPick(false);
+    handleCherryPick();
+  }, [handleCherryPick]);
+
+  const handleCancelCherryPick = useCallback(() => setConfirmCherryPick(false), []);
+  const openConfirmCherryPick = useCallback(() => setConfirmCherryPick(true), []);
+
+  const handleConfirmRebase = useCallback(() => {
+    setConfirmRebase(false);
+    handleRebase();
+  }, [handleRebase]);
+
+  const handleCancelRebase = useCallback(() => setConfirmRebase(false), []);
+  const openConfirmRebase = useCallback(() => setConfirmRebase(true), []);
+
   return (
     <Modal open={open} onClose={onClose} title="Branch Manager">
       <Tabs
@@ -118,6 +172,7 @@ export const BranchManager = memo(function BranchManager({
           { value: "create", label: "Create" },
           { value: "delete", label: "Delete" },
           { value: "merge", label: "Merge" },
+          { value: "cherrypick", label: "Cherry-pick" },
         ]}
         active={tab}
         onChange={setTab}
@@ -205,6 +260,53 @@ export const BranchManager = memo(function BranchManager({
             >
               {loading ? "Merging..." : `Merge "${selectedBranch}" into "${currentBranch}"`}
             </PrimaryButton>
+
+            <div className="border-t border-gray-200 dark:border-gray-700 pt-4 mt-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Rebase Current ({currentBranch}) Onto
+                </label>
+                <SelectDropdown
+                  options={otherBranchOptions}
+                  value={rebaseBranch}
+                  onChange={setRebaseBranch}
+                  placeholder="-- Select branch to rebase onto --"
+                  ariaLabel="Branch to rebase onto"
+                />
+              </div>
+              <PrimaryButton
+                color="blue"
+                onClick={openConfirmRebase}
+                disabled={!rebaseBranch || loading}
+              >
+                {loading ? "Rebasing..." : `Rebase onto "${rebaseBranch}"`}
+              </PrimaryButton>
+            </div>
+          </div>
+        )}
+
+        {tab === "cherrypick" && (
+          <div className="space-y-4">
+            <div>
+              <label htmlFor="commit-hash" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Commit Hash
+              </label>
+              <input
+                id="commit-hash"
+                type="text"
+                value={commitHash}
+                onChange={(e) => setCommitHash(e.target.value)}
+                placeholder="abc1234..."
+                className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400"
+              />
+            </div>
+            <PrimaryButton
+              color="blue"
+              onClick={openConfirmCherryPick}
+              disabled={!commitHash.trim() || loading}
+            >
+              {loading ? "Cherry-picking..." : "Cherry-pick Commit"}
+            </PrimaryButton>
           </div>
         )}
       </div>
@@ -225,6 +327,24 @@ export const BranchManager = memo(function BranchManager({
         confirmColor="green"
         onConfirm={handleConfirmMerge}
         onCancel={handleCancelMerge}
+      />
+      <ConfirmDialog
+        open={confirmCherryPick}
+        title="Cherry-pick Commit"
+        message={`Cherry-pick commit ${commitHash.trim().slice(0, 8)} into "${currentBranch}"? This may create conflicts that need manual resolution.`}
+        confirmLabel="Cherry-pick"
+        confirmColor="blue"
+        onConfirm={handleConfirmCherryPick}
+        onCancel={handleCancelCherryPick}
+      />
+      <ConfirmDialog
+        open={confirmRebase}
+        title="Rebase Branch"
+        message={`Rebase "${currentBranch}" onto "${rebaseBranch}"? This will rewrite commit history.`}
+        confirmLabel="Rebase"
+        confirmColor="blue"
+        onConfirm={handleConfirmRebase}
+        onCancel={handleCancelRebase}
       />
     </Modal>
   );
