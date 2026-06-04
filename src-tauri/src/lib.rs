@@ -81,6 +81,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             // AI Review
             commands::get_branch_diff,
             commands::ai_review,
+            commands::list_reviews,
+            commands::delete_review,
             commands::generate_commit_msg,
         ])
         .run(tauri::generate_context!())?;

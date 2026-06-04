@@ -210,3 +210,11 @@ export async function aiReview(
 export async function generateCommitMsg(path: string): Promise<string> {
   return invoke("generate_commit_msg", { path });
 }
+
+export async function listReviews(path: string): Promise<ReviewResult[]> {
+  return invoke("list_reviews", { path });
+}
+
+export async function deleteReview(id: string): Promise<void> {
+  return invoke("delete_review", { id });
+}
