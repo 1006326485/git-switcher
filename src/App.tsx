@@ -7,10 +7,12 @@ import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ExportImportDialog } from "./components/ExportImportDialog";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { ToastContainer } from "./components/Toast";
+import { CommandPalette } from "./components/CommandPalette";
 import { useProjects } from "./hooks/useProjects";
 import { useTheme } from "./hooks/useTheme";
 import { useToast } from "./hooks/useToast";
 import { useBatchOps } from "./hooks/useBatchOps";
+import { useCommandPalette } from "./hooks/useCommandPalette";
 import type { ProjectDetail, ViewMode, GitOpEvent } from "./lib/types";
 import { getSettings, updateSettings, listProjectsInGroup } from "./lib/tauri";
 import { listen } from "@tauri-apps/api/event";
@@ -181,6 +183,16 @@ export default function App() {
   const handleCloseSettings = useCallback(() => setSettingsOpen(false), []);
   const handleCancelDelete = useCallback(() => setConfirmDelete(null), []);
 
+  const { open: paletteOpen, toggle: togglePalette, setOpen: setPaletteOpen, commands: paletteCommands } = useCommandPalette({
+    onAddProject: handleAddProject,
+    onRefreshAll: refreshAll,
+    onToggleSidebar: handleToggleSidebar,
+    onExportImport: handleOpenExportImport,
+    onSettings: handleOpenSettings,
+    onFetchAll: fetchAll,
+    onPullAll: pullAll,
+  });
+
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -270,6 +282,7 @@ export default function App() {
             onToggleSidebar={handleToggleSidebar}
             onExportImport={handleOpenExportImport}
             onSettings={handleOpenSettings}
+            onToggleCommandPalette={togglePalette}
             batchLoading={batchLoading}
             onFetchAll={fetchAll}
             onPullAll={pullAll}
@@ -326,6 +339,12 @@ export default function App() {
       />
 
       <ToastContainer toasts={toast.toasts} onRemove={toast.removeToast} onPause={toast.pauseToast} onResume={toast.resumeToast} />
+
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        commands={paletteCommands}
+      />
     </div>
   );
 }
