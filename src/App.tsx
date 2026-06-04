@@ -11,9 +11,11 @@ import { useProjects } from "./hooks/useProjects";
 import { useTheme } from "./hooks/useTheme";
 import { useToast } from "./hooks/useToast";
 import { useBatchOps } from "./hooks/useBatchOps";
-import type { ProjectDetail, ViewMode, GitOpEvent } from "./lib/types";
-import { getSettings, updateSettings, listProjectsInGroup } from "./lib/tauri";
-import { listen } from "@tauri-apps/api/event";
+import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { useAutoRefresh } from "./hooks/useAutoRefresh";
+import { useAppSettings } from "./hooks/useAppSettings";
+import type { ProjectDetail } from "./lib/types";
+import { listProjectsInGroup } from "./lib/tauri";
 
 export default function App() {
   const { theme, setTheme } = useTheme();
@@ -22,7 +24,6 @@ export default function App() {
   toastRef.current = toast;
 
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [viewMode, setViewModeState] = useState<ViewMode>("card");
   const [searchQuery, setSearchQuery] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<{
     id: string;
@@ -49,63 +50,14 @@ export default function App() {
 
   const { batchLoading, fetchAll, pullAll } = useBatchOps(toast, refreshAll, activeGroup);
 
+  const { viewMode, setViewMode } = useAppSettings(
+    useCallback((msg: string) => toastRef.current.error(msg), [])
+  );
+
+  useAutoRefresh(refreshAll, useCallback((msg: string) => toastRef.current.error(msg), []));
+
   const projectsRef = useRef(projects);
   projectsRef.current = projects;
-
-  const busyOpsRef = useRef(0);
-
-  // Track active git operations to skip auto-refresh during busy periods
-  useEffect(() => {
-    const unlistenStart = listen<GitOpEvent>("git-op-start", () => {
-      busyOpsRef.current++;
-    });
-    const unlistenDone = listen<GitOpEvent>("git-op-done", () => {
-      busyOpsRef.current = Math.max(0, busyOpsRef.current - 1);
-    });
-    const unlistenError = listen<GitOpEvent>("git-op-error", () => {
-      busyOpsRef.current = Math.max(0, busyOpsRef.current - 1);
-    });
-    return () => {
-      unlistenStart.then((fn) => fn()).catch(() => {});
-      unlistenDone.then((fn) => fn()).catch(() => {});
-      unlistenError.then((fn) => fn()).catch(() => {});
-    };
-  }, []);
-
-  // Load settings once: view mode + auto-refresh (pauses when window hidden)
-  useEffect(() => {
-    let timer: ReturnType<typeof setInterval> | null = null;
-    let cancelled = false;
-    let onVisibility: (() => void) | null = null;
-
-    getSettings().then((s) => {
-      if (cancelled) return;
-      setViewModeState(s.view_mode);
-      if (s.auto_refresh && s.refresh_interval_secs > 0) {
-        const ms = s.refresh_interval_secs * 1000;
-        const startTimer = () => {
-          timer = setInterval(() => {
-            if (!document.hidden && busyOpsRef.current === 0) refreshAll();
-          }, ms);
-        };
-        startTimer();
-        onVisibility = () => {
-          if (document.hidden) {
-            if (timer) { clearInterval(timer); timer = null; }
-          } else {
-            if (!timer) startTimer();
-          }
-        };
-        document.addEventListener("visibilitychange", onVisibility);
-      }
-    }).catch((e) => toastRef.current.error(`Failed to load settings: ${e}`));
-
-    return () => {
-      cancelled = true;
-      if (timer) clearInterval(timer);
-      if (onVisibility) document.removeEventListener("visibilitychange", onVisibility);
-    };
-  }, [refreshAll]);
 
   // Load group projects when active group changes
   useEffect(() => {
@@ -121,20 +73,6 @@ export default function App() {
     }
     return () => { cancelled = true; };
   }, [activeGroup, projectsVersion]);
-
-  const committedViewMode = useRef(viewMode);
-  const setViewMode = useCallback(async (mode: ViewMode) => {
-    const prev = committedViewMode.current;
-    setViewModeState(mode);
-    try {
-      const settings = await getSettings();
-      await updateSettings({ ...settings, view_mode: mode });
-      committedViewMode.current = mode;
-    } catch (e) {
-      setViewModeState(prev);
-      toastRef.current.error(`Failed to save view mode: ${e}`);
-    }
-  }, []);
 
   // Filter projects by search query and group
   const filteredProjects = useMemo(() => {
@@ -181,57 +119,25 @@ export default function App() {
   const handleCloseSettings = useCallback(() => setSettingsOpen(false), []);
   const handleCancelDelete = useCallback(() => setConfirmDelete(null), []);
 
-  // Keyboard shortcuts
+  // Keyboard shortcuts — Escape stays here (closes multiple dialogs)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      const isMeta = e.metaKey || e.ctrlKey;
-
-      // Escape always works — close topmost dialog
       if (e.key === "Escape") {
         setDialogOpen(false);
         setConfirmDelete(null);
         setExportImportOpen(false);
-        return;
-      }
-
-      const el = e.target;
-      if (!(el instanceof HTMLElement)) return;
-      const tag = el.tagName;
-      const isInput = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
-
-      // Skip meta shortcuts when user is typing in an input
-      if (isInput) return;
-
-      // Cmd+N: Add project
-      if (isMeta && e.key === "n") {
-        e.preventDefault();
-        setDialogOpen(true);
-      }
-      // Cmd+R: Refresh all
-      if (isMeta && e.key === "r") {
-        e.preventDefault();
-        refreshAll();
-      }
-      // Cmd+F: Focus search
-      if (isMeta && e.key === "f") {
-        e.preventDefault();
-        document.getElementById("global-search-input")?.focus();
-      }
-      // Cmd+E: Export/Import
-      if (isMeta && e.key === "e") {
-        e.preventDefault();
-        setExportImportOpen(true);
-      }
-      // Cmd+B: Toggle sidebar
-      if (isMeta && e.key === "b") {
-        e.preventDefault();
-        setShowSidebar((s) => !s);
       }
     };
-
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [refreshAll]);
+  }, []);
+
+  useKeyboardShortcuts({
+    onAddProject: handleAddProject,
+    onRefreshAll: refreshAll,
+    onToggleSidebar: handleToggleSidebar,
+    onExportImport: handleOpenExportImport,
+  });
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col">
