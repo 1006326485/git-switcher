@@ -1,6 +1,7 @@
 import { memo } from "react";
 import type { Theme, ViewMode } from "../lib/types";
 import { SegmentedControl, DropdownMenu, MenuItem, IconButton } from "./ui/primitives";
+import { SearchIcon, PlusIcon, KebabIcon } from "./ui/icons";
 import { BatchOpsToolbar } from "./BatchOpsToolbar";
 
 interface HeaderProps {
@@ -79,15 +80,7 @@ export const Header = memo(function Header({
         {/* ── Center: Search ─────────────────────────────────────────── */}
         <div className="flex-1 max-w-md mx-4">
           <div className="relative">
-            <svg
-              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400"
-              width="14"
-              height="14"
-              viewBox="0 0 16 16"
-              fill="currentColor"
-            >
-              <path d="M10.68 11.74a6 6 0 01-7.922-8.982 6 6 0 018.982 7.922l3.04 3.04a.749.749 0 01-.326 1.275.749.749 0 01-.734-.215zM11.5 7a4.499 4.499 0 10-8.997 0A4.499 4.499 0 0011.5 7z" />
-            </svg>
+            <SearchIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
               type="search"
               value={searchQuery}
@@ -112,9 +105,7 @@ export const Header = memo(function Header({
             aria-label="Add project"
             className="h-8 px-3 rounded-lg bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-sm font-medium transition-all flex items-center gap-1.5 shadow-sm shadow-blue-600/20"
           >
-            <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M7.75 2a.75.75 0 01.75.75V7h4.25a.75.75 0 010 1.5H8.5v4.25a.75.75 0 01-1.5 0V8.5H2.75a.75.75 0 010-1.5H7V2.75A.75.75 0 017.75 2z" />
-            </svg>
+            <PlusIcon />
             Add
           </button>
 
@@ -142,11 +133,7 @@ export const Header = memo(function Header({
           <DropdownMenu
             trigger={
               <IconButton title="More actions">
-                <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                  <circle cx="8" cy="3" r="1.5" />
-                  <circle cx="8" cy="8" r="1.5" />
-                  <circle cx="8" cy="13" r="1.5" />
-                </svg>
+                <KebabIcon size={16} />
               </IconButton>
             }
           >

@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef, memo } from "react";
 import type { BranchInfo, ReviewResult } from "../lib/types";
 import * as api from "../lib/tauri";
 import { Modal } from "./ui/primitives";
+import { AiGenerateIcon, ArrowRightIcon } from "./ui/icons";
 import { BranchDropdown } from "./BranchDropdown";
 import { MarkdownViewer } from "./MarkdownViewer";
 
@@ -89,9 +90,7 @@ export const AiReviewDialog = memo(function AiReviewDialog({
           </div>
 
           <div className="pb-2 text-gray-400">
-            <svg aria-hidden="true" width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M1 8a.75.75 0 01.75-.75h10.69L9.22 4.03a.75.75 0 011.06-1.06l4.5 4.5a.75.75 0 010 1.06l-4.5 4.5a.75.75 0 01-1.06-1.06l3.22-3.22H1.75A.75.75 0 011 8z" />
-            </svg>
+            <ArrowRightIcon size={20} />
           </div>
 
           <div className="flex-1">
@@ -118,9 +117,7 @@ export const AiReviewDialog = memo(function AiReviewDialog({
               </>
             ) : (
               <>
-                <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                  <path d="M8 0a8 8 0 110 16A8 8 0 018 0zm3.28 5.78a.75.75 0 00-1.06-1.06L7 7.94 5.78 6.72a.75.75 0 00-1.06 1.06l1.75 1.75a.75.75 0 001.06 0l3.75-3.75z" />
-                </svg>
+                <AiGenerateIcon />
                 Review
               </>
             )}

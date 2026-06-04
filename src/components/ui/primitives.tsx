@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useId, memo } from "react";
 import { createPortal } from "react-dom";
+import { CloseIcon } from "./icons";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Design System Primitives — single source of truth
@@ -261,9 +262,7 @@ export const Modal = memo(function Modal({
             aria-label="Close dialog"
             className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
           >
-            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.749.749 0 111.06 1.06L9.06 8l3.22 3.22a.749.749 0 11-1.06 1.06L8 9.06l-3.22 3.22a.749.749 0 11-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
-            </svg>
+            <CloseIcon size={16} />
           </button>
         </div>
 

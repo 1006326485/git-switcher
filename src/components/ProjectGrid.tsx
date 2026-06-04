@@ -1,12 +1,12 @@
 import { memo } from "react";
-import type { ProjectDetail, ProjectRowCallbacks, ViewMode } from "../lib/types";
+import type { ProjectDetail, ViewMode } from "../lib/types";
 import { ProjectCard } from "./ProjectCard";
 import { ProjectList } from "./ProjectList";
 import { ProjectCompact } from "./ProjectCompact";
 import { ProjectTable } from "./ProjectTable";
 import { DashboardView } from "./DashboardView";
 
-interface ProjectGridProps extends ProjectRowCallbacks {
+interface ProjectGridProps {
   projects: ProjectDetail[];
   loading: boolean;
   viewMode: ViewMode;
@@ -18,12 +18,6 @@ export const ProjectGrid = memo(function ProjectGrid({
   loading,
   viewMode,
   isFiltered,
-  onSwitchBranch,
-  onRefresh,
-  onRemove,
-  onSuccess,
-  onError,
-  onInfo,
 }: ProjectGridProps) {
   if (loading) {
     return (
@@ -54,66 +48,19 @@ export const ProjectGrid = memo(function ProjectGrid({
 
   switch (viewMode) {
     case "dashboard":
-      return (
-        <DashboardView
-          projects={projects}
-          onSwitchBranch={onSwitchBranch}
-          onRefresh={onRefresh}
-          onSuccess={onSuccess}
-          onError={onError}
-        />
-      );
+      return <DashboardView projects={projects} />;
     case "list":
-      return (
-        <ProjectList
-          projects={projects}
-          onSwitchBranch={onSwitchBranch}
-          onRefresh={onRefresh}
-          onRemove={onRemove}
-          onSuccess={onSuccess}
-          onError={onError}
-          onInfo={onInfo}
-        />
-      );
+      return <ProjectList projects={projects} />;
     case "compact":
-      return (
-        <ProjectCompact
-          projects={projects}
-          onSwitchBranch={onSwitchBranch}
-          onRefresh={onRefresh}
-          onRemove={onRemove}
-          onSuccess={onSuccess}
-          onError={onError}
-          onInfo={onInfo}
-        />
-      );
+      return <ProjectCompact projects={projects} />;
     case "table":
-      return (
-        <ProjectTable
-          projects={projects}
-          onSwitchBranch={onSwitchBranch}
-          onRefresh={onRefresh}
-          onRemove={onRemove}
-          onSuccess={onSuccess}
-          onError={onError}
-          onInfo={onInfo}
-        />
-      );
+      return <ProjectTable projects={projects} />;
     case "card":
     default:
       return (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {projects.map((detail) => (
-            <ProjectCard
-              key={detail.project.id}
-              detail={detail}
-              onSwitchBranch={onSwitchBranch}
-              onRefresh={onRefresh}
-              onRemove={onRemove}
-              onSuccess={onSuccess}
-              onError={onError}
-              onInfo={onInfo}
-            />
+            <ProjectCard key={detail.project.id} detail={detail} />
           ))}
         </div>
       );
