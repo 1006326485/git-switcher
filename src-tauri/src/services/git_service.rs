@@ -1,4 +1,4 @@
-use git2::{Repository, Status, StatusOptions, BranchType, build::CheckoutBuilder};
+use git2::{Repository, Status, StatusOptions, BranchType, IndexAddOption, build::CheckoutBuilder, DiffOptions};
 
 use crate::AppError;
 use crate::models::{BranchInfo, CommitInfo, FileStatus, GitFileEntry, GitStatus, MergeResult, ProjectDetail, GitProject, Group, StashInfo};
@@ -289,6 +289,73 @@ impl GitService {
         Ok(())
     }
 
+    pub fn stage_all(path: &str) -> Result<(), AppError> {
+        let repo = Self::open_repo(path)?;
+        let mut index = repo.index().map_err(|e| AppError::Git(format!("Failed to get index: {}", e)))?;
+        index.add_all(["*"].iter(), IndexAddOption::DEFAULT, None)
+            .map_err(|e| AppError::Git(format!("Failed to stage all: {}", e)))?;
+        index.write().map_err(|e| AppError::Git(format!("Failed to write index: {}", e)))?;
+        Ok(())
+    }
+
+    pub fn unstage_all(path: &str) -> Result<(), AppError> {
+        let repo = Self::open_repo(path)?;
+        match repo.revparse_single("HEAD").ok() {
+            Some(head_obj) => {
+                repo.reset_default(Some(&head_obj), &["*"])
+                    .map_err(|e| AppError::Git(format!("Failed to unstage all: {}", e)))?;
+            }
+            None => {
+                let mut index = repo.index().map_err(|e| AppError::Git(format!("Failed to get index: {}", e)))?;
+                index.clear().map_err(|e| AppError::Git(format!("Failed to clear index: {}", e)))?;
+                index.write().map_err(|e| AppError::Git(format!("Failed to write index: {}", e)))?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn get_staged_diff(path: &str) -> Result<String, AppError> {
+        let repo = Self::open_repo(path)?;
+
+        let head = match repo.revparse_single("HEAD") {
+            Ok(obj) => obj,
+            Err(_) => return Ok(String::new()), // no commits yet
+        };
+        let head_tree = repo.find_tree(Self::obj_to_tree_id(&head))
+            .map_err(|e| AppError::Git(format!("Failed to find HEAD tree: {}", e)))?;
+
+        let mut opts = DiffOptions::new();
+        opts.force_text(true);
+
+        let diff = repo.diff_tree_to_index(Some(&head_tree), None, Some(&mut opts))
+            .map_err(|e| AppError::Git(format!("Failed to compute diff: {}", e)))?;
+
+        let mut output = String::new();
+        diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
+            let prefix = match line.origin() {
+                '+' => "+",
+                '-' => "-",
+                ' ' => " ",
+                _ => "",
+            };
+            output.push_str(prefix);
+            output.push_str(std::str::from_utf8(line.content()).unwrap_or(""));
+            true
+        }).map_err(|e| AppError::Git(format!("Failed to format diff: {}", e)))?;
+
+        Ok(output)
+    }
+
+    fn obj_to_tree_id(obj: &git2::Object) -> git2::Oid {
+        if obj.kind() == Some(git2::ObjectType::Commit) {
+            obj.peel_to_commit()
+                .map(|c| c.tree_id())
+                .unwrap_or(obj.id())
+        } else {
+            obj.id()
+        }
+    }
+
     pub fn commit(path: &str, message: &str) -> Result<String, AppError> {
         if message.trim().is_empty() {
             return Err(AppError::Other("Commit message cannot be empty".to_string()));
@@ -342,21 +409,26 @@ impl GitService {
         Self::run_with_timeout(cmd, 120)
     }
 
-    pub fn stash(path: &str) -> Result<String, AppError> {
+    pub fn stash(path: &str, message: Option<&str>) -> Result<String, AppError> {
         let mut repo = Self::open_repo(path)?;
 
-        // stash_save takes &mut self, so we need a 'static signature (no borrow on repo).
-        // Read config values first, then create an owned signature.
         let config = repo.config().map_err(|e| AppError::Git(format!("Failed to read config: {}", e)))?;
         let name = config.get_string("user.name").unwrap_or_else(|_| "Git Switcher".into());
         let email = config.get_string("user.email").unwrap_or_else(|_| "git-switcher@local".into());
         let signature = git2::Signature::now(&name, &email)
             .map_err(|e| AppError::Git(format!("Failed to create signature: {}", e)))?;
 
-        let stash_oid = repo.stash_save(&signature, "WIP: stashed by Git Switcher", None)
+        let msg = message.unwrap_or("WIP: stashed by Git Switcher");
+        let stash_oid = repo.stash_save(&signature, msg, None)
             .map_err(|e| AppError::Git(format!("Failed to stash: {}", e)))?;
 
         Ok(stash_oid.to_string())
+    }
+
+    pub fn stash_apply(path: &str, index: usize) -> Result<String, AppError> {
+        let mut cmd = Self::git_cmd(path);
+        cmd.args(["stash", "apply", &format!("stash@{{{}}}", index)]);
+        Self::run_with_timeout(cmd, 60)
     }
 
     pub fn stash_pop(path: &str) -> Result<String, AppError> {
