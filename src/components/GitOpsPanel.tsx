@@ -19,6 +19,10 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
   const [generatingMsg, setGeneratingMsg] = useState(false);
   const [stashList, setStashList] = useState<StashInfo[]>([]);
   const [showStashList, setShowStashList] = useState(false);
+  const [stashMsg, setStashMsg] = useState("");
+  const [showDiff, setShowDiff] = useState(false);
+  const [stagedDiff, setStagedDiff] = useState<string | null>(null);
+  const [loadingDiff, setLoadingDiff] = useState(false);
 
   const loadFiles = useCallback(async () => {
     try {
@@ -38,6 +42,18 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
     }
   }, [path, onError]);
 
+  const loadStagedDiff = useCallback(async () => {
+    setLoadingDiff(true);
+    try {
+      const diff = await api.gitGetStagedDiff(path);
+      setStagedDiff(diff);
+    } catch (e) {
+      onError(`Failed to load diff: ${e}`);
+    } finally {
+      setLoadingDiff(false);
+    }
+  }, [path, onError]);
+
   const handleToggle = useCallback(async () => {
     const next = !expanded;
     setExpanded(next);
@@ -49,7 +65,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
   const handleAction = useCallback(
     async (name: string, fn: () => Promise<void>, successMsg?: string) => {
       setLoadingOps((prev) => new Set(prev).add(name));
-      const label = { fetch: "Fetching", pull: "Pulling", push: "Pushing", stash: "Stashing", pop: "Popping", stash_drop: "Dropping" }[name] ?? name;
+      const label = { fetch: "Fetching", pull: "Pulling", push: "Pushing", stash: "Stashing", pop: "Popping", stash_drop: "Dropping", stage_all: "Staging all", unstage_all: "Unstaging all", stash_apply: "Applying stash" }[name] ?? name;
       onInfo?.(`${label}...`);
       try {
         await fn();
@@ -75,6 +91,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
       const hash = await api.gitCommit(path, commitMsg.trim());
       onSuccess(`Committed: ${hash.slice(0, 7)}`);
       setCommitMsg("");
+      setStagedDiff(null);
       await Promise.all([onRefresh(), loadFiles()]);
     } catch (e) {
       onError(String(e));
@@ -125,11 +142,19 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
     [path, loadFiles, onError]
   );
 
+  const handleStageAll = useCallback(() => handleAction("stage_all", async () => { await api.gitStageAll(path); }, "All files staged"), [handleAction, path]);
+  const handleUnstageAll = useCallback(() => handleAction("unstage_all", async () => { await api.gitUnstageAll(path); }, "All files unstaged"), [handleAction, path]);
   const handleFetch = useCallback(() => handleAction("fetch", async () => { await api.gitFetch(path); }, "Fetch completed"), [handleAction, path]);
   const handlePull = useCallback(() => handleAction("pull", async () => { await api.gitPull(path); }, "Pull completed"), [handleAction, path]);
   const handlePush = useCallback(() => handleAction("push", async () => { await api.gitPush(path); }, "Push completed"), [handleAction, path]);
-  const handleStash = useCallback(() => handleAction("stash", async () => { await api.gitStash(path); }, "Stashed changes"), [handleAction, path]);
   const handlePop = useCallback(() => handleAction("pop", async () => { await api.gitStashPop(path); }, "Stash popped"), [handleAction, path]);
+
+  const handleStash = useCallback(() => {
+    const msg = stashMsg.trim();
+    return handleAction("stash", async () => {
+      await api.gitStash(path, msg || undefined);
+    }, "Stashed changes");
+  }, [handleAction, path, stashMsg]);
 
   const handleGenerateMsg = useCallback(async () => {
     setGeneratingMsg(true);
@@ -147,6 +172,10 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
     (index: number) => handleAction("pop", async () => { await api.gitStashPop(path, index); }, `Stash@{${index}} popped`),
     [handleAction, path]
   );
+  const handleStashApply = useCallback(
+    (index: number) => handleAction("stash_apply", async () => { await api.gitStashApply(path, index); }, `Stash@{${index}} applied`),
+    [handleAction, path]
+  );
   const handleStashDrop = useCallback(
     (index: number) => handleAction("stash_drop", async () => { await api.gitStashDrop(path, index); }, `Stash@{${index}} dropped`),
     [handleAction, path]
@@ -159,6 +188,14 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
       await loadStashList();
     }
   }, [showStashList, loadStashList]);
+
+  const handleToggleDiff = useCallback(async () => {
+    const next = !showDiff;
+    setShowDiff(next);
+    if (next) {
+      await loadStagedDiff();
+    }
+  }, [showDiff, loadStagedDiff]);
 
   const isLoading = (name: string) => loadingOps.has(name);
 
@@ -210,6 +247,15 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
             >
               {isLoading("stash") ? "Stashing..." : "Stash"}
             </button>
+            <input
+              type="text"
+              value={stashMsg}
+              onChange={(e) => setStashMsg(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleStash()}
+              placeholder="Stash message (optional)"
+              aria-label="Stash message"
+              className="px-2 py-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-xs w-40 focus:outline-none focus:ring-2 focus:ring-yellow-500"
+            />
             <button
               onClick={handlePop}
               disabled={isLoading("pop")}
@@ -243,6 +289,15 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
                       {s.message}
                     </span>
                     <button
+                      onClick={() => handleStashApply(s.index)}
+                      disabled={isLoading("stash_apply")}
+                      className="px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-900/50 disabled:opacity-50"
+                      aria-label={`Apply stash@{${s.index}}`}
+                      title="Apply"
+                    >
+                      Apply
+                    </button>
+                    <button
                       onClick={() => handleStashPopAt(s.index)}
                       disabled={isLoading("pop")}
                       className="px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 hover:bg-purple-200 dark:hover:bg-purple-900/50 disabled:opacity-50"
@@ -268,58 +323,79 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
 
           {/* File list with stage/unstage */}
           {files.length > 0 && (
-            <div className="space-y-1 max-h-32 overflow-y-auto">
-              {files.map((f) => (
-                <div key={f.path} className="flex items-center gap-2 text-xs">
-                  <span
-                    className={`w-14 text-center px-1.5 py-0.5 rounded font-mono ${
-                      f.status === "untracked"
-                        ? "bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300"
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-xs text-gray-500 dark:text-gray-400">{files.length} file{files.length !== 1 ? "s" : ""}</span>
+                <button
+                  onClick={handleStageAll}
+                  disabled={isLoading("stage_all")}
+                  className="px-2 py-0.5 rounded text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/50 disabled:opacity-50 transition-colors"
+                  aria-label="Stage all files"
+                >
+                  {isLoading("stage_all") ? "Staging..." : "Stage All"}
+                </button>
+                <button
+                  onClick={handleUnstageAll}
+                  disabled={isLoading("unstage_all")}
+                  className="px-2 py-0.5 rounded text-xs font-medium bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 hover:bg-red-200 dark:hover:bg-red-900/50 disabled:opacity-50 transition-colors"
+                  aria-label="Unstage all files"
+                >
+                  {isLoading("unstage_all") ? "Unstaging..." : "Unstage All"}
+                </button>
+              </div>
+              <div className="max-h-32 overflow-y-auto">
+                {files.map((f) => (
+                  <div key={f.path} className="flex items-center gap-2 text-xs">
+                    <span
+                      className={`w-14 text-center px-1.5 py-0.5 rounded font-mono ${
+                        f.status === "untracked"
+                          ? "bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300"
+                          : f.status === "modified"
+                          ? "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300"
+                          : f.status === "deleted"
+                          ? "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300"
+                          : f.status === "renamed"
+                          ? "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
+                          : "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300"
+                      }`}
+                    >
+                      {f.status === "untracked"
+                        ? "??"
                         : f.status === "modified"
-                        ? "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300"
+                        ? "M"
                         : f.status === "deleted"
-                        ? "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300"
+                        ? "D"
                         : f.status === "renamed"
-                        ? "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
-                        : "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300"
-                    }`}
-                  >
-                    {f.status === "untracked"
-                      ? "??"
-                      : f.status === "modified"
-                      ? "M"
-                      : f.status === "deleted"
-                      ? "D"
-                      : f.status === "renamed"
-                      ? "R"
-                      : "A"}
-                  </span>
-                  <span className="flex-1 truncate text-gray-700 dark:text-gray-300 font-mono">
-                    {f.path}
-                  </span>
-                  {f.status === "untracked" ? (
-                    <button
-                      onClick={() => handleStage(f.path)}
-                      disabled={stagingFiles.has(f.path)}
-                      className="px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/50 disabled:opacity-50"
-                      aria-label={`Stage ${f.path}`}
-                      title="Stage"
-                    >
-                      {stagingFiles.has(f.path) ? "..." : "+"}
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => handleUnstage(f.path)}
-                      disabled={stagingFiles.has(f.path)}
-                      className="px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 hover:bg-red-200 dark:hover:bg-red-900/50 disabled:opacity-50"
-                      aria-label={`Unstage ${f.path}`}
-                      title="Unstage"
-                    >
-                      {stagingFiles.has(f.path) ? "..." : "-"}
-                    </button>
-                  )}
-                </div>
-              ))}
+                        ? "R"
+                        : "A"}
+                    </span>
+                    <span className="flex-1 truncate text-gray-700 dark:text-gray-300 font-mono">
+                      {f.path}
+                    </span>
+                    {f.status === "untracked" ? (
+                      <button
+                        onClick={() => handleStage(f.path)}
+                        disabled={stagingFiles.has(f.path)}
+                        className="px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/50 disabled:opacity-50"
+                        aria-label={`Stage ${f.path}`}
+                        title="Stage"
+                      >
+                        {stagingFiles.has(f.path) ? "..." : "+"}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleUnstage(f.path)}
+                        disabled={stagingFiles.has(f.path)}
+                        className="px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 hover:bg-red-200 dark:hover:bg-red-900/50 disabled:opacity-50"
+                        aria-label={`Unstage ${f.path}`}
+                        title="Unstage"
+                      >
+                        {stagingFiles.has(f.path) ? "..." : "-"}
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
@@ -350,6 +426,15 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
               )}
             </button>
             <button
+              onClick={handleToggleDiff}
+              title="Preview staged diff"
+              aria-label="Preview staged diff"
+              aria-expanded={showDiff}
+              className={`px-2 py-1.5 rounded-md text-xs font-medium transition-colors ${showDiff ? "bg-teal-200 dark:bg-teal-800/50 text-teal-800 dark:text-teal-200" : "bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 hover:bg-teal-200 dark:hover:bg-teal-900/50"}`}
+            >
+              {showDiff ? "Hide Diff" : "Preview Diff"}
+            </button>
+            <button
               onClick={handleCommit}
               disabled={!commitMsg.trim() || isLoading("commit")}
               className="px-3 py-1.5 rounded-md text-xs font-medium bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white transition-colors"
@@ -357,6 +442,48 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
               {isLoading("commit") ? "Committing..." : "Commit"}
             </button>
           </div>
+
+          {/* Staged diff preview */}
+          {showDiff && (
+            <div className="rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 overflow-hidden">
+              <div className="flex items-center justify-between px-3 py-1.5 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+                <span className="text-xs font-medium text-gray-600 dark:text-gray-400">Staged Changes</span>
+                <button
+                  onClick={loadStagedDiff}
+                  disabled={loadingDiff}
+                  className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 disabled:opacity-50"
+                  aria-label="Refresh diff"
+                >
+                  {loadingDiff ? "Loading..." : "Refresh"}
+                </button>
+              </div>
+              <pre className="p-3 text-xs font-mono max-h-48 overflow-y-auto whitespace-pre-wrap break-all text-gray-800 dark:text-gray-200">
+                {stagedDiff === null ? (
+                  <span className="text-gray-400 italic">Loading...</span>
+                ) : stagedDiff.length === 0 ? (
+                  <span className="text-gray-400 italic">No staged changes</span>
+                ) : (
+                  stagedDiff.split("\n").map((line, i) => (
+                    <span
+                      key={i}
+                      className={
+                        line.startsWith("+")
+                          ? "text-green-600 dark:text-green-400"
+                          : line.startsWith("-")
+                          ? "text-red-600 dark:text-red-400"
+                          : line.startsWith("@@")
+                          ? "text-purple-600 dark:text-purple-400"
+                          : undefined
+                      }
+                    >
+                      {line}
+                      {"\n"}
+                    </span>
+                  ))
+                )}
+              </pre>
+            </div>
+          )}
         </div>
       )}
     </div>

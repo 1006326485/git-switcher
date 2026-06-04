@@ -68,6 +68,18 @@ export async function gitUnstageFile(path: string, file: string): Promise<void> 
   return invoke("git_unstage_file", { path, file });
 }
 
+export async function gitStageAll(path: string): Promise<void> {
+  return invoke("git_stage_all", { path });
+}
+
+export async function gitUnstageAll(path: string): Promise<void> {
+  return invoke("git_unstage_all", { path });
+}
+
+export async function gitGetStagedDiff(path: string): Promise<string> {
+  return invoke("git_get_staged_diff", { path });
+}
+
 export async function gitCommit(path: string, message: string): Promise<string> {
   return invoke("git_commit", { path, message });
 }
@@ -84,8 +96,12 @@ export async function gitFetch(path: string): Promise<string> {
   return invoke("git_fetch", { path });
 }
 
-export async function gitStash(path: string): Promise<string> {
-  return invoke("git_stash", { path });
+export async function gitStash(path: string, message?: string): Promise<string> {
+  return invoke("git_stash", { path, message: message ?? null });
+}
+
+export async function gitStashApply(path: string, index: number): Promise<string> {
+  return invoke("git_stash_apply", { path, index });
 }
 
 export async function gitStashPop(path: string, index?: number): Promise<string> {

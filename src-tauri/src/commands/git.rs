@@ -122,6 +122,33 @@ pub async fn git_unstage_file(path: String, file: String) -> Result<(), AppError
 }
 
 #[tauri::command]
+pub async fn git_stage_all(path: String) -> Result<(), AppError> {
+    tokio::task::spawn_blocking(move || -> Result<(), AppError> {
+        GitService::stage_all(&path)
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
+}
+
+#[tauri::command]
+pub async fn git_unstage_all(path: String) -> Result<(), AppError> {
+    tokio::task::spawn_blocking(move || -> Result<(), AppError> {
+        GitService::unstage_all(&path)
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
+}
+
+#[tauri::command]
+pub async fn git_get_staged_diff(path: String) -> Result<String, AppError> {
+    tokio::task::spawn_blocking(move || -> Result<String, AppError> {
+        GitService::get_staged_diff(&path)
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
+}
+
+#[tauri::command]
 pub async fn git_commit(
     path: String,
     message: String,
@@ -153,7 +180,7 @@ pub async fn git_commit(
 }
 
 #[tauri::command]
-pub async fn git_stash(path: String, app: AppHandle) -> Result<String, AppError> {
+pub async fn git_stash(path: String, message: Option<String>, app: AppHandle) -> Result<String, AppError> {
     let op_id = next_op_id();
     emit_op_start(&app, op_id, "stash", &path);
 
@@ -161,7 +188,7 @@ pub async fn git_stash(path: String, app: AppHandle) -> Result<String, AppError>
     let app_clone = app.clone();
 
     let result = tokio::task::spawn_blocking(move || -> Result<String, AppError> {
-        GitService::stash(&path_clone)
+        GitService::stash(&path_clone, message.as_deref())
     })
     .await
     .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?;
@@ -169,6 +196,27 @@ pub async fn git_stash(path: String, app: AppHandle) -> Result<String, AppError>
     match &result {
         Ok(_) => emit_op_done(&app_clone, op_id, "stash", &path),
         Err(e) => emit_op_error(&app_clone, op_id, "stash", &path, &e.to_string()),
+    }
+    result
+}
+
+#[tauri::command]
+pub async fn git_stash_apply(path: String, index: usize, app: AppHandle) -> Result<String, AppError> {
+    let op_id = next_op_id();
+    emit_op_start(&app, op_id, "stash_apply", &path);
+
+    let path_clone = path.clone();
+    let app_clone = app.clone();
+
+    let result = tokio::task::spawn_blocking(move || -> Result<String, AppError> {
+        GitService::stash_apply(&path_clone, index)
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?;
+
+    match &result {
+        Ok(_) => emit_op_done(&app_clone, op_id, "stash_apply", &path),
+        Err(e) => emit_op_error(&app_clone, op_id, "stash_apply", &path, &e.to_string()),
     }
     result
 }
