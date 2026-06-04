@@ -197,6 +197,18 @@ export async function pickWorkspaceFile(): Promise<string | null> {
   });
 }
 
+export async function updateSettingsPartial(patch: Partial<AppSettings>): Promise<AppSettings> {
+  return invoke("update_settings_partial", { patch });
+}
+
+export async function setLlmApiKey(key: string): Promise<void> {
+  return invoke("set_llm_api_key", { key });
+}
+
+export async function getLlmApiKey(): Promise<string> {
+  return invoke("get_llm_api_key");
+}
+
 // ── AI Code Review ────────────────────────────────────────────────────
 
 export async function aiReview(
