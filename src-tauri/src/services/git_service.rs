@@ -667,7 +667,15 @@ impl GitService {
 
     // ── Git Log ─────────────────────────────────────────────────────────
 
-    pub fn get_log(path: &str, offset: usize, limit: usize) -> Result<Vec<CommitInfo>, AppError> {
+    pub fn get_log(
+        path: &str,
+        offset: usize,
+        limit: usize,
+        author: Option<&str>,
+        message_contains: Option<&str>,
+        since: Option<i64>,
+        until: Option<i64>,
+    ) -> Result<Vec<CommitInfo>, AppError> {
         let repo = Self::open_repo(path)?;
 
         // Empty repo with no commits — return empty log instead of error
@@ -680,6 +688,8 @@ impl GitService {
             None => return Ok(Vec::new()),
         };
 
+        let has_filters = author.is_some() || message_contains.is_some() || since.is_some() || until.is_some();
+
         let mut revwalk = repo.revwalk()
             .map_err(|e| AppError::Git(format!("Failed to create revwalk: {}", e)))?;
 
@@ -689,15 +699,50 @@ impl GitService {
         revwalk.push(head_oid)
             .map_err(|e| AppError::Git(format!("Failed to push HEAD: {}", e)))?;
 
+        let author_lower = author.map(|a| a.to_lowercase());
+        let msg_lower = message_contains.map(|m| m.to_lowercase());
+
         let mut commits = Vec::new();
-        for (i, oid_result) in revwalk.enumerate() {
-            if i < offset { continue; }
-            if commits.len() >= limit { break; }
+        let mut filtered_count: usize = 0;
+
+        for oid_result in revwalk {
+            if !has_filters && filtered_count >= offset + limit { break; }
+            if has_filters && commits.len() >= limit { break; }
+
             let oid = oid_result.map_err(|e| AppError::Git(format!("Failed to get oid: {}", e)))?;
             let commit = repo.find_commit(oid)
                 .map_err(|e| AppError::Git(format!("Failed to find commit: {}", e)))?;
 
-            let author = commit.author();
+            let commit_author = commit.author();
+            let commit_ts = commit_author.when().seconds();
+
+            // Apply date filters
+            if let Some(s) = since {
+                if commit_ts < s { continue; }
+            }
+            if let Some(u) = until {
+                if commit_ts > u { continue; }
+            }
+
+            // Apply author filter
+            let author_name = commit_author.name().unwrap_or("Unknown").to_string();
+            if let Some(ref al) = author_lower {
+                if !author_name.to_lowercase().contains(al.as_str()) {
+                    continue;
+                }
+            }
+
+            // Apply message filter
+            let commit_msg = commit.message().unwrap_or("").lines().next().unwrap_or("").to_string();
+            if let Some(ref ml) = msg_lower {
+                if !commit_msg.to_lowercase().contains(ml.as_str()) {
+                    continue;
+                }
+            }
+
+            filtered_count += 1;
+            if filtered_count <= offset { continue; }
+
             let parents: Vec<String> = commit.parent_ids().map(|id| id.to_string()).collect();
             let oid_s = oid.to_string();
             let short_len = 7.min(oid_s.len());
@@ -705,10 +750,10 @@ impl GitService {
             commits.push(CommitInfo {
                 short_hash: oid_s[..short_len].to_string(),
                 hash: oid_s,
-                message: commit.message().unwrap_or("").lines().next().unwrap_or("").to_string(),
-                author: author.name().unwrap_or("Unknown").to_string(),
-                email: author.email().unwrap_or("").to_string(),
-                timestamp: author.when().seconds(),
+                message: commit_msg,
+                author: author_name,
+                email: commit_author.email().unwrap_or("").to_string(),
+                timestamp: commit_ts,
                 parents,
             });
         }
@@ -724,6 +769,10 @@ impl GitService {
 
     pub fn pull_all_projects(paths: &[String]) -> Vec<(String, Result<String, AppError>)> {
         Self::run_batch(paths, |p| Self::pull(&p))
+    }
+
+    pub fn push_all_projects(paths: &[String]) -> Vec<(String, Result<String, AppError>)> {
+        Self::run_batch(paths, |p| Self::push(&p, None))
     }
 
     fn run_batch<F>(paths: &[String], op: F) -> Vec<(String, Result<String, AppError>)>

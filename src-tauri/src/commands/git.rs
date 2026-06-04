@@ -86,9 +86,25 @@ pub async fn refresh_project(
 }
 
 #[tauri::command]
-pub async fn git_get_log(path: String, limit: Option<usize>, offset: Option<usize>) -> Result<Vec<CommitInfo>, AppError> {
+pub async fn git_get_log(
+    path: String,
+    limit: Option<usize>,
+    offset: Option<usize>,
+    author: Option<String>,
+    message_contains: Option<String>,
+    since: Option<i64>,
+    until: Option<i64>,
+) -> Result<Vec<CommitInfo>, AppError> {
     tokio::task::spawn_blocking(move || -> Result<Vec<CommitInfo>, AppError> {
-        GitService::get_log(&path, offset.unwrap_or(0), limit.unwrap_or(50))
+        GitService::get_log(
+            &path,
+            offset.unwrap_or(0),
+            limit.unwrap_or(50),
+            author.as_deref(),
+            message_contains.as_deref(),
+            since,
+            until,
+        )
     })
     .await
     .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
@@ -392,6 +408,21 @@ pub async fn pull_all(
     let app_clone = app.clone();
     tokio::task::spawn_blocking(move || -> Result<(), AppError> {
         run_batch_sync(&app_clone, &db, "pull", group_id.as_deref(), GitService::pull_all_projects)
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
+}
+
+#[tauri::command]
+pub async fn push_all(
+    app: AppHandle,
+    db: State<'_, Database>,
+    group_id: Option<String>,
+) -> Result<(), AppError> {
+    let db = db.inner().clone();
+    let app_clone = app.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), AppError> {
+        run_batch_sync(&app_clone, &db, "push", group_id.as_deref(), GitService::push_all_projects)
     })
     .await
     .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?

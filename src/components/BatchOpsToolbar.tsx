@@ -4,9 +4,10 @@ interface BatchOpsToolbarProps {
   batchLoading: string | null;
   onFetchAll: () => void;
   onPullAll: () => void;
+  onPushAll: () => void;
 }
 
-export const BatchOpsToolbar = memo(function BatchOpsToolbar({ batchLoading, onFetchAll, onPullAll }: BatchOpsToolbarProps) {
+export const BatchOpsToolbar = memo(function BatchOpsToolbar({ batchLoading, onFetchAll, onPullAll, onPushAll }: BatchOpsToolbarProps) {
   return (
     <div className="space-y-0.5">
       <button
@@ -52,6 +53,30 @@ export const BatchOpsToolbar = memo(function BatchOpsToolbar({ batchLoading, onF
           <div className="text-xs text-gray-400 dark:text-gray-500">Pull latest changes</div>
         </div>
         {batchLoading === "pull" && (
+          <span className="text-xs text-blue-500">Running...</span>
+        )}
+      </button>
+
+      <button
+        onClick={onPushAll}
+        disabled={!!batchLoading}
+        className="w-full text-left px-3 py-2 text-sm flex items-center gap-3 transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50 text-gray-700 dark:text-gray-300 disabled:opacity-50"
+      >
+        <span className="shrink-0 w-5 h-5 flex items-center justify-center text-gray-400 dark:text-gray-500">
+          {batchLoading === "push" ? (
+            <span className="animate-spin text-xs">&#x21BB;</span>
+          ) : (
+            <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M13.25 14A1.75 1.75 0 0015 12.25v-2.5a.75.75 0 00-1.5 0v2.5a.25.25 0 01-.25.25H2.75a.25.25 0 01-.25-.25v-2.5a.75.75 0 00-1.5 0v2.5c0 .966.784 1.75 1.75 1.75h10.5z" />
+              <path d="M8.75 1.311V8a.75.75 0 01-1.5 0V1.311L5.28 3.28A.75.75 0 014.22 2.22l3.25-3.25a.75.75 0 011.06 0l3.25 3.25a.749.749 0 11-1.06 1.06L8.75 1.311z" />
+            </svg>
+          )}
+        </span>
+        <div className="flex-1 min-w-0">
+          <div className="text-gray-900 dark:text-gray-100">Push All</div>
+          <div className="text-xs text-gray-400 dark:text-gray-500">Push local commits</div>
+        </div>
+        {batchLoading === "push" && (
           <span className="text-xs text-blue-500">Running...</span>
         )}
       </button>

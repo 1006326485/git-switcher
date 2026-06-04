@@ -51,8 +51,28 @@ export async function refreshProject(path: string): Promise<ProjectDetail> {
   return invoke("refresh_project", { path });
 }
 
-export async function gitGetLog(path: string, limit?: number, offset?: number): Promise<CommitInfo[]> {
-  return invoke("git_get_log", { path, limit, offset });
+export interface GitLogFilters {
+  author?: string;
+  message_contains?: string;
+  since?: number;
+  until?: number;
+}
+
+export async function gitGetLog(
+  path: string,
+  limit?: number,
+  offset?: number,
+  filters?: GitLogFilters,
+): Promise<CommitInfo[]> {
+  return invoke("git_get_log", {
+    path,
+    limit,
+    offset,
+    author: filters?.author ?? null,
+    message_contains: filters?.message_contains ?? null,
+    since: filters?.since ?? null,
+    until: filters?.until ?? null,
+  });
 }
 
 export async function gitGetFiles(path: string): Promise<GitFileEntry[]> {
@@ -125,6 +145,10 @@ export async function fetchAll(groupId?: string): Promise<void> {
 
 export async function pullAll(groupId?: string): Promise<void> {
   return invoke("pull_all", { groupId: groupId ?? null });
+}
+
+export async function pushAll(groupId?: string): Promise<void> {
+  return invoke("push_all", { groupId: groupId ?? null });
 }
 
 // ── Groups ──────────────────────────────────────────────────────────────

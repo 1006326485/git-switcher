@@ -67,6 +67,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             // Batch operations
             commands::fetch_all,
             commands::pull_all,
+            commands::push_all,
             commands::cancel_git_op,
             // Groups
             commands::create_group,

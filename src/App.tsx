@@ -47,7 +47,7 @@ export default function App() {
     refreshAll,
   } = useProjects(toast, activeGroup);
 
-  const { batchLoading, fetchAll, pullAll } = useBatchOps(toast, refreshAll, activeGroup);
+  const { batchLoading, fetchAll, pullAll, pushAll } = useBatchOps(toast, refreshAll, activeGroup);
 
   const projectsRef = useRef(projects);
   projectsRef.current = projects;
@@ -273,6 +273,7 @@ export default function App() {
             batchLoading={batchLoading}
             onFetchAll={fetchAll}
             onPullAll={pullAll}
+            onPushAll={pushAll}
           />
 
           {/* Main content */}
