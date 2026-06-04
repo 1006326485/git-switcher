@@ -116,21 +116,46 @@ pub(crate) fn fetch_project_details_batch(
         })
         .collect();
 
-    // Parallel git2 I/O via std::thread::scope
-    std::thread::scope(|s| {
-        let handles: Vec<_> = project_groups
-            .into_iter()
+    // Parallel git2 I/O with bounded concurrency (matches run_batch pattern)
+    use std::panic::catch_unwind;
+    use std::sync::mpsc;
+    const MAX_CONCURRENT: usize = 8;
+
+    let (tx, rx) = mpsc::channel();
+
+    for chunk in project_groups.chunks(MAX_CONCURRENT) {
+        let handles: Vec<_> = chunk
+            .iter()
             .map(|(p, group)| {
-                s.spawn(move || {
-                    let fallback_group = group.clone();
-                    match GitService::get_project_detail(&p, group) {
-                        Ok(detail) => detail,
-                        Err(_) => ProjectDetail::fallback(p, fallback_group),
-                    }
+                let p = p.clone();
+                let group = group.clone();
+                let tx = tx.clone();
+                std::thread::spawn(move || {
+                    let panic_p = p.clone();
+                    let panic_group = group.clone();
+                    let detail = catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        let fallback_p = p.clone();
+                        let fallback_group = group.clone();
+                        match GitService::get_project_detail(&p, group) {
+                            Ok(detail) => detail,
+                            Err(_) => ProjectDetail::fallback(fallback_p, fallback_group),
+                        }
+                    }))
+                    .unwrap_or_else(|_| ProjectDetail::fallback(panic_p, panic_group));
+                    let _ = tx.send(detail);
                 })
             })
             .collect();
 
-        handles.into_iter().filter_map(|h| h.join().ok()).collect()
-    })
+        for h in handles {
+            let _ = h.join();
+        }
+    }
+    drop(tx);
+
+    let mut results = Vec::with_capacity(project_groups.len());
+    while let Ok(item) = rx.recv() {
+        results.push(item);
+    }
+    results
 }
