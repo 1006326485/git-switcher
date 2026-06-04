@@ -21,11 +21,6 @@ fn truncate_str(s: &str, max_bytes: usize) -> &str {
     &s[..end]
 }
 
-/// Leak a string to get a static str (acceptable for small CLI lifetime data).
-fn leak_str(s: String) -> &'static str {
-    Box::leak(s.into_boxed_str())
-}
-
 /// Paths that should never be sent to the LLM.
 fn is_excluded_path(path: &str) -> bool {
     static EXCLUDED: &[&str] = &[
@@ -284,16 +279,16 @@ impl LlmService {
         let (sev_str, title) = if let Some(rest) = heading.strip_prefix("🔴") {
             Self::split_severity(rest.trim())
         } else if let Some(rest) = heading.strip_prefix("🟡") {
-            (Some("warning"), rest.trim().to_string())
+            (Some("warning".to_string()), rest.trim().to_string())
         } else if let Some(rest) = heading.strip_prefix("ℹ️") {
-            (Some("info"), rest.trim().to_string())
+            (Some("info".to_string()), rest.trim().to_string())
         } else if let Some(rest) = heading.strip_prefix("💡") {
-            (Some("suggestion"), rest.trim().to_string())
+            (Some("suggestion".to_string()), rest.trim().to_string())
         } else {
             Self::split_severity(heading)
         };
 
-        let severity = match sev_str {
+        let severity = match sev_str.as_deref() {
             Some("critical") => FindingSeverity::Critical,
             Some("warning") => FindingSeverity::Warning,
             Some("info") => FindingSeverity::Info,
@@ -304,21 +299,21 @@ impl LlmService {
         (severity, title)
     }
 
-    fn split_severity(text: &str) -> (Option<&str>, String) {
+    fn split_severity(text: &str) -> (Option<String>, String) {
         // Try "[Critical] Title"
         if let Some(rest) = text.strip_prefix('[') {
             if let Some(end) = rest.find(']') {
                 let sev = &rest[..end];
                 let title = rest[end + 1..].trim().to_string();
                 let sev_lower = sev.to_lowercase();
-                return (Some(leak_str(sev_lower)), title);
+                return (Some(sev_lower), title);
             }
         }
         // Try "Critical: Title"
         if let Some(pos) = text.find(':') {
             let sev = text[..pos].trim().to_lowercase();
             let title = text[pos + 1..].trim().to_string();
-            return (Some(leak_str(sev)), title);
+            return (Some(sev), title);
         }
         (None, text.to_string())
     }

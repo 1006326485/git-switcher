@@ -38,50 +38,42 @@ pub(crate) fn try_update_activity(db: &Database, project_id: &str, hash: Option<
     }
 }
 
+#[derive(serde::Serialize, Clone)]
+struct GitOpEvent {
+    id: u64,
+    op: String,
+    path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
 /// Emit a git-op-start event.
 pub(crate) fn emit_op_start(app: &AppHandle, id: u64, op: &str, path: &str) {
-    #[derive(serde::Serialize, Clone)]
-    struct OpStart {
-        id: u64,
-        op: String,
-        path: String,
-    }
-    let _ = app.emit("git-op-start", OpStart {
+    let _ = app.emit("git-op-start", GitOpEvent {
         id,
         op: op.to_string(),
         path: path.to_string(),
+        error: None,
     });
 }
 
 /// Emit a git-op-done event.
 pub(crate) fn emit_op_done(app: &AppHandle, id: u64, op: &str, path: &str) {
-    #[derive(serde::Serialize, Clone)]
-    struct OpDone {
-        id: u64,
-        op: String,
-        path: String,
-    }
-    let _ = app.emit("git-op-done", OpDone {
+    let _ = app.emit("git-op-done", GitOpEvent {
         id,
         op: op.to_string(),
         path: path.to_string(),
+        error: None,
     });
 }
 
 /// Emit a git-op-error event.
 pub(crate) fn emit_op_error(app: &AppHandle, id: u64, op: &str, path: &str, error: &str) {
-    #[derive(serde::Serialize, Clone)]
-    struct OpError {
-        id: u64,
-        op: String,
-        path: String,
-        error: String,
-    }
-    let _ = app.emit("git-op-error", OpError {
+    let _ = app.emit("git-op-error", GitOpEvent {
         id,
         op: op.to_string(),
         path: path.to_string(),
-        error: error.to_string(),
+        error: Some(error.to_string()),
     });
 }
 
