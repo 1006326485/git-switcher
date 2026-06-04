@@ -2,6 +2,7 @@ import { useState, useCallback, memo } from "react";
 import * as api from "../lib/tauri";
 import type { GitFileEntry, StashInfo } from "../lib/types";
 import { DiffViewer } from "./DiffViewer";
+import { AiGenerateIcon } from "./ui/icons";
 
 interface GitOpsPanelProps {
   path: string;
@@ -426,9 +427,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
               {generatingMsg ? (
                 <span className="animate-spin inline-block">&#x21BB;</span>
               ) : (
-                <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                  <path d="M8 0a8 8 0 110 16A8 8 0 018 0zm3.28 5.78a.75.75 0 00-1.06-1.06L7 7.94 5.78 6.72a.75.75 0 00-1.06 1.06l1.75 1.75a.75.75 0 001.06 0l3.75-3.75z" />
-                </svg>
+                <AiGenerateIcon />
               )}
             </button>
             <button

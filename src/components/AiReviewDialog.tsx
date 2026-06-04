@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import type { BranchInfo, ReviewResult } from "../lib/types";
 import * as api from "../lib/tauri";
 import { Modal, Tabs } from "./ui/primitives";
+import { AiGenerateIcon, ArrowRightIcon } from "./ui/icons";
 import { BranchDropdown } from "./BranchDropdown";
 import { MarkdownViewer } from "./MarkdownViewer";
 
@@ -240,15 +241,7 @@ export const AiReviewDialog = memo(function AiReviewDialog({
                 </>
               ) : (
                 <>
-                  <svg
-                    aria-hidden="true"
-                    width="14"
-                    height="14"
-                    viewBox="0 0 16 16"
-                    fill="currentColor"
-                  >
-                    <path d="M8 0a8 8 0 110 16A8 8 0 018 0zm3.28 5.78a.75.75 0 00-1.06-1.06L7 7.94 5.78 6.72a.75.75 0 00-1.06 1.06l1.75 1.75a.75.75 0 001.06 0l3.75-3.75z" />
-                  </svg>
+                  <AiGenerateIcon size={14} />
                   Review
                 </>
               )}

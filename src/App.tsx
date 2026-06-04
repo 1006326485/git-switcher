@@ -8,6 +8,7 @@ import { ExportImportDialog } from "./components/ExportImportDialog";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { ToastContainer } from "./components/Toast";
 import { CommandPalette } from "./components/CommandPalette";
+import { ProjectProvider } from "./context/ProjectContext";
 import { useProjects } from "./hooks/useProjects";
 import { useTheme } from "./hooks/useTheme";
 import { useToast } from "./hooks/useToast";
@@ -162,6 +163,18 @@ export default function App() {
     onExportImport: handleOpenExportImport,
   });
 
+  const projectActions = useMemo(
+    () => ({
+      onSwitchBranch: switchBranch,
+      onRefresh: refreshProject,
+      onRemove: handleRemoveRequest,
+      onSuccess: toast.success,
+      onError: toast.error,
+      onInfo: toast.info,
+    }),
+    [switchBranch, refreshProject, handleRemoveRequest, toast]
+  );
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col">
       {/* Title bar — draggable, spans full width above sidebar */}
@@ -171,18 +184,19 @@ export default function App() {
         className="h-6 bg-white dark:bg-gray-900 pl-20 select-none shrink-0"
       />
 
-      <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar */}
-        {showSidebar && (
-          <aside className="w-56 shrink-0 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 p-4 overflow-y-auto">
-            <ProjectGroupsPanel
-              activeGroup={activeGroup}
-              onGroupChange={setActiveGroup}
-              onSuccess={toast.success}
-              onError={toast.error}
-            />
-          </aside>
-        )}
+      <ProjectProvider value={projectActions}>
+        <div className="flex flex-1 overflow-hidden">
+          {/* Sidebar */}
+          {showSidebar && (
+            <aside className="w-56 shrink-0 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 p-4 overflow-y-auto">
+              <ProjectGroupsPanel
+                activeGroup={activeGroup}
+                onGroupChange={setActiveGroup}
+                onSuccess={toast.success}
+                onError={toast.error}
+              />
+            </aside>
+          )}
 
         {/* Main area: toolbar + content */}
         <div className="flex-1 flex flex-col overflow-hidden">
@@ -224,7 +238,7 @@ export default function App() {
             />
           </main>
         </div>
-      </div>
+      </ProjectProvider>
 
       <AddProjectDialog
         open={dialogOpen}

@@ -3,10 +3,6 @@ import type { ProjectDetail } from "../lib/types";
 
 interface DashboardViewProps {
   projects: ProjectDetail[];
-  onSwitchBranch: (path: string, branch: string) => Promise<ProjectDetail>;
-  onRefresh: (path: string) => Promise<ProjectDetail>;
-  onSuccess: (msg: string) => void;
-  onError: (msg: string) => void;
 }
 
 export const DashboardView = memo(function DashboardView({ projects }: DashboardViewProps) {

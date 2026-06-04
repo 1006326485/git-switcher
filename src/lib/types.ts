@@ -71,15 +71,6 @@ export interface Group {
   created_at: string;
 }
 
-export interface ProjectRowCallbacks {
-  onSwitchBranch: (path: string, branch: string) => Promise<ProjectDetail>;
-  onRefresh: (path: string) => Promise<ProjectDetail>;
-  onRemove: (id: string) => Promise<void>;
-  onSuccess: (msg: string) => void;
-  onError: (msg: string) => void;
-  onInfo?: (msg: string) => void;
-}
-
 export type FileStatus = "modified" | "deleted" | "untracked" | "renamed";
 
 export interface GitFileEntry {
