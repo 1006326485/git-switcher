@@ -68,6 +68,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::fetch_all,
             commands::pull_all,
             commands::cancel_git_op,
+            // Tag management
+            commands::git_list_tags,
+            commands::git_create_tag,
+            commands::git_delete_tag,
             // Groups
             commands::create_group,
             commands::list_groups,

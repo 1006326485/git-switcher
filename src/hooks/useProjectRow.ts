@@ -17,6 +17,7 @@ export function useProjectRow({ detail, onSwitchBranch, onRefresh, onRemove }: U
   const [logOpen, setLogOpen] = useState(false);
   const [branchMgrOpen, setBranchMgrOpen] = useState(false);
   const [aiReviewOpen, setAiReviewOpen] = useState(false);
+  const [tagMgrOpen, setTagMgrOpen] = useState(false);
 
   const handleSwitch = useCallback(
     async (branch: string) => {
@@ -58,6 +59,8 @@ export function useProjectRow({ detail, onSwitchBranch, onRefresh, onRemove }: U
   const handleCloseBranchMgr = useCallback(() => setBranchMgrOpen(false), []);
   const handleOpenAiReview = useCallback(() => setAiReviewOpen(true), []);
   const handleCloseAiReview = useCallback(() => setAiReviewOpen(false), []);
+  const handleOpenTagMgr = useCallback(() => setTagMgrOpen(true), []);
+  const handleCloseTagMgr = useCallback(() => setTagMgrOpen(false), []);
   const handleRemove = useCallback(async () => {
     try {
       await onRemove(project.id);
@@ -74,6 +77,7 @@ export function useProjectRow({ detail, onSwitchBranch, onRefresh, onRemove }: U
     logOpen,
     branchMgrOpen,
     aiReviewOpen,
+    tagMgrOpen,
     handleSwitch,
     handleRefresh,
     handleGitRefresh,
@@ -83,6 +87,8 @@ export function useProjectRow({ detail, onSwitchBranch, onRefresh, onRemove }: U
     handleCloseBranchMgr,
     handleOpenAiReview,
     handleCloseAiReview,
+    handleOpenTagMgr,
+    handleCloseTagMgr,
     handleRemove,
   };
 }

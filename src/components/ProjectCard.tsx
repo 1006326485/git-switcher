@@ -6,6 +6,7 @@ import { BranchDropdown } from "./BranchDropdown";
 import { GitOpsPanel } from "./GitOpsPanel";
 import { GitLogViewer } from "./GitLogViewer";
 import { BranchManager } from "./BranchManager";
+import { TagManager } from "./TagManager";
 import { AiReviewDialog } from "./AiReviewDialog";
 import { ProjectContextMenu } from "./ProjectContextMenu";
 import { GroupAssignDropdown } from "./ProjectGroupsPanel";
@@ -41,11 +42,12 @@ export const ProjectCard = memo(function ProjectCard({
 
   const {
     switching, refreshing, error,
-    logOpen, branchMgrOpen, aiReviewOpen,
+    logOpen, branchMgrOpen, aiReviewOpen, tagMgrOpen,
     handleSwitch, handleRefresh, handleGitRefresh,
     handleOpenLog, handleCloseLog,
     handleOpenBranchMgr, handleCloseBranchMgr,
     handleOpenAiReview, handleCloseAiReview,
+    handleOpenTagMgr, handleCloseTagMgr,
     handleRemove,
   } = useProjectRow({ detail, onSwitchBranch, onRefresh, onRemove });
 
@@ -154,6 +156,7 @@ export const ProjectCard = memo(function ProjectCard({
           onSuccess={onSuccess}
           onError={onError}
           onOpenBranchManager={handleOpenBranchMgr}
+          onOpenTagManager={handleOpenTagMgr}
           onOpenLogViewer={handleOpenLog}
           onOpenAiReview={handleOpenAiReview}
         />
@@ -206,6 +209,15 @@ export const ProjectCard = memo(function ProjectCard({
           open
           onClose={handleCloseBranchMgr}
           onRefresh={handleGitRefresh}
+          onSuccess={onSuccess}
+          onError={onError}
+        />
+      )}
+      {tagMgrOpen && (
+        <TagManager
+          path={project.path}
+          open
+          onClose={handleCloseTagMgr}
           onSuccess={onSuccess}
           onError={onError}
         />

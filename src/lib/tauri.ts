@@ -9,6 +9,7 @@ import type {
   MergeResult,
   ReviewResult,
   StashInfo,
+  TagInfo,
 } from "./types";
 
 // ── Projects ────────────────────────────────────────────────────────────
@@ -115,6 +116,20 @@ export async function deleteBranch(path: string, name: string): Promise<void> {
 
 export async function mergeBranch(path: string, branch: string): Promise<MergeResult> {
   return invoke("merge_branch", { path, branch });
+}
+
+// ── Tag Management ─────────────────────────────────────────────────────
+
+export async function gitListTags(path: string): Promise<TagInfo[]> {
+  return invoke("git_list_tags", { path });
+}
+
+export async function gitCreateTag(path: string, name: string, message?: string): Promise<void> {
+  return invoke("git_create_tag", { path, name, message: message ?? null });
+}
+
+export async function gitDeleteTag(path: string, name: string): Promise<void> {
+  return invoke("git_delete_tag", { path, name });
 }
 
 // ── Batch Operations ────────────────────────────────────────────────────

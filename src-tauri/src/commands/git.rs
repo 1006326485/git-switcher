@@ -2,7 +2,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::AppError;
 use crate::db::Database;
-use crate::models::{BatchResult, BranchInfo, CommitInfo, GitFileEntry, GitStatus, MergeResult, ProjectDetail, StashInfo};
+use crate::models::{BatchResult, BranchInfo, CommitInfo, GitFileEntry, GitStatus, MergeResult, ProjectDetail, StashInfo, TagInfo};
 use crate::services::GitService;
 
 use super::{emit_op_done, emit_op_error, emit_op_start, next_op_id, try_update_activity};
@@ -332,6 +332,29 @@ pub async fn git_stash_drop(path: String, index: usize, app: AppHandle) -> Resul
         Err(e) => emit_op_error(&app_clone, op_id, "stash_drop", &path, &e.to_string()),
     }
     result
+}
+
+// ── Tag management ─────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn git_list_tags(path: String) -> Result<Vec<TagInfo>, AppError> {
+    tokio::task::spawn_blocking(move || GitService::list_tags(&path))
+        .await
+        .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
+}
+
+#[tauri::command]
+pub async fn git_create_tag(path: String, name: String, message: Option<String>) -> Result<(), AppError> {
+    tokio::task::spawn_blocking(move || GitService::create_tag(&path, &name, message.as_deref(), None))
+        .await
+        .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
+}
+
+#[tauri::command]
+pub async fn git_delete_tag(path: String, name: String) -> Result<(), AppError> {
+    tokio::task::spawn_blocking(move || GitService::delete_tag(&path, &name))
+        .await
+        .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
 }
 
 // ── Batch operations: non-blocking, results stream via events ──────────
