@@ -117,6 +117,14 @@ export async function mergeBranch(path: string, branch: string): Promise<MergeRe
   return invoke("merge_branch", { path, branch });
 }
 
+export async function gitCherryPick(path: string, commitHash: string): Promise<MergeResult> {
+  return invoke("git_cherry_pick", { path, commitHash });
+}
+
+export async function gitRebase(path: string, ontoBranch: string): Promise<string> {
+  return invoke("git_rebase", { path, ontoBranch });
+}
+
 // ── Batch Operations ────────────────────────────────────────────────────
 
 export async function fetchAll(groupId?: string): Promise<void> {

@@ -64,6 +64,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::create_branch,
             commands::delete_branch,
             commands::merge_branch,
+            commands::git_cherry_pick,
+            commands::git_rebase,
             // Batch operations
             commands::fetch_all,
             commands::pull_all,

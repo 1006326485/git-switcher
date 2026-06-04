@@ -218,6 +218,51 @@ pub async fn merge_branch(path: String, branch: String, app: AppHandle) -> Resul
     result
 }
 
+#[tauri::command]
+pub async fn git_cherry_pick(path: String, commit_hash: String, app: AppHandle) -> Result<MergeResult, AppError> {
+    let op_id = next_op_id();
+    emit_op_start(&app, op_id, "cherry_pick", &path);
+
+    let path_clone = path.clone();
+    let commit_clone = commit_hash.clone();
+    let app_clone = app.clone();
+
+    let result = tokio::task::spawn_blocking(move || -> Result<MergeResult, AppError> {
+        GitService::cherry_pick(&path_clone, &commit_clone)
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?;
+
+    match &result {
+        Ok(r) if r.success => emit_op_done(&app_clone, op_id, "cherry_pick", &path),
+        Ok(r) => emit_op_error(&app_clone, op_id, "cherry_pick", &path, &r.message),
+        Err(e) => emit_op_error(&app_clone, op_id, "cherry_pick", &path, &e.to_string()),
+    }
+    result
+}
+
+#[tauri::command]
+pub async fn git_rebase(path: String, onto_branch: String, app: AppHandle) -> Result<String, AppError> {
+    let op_id = next_op_id();
+    emit_op_start(&app, op_id, "rebase", &path);
+
+    let path_clone = path.clone();
+    let branch_clone = onto_branch.clone();
+    let app_clone = app.clone();
+
+    let result = tokio::task::spawn_blocking(move || -> Result<String, AppError> {
+        GitService::rebase(&path_clone, &branch_clone)
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?;
+
+    match &result {
+        Ok(_) => emit_op_done(&app_clone, op_id, "rebase", &path),
+        Err(e) => emit_op_error(&app_clone, op_id, "rebase", &path, &e.to_string()),
+    }
+    result
+}
+
 // ── Network operations (async via spawn_blocking + CLI subprocess) ────
 
 #[tauri::command]

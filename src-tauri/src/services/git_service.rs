@@ -16,6 +16,41 @@ impl GitService {
             .map_err(|e| AppError::Git(format!("Failed to create signature: {}", e)))
     }
 
+    /// Collect conflicting file paths from the index.
+    fn collect_conflicts(index: &mut git2::Index) -> Result<Vec<String>, AppError> {
+        let mut conflicts = Vec::new();
+        let entries: Vec<_> = index.conflicts()
+            .map_err(|e| AppError::Git(format!("Failed to get conflicts: {}", e)))?
+            .filter_map(|c| c.map_err(|e| log::warn!("skipping corrupt conflict entry: {}", e)).ok())
+            .collect();
+        for entry in &entries {
+            if let Some(our) = &entry.our {
+                let path = String::from_utf8_lossy(&our.path).to_string();
+                if !conflicts.contains(&path) {
+                    conflicts.push(path);
+                }
+            } else if let Some(their) = &entry.their {
+                let path = String::from_utf8_lossy(&their.path).to_string();
+                if !conflicts.contains(&path) {
+                    conflicts.push(path);
+                }
+            }
+        }
+        Ok(conflicts)
+    }
+
+    /// Reset the repo to HEAD and clean up merge/cherry-pick state.
+    fn abort_to_head(repo: &Repository) {
+        if let Ok(head) = repo.head() {
+            if let Some(oid) = head.target() {
+                if let Ok(obj) = repo.find_object(oid, Some(git2::ObjectType::Commit)) {
+                    let _ = repo.reset(&obj, git2::ResetType::Hard, None);
+                }
+            }
+        }
+        let _ = repo.cleanup_state();
+    }
+
     pub fn is_git_repo(path: &str) -> bool {
         Repository::open(path).is_ok()
     }
@@ -578,38 +613,10 @@ impl GitService {
             .map_err(|e| AppError::Git(format!("Failed to merge: {}", e)))?;
 
         // Check for conflicts
-        let mut conflicts = Vec::new();
         let mut index = repo.index().map_err(|e| AppError::Git(format!("Failed to get index: {}", e)))?;
         if index.has_conflicts() {
-            let conflict_entries: Vec<_> = index.conflicts()
-                .map_err(|e| AppError::Git(format!("Failed to get conflicts: {}", e)))?
-                .filter_map(|c| c.map_err(|e| log::warn!("skipping corrupt conflict entry: {}", e)).ok())
-                .collect();
-            for entry in &conflict_entries {
-                // Capture both sides — use "our" path as canonical name
-                if let Some(our) = &entry.our {
-                    let path = String::from_utf8_lossy(&our.path).to_string();
-                    if !conflicts.contains(&path) {
-                        conflicts.push(path);
-                    }
-                } else if let Some(their) = &entry.their {
-                    let path = String::from_utf8_lossy(&their.path).to_string();
-                    if !conflicts.contains(&path) {
-                        conflicts.push(path);
-                    }
-                }
-            }
-
-            // Abort merge: reset index + working tree to HEAD, clean merge state
-            if let Ok(head) = repo.head() {
-                if let Some(oid) = head.target() {
-                    if let Ok(obj) = repo.find_object(oid, Some(git2::ObjectType::Commit)) {
-                        let _ = repo.reset(&obj, git2::ResetType::Hard, None);
-                    }
-                }
-            }
-            let _ = repo.cleanup_state();
-
+            let conflicts = Self::collect_conflicts(&mut index)?;
+            Self::abort_to_head(&repo);
             return Ok(MergeResult {
                 success: false,
                 message: format!("Merge has {} conflict(s)", conflicts.len()),
@@ -642,15 +649,8 @@ impl GitService {
             Ok(())
         })();
 
-        // Always clean up merge state; abort (reset to HEAD) if commit failed
         if commit_result.is_err() {
-            if let Ok(head) = repo.head() {
-                if let Some(oid) = head.target() {
-                    if let Ok(obj) = repo.find_object(oid, Some(git2::ObjectType::Commit)) {
-                        let _ = repo.reset(&obj, git2::ResetType::Hard, None);
-                    }
-                }
-            }
+            Self::abort_to_head(&repo);
         }
         if let Err(e) = repo.cleanup_state() {
             log::warn!("cleanup_state failed: {}", e);
@@ -663,6 +663,82 @@ impl GitService {
             message: format!("Merged branch '{}'", branch_name),
             conflicts: vec![],
         })
+    }
+
+    // ── Cherry-pick (libgit2) ───────────────────────────────────────────
+
+    pub fn cherry_pick(path: &str, commit_hash: &str) -> Result<MergeResult, AppError> {
+        let repo = Self::open_repo(path)?;
+
+        let oid = git2::Oid::from_str(commit_hash)
+            .map_err(|e| AppError::Git(format!("Invalid commit hash '{}': {}", commit_hash, e)))?;
+        let commit = repo.find_commit(oid)
+            .map_err(|e| AppError::Git(format!("Commit '{}' not found: {}", commit_hash, e)))?;
+
+        let head = repo.head().map_err(|e| AppError::Git(format!("Failed to get HEAD: {}", e)))?;
+        let head_commit = repo.find_commit(head.target().ok_or(AppError::Git("No HEAD target".to_string()))?)
+            .map_err(|e| AppError::Git(format!("Failed to find HEAD commit: {}", e)))?;
+
+        repo.cherrypick_commit(&commit, &head_commit, 0, None)
+            .map_err(|e| AppError::Git(format!("Cherry-pick failed: {}", e)))?;
+
+        // Check for conflicts
+        let mut index = repo.index().map_err(|e| AppError::Git(format!("Failed to get index: {}", e)))?;
+        if index.has_conflicts() {
+            let conflicts = Self::collect_conflicts(&mut index)?;
+            Self::abort_to_head(&repo);
+            return Ok(MergeResult {
+                success: false,
+                message: format!("Cherry-pick has {} conflict(s)", conflicts.len()),
+                conflicts,
+            });
+        }
+
+        // Commit the cherry-pick — abort on any failure
+        let commit_result = (|| -> Result<(), AppError> {
+            let tree_id = index.write_tree().map_err(|e| AppError::Git(format!("Failed to write tree: {}", e)))?;
+            let tree = repo.find_tree(tree_id).map_err(|e| AppError::Git(format!("Failed to find tree: {}", e)))?;
+
+            let signature = Self::get_signature(&repo)?;
+
+            let head = repo.head().map_err(|e| AppError::Git(format!("Failed to get HEAD: {}", e)))?;
+            let head_commit = repo.find_commit(head.target().ok_or(AppError::Git("No HEAD".to_string()))?)
+                .map_err(|e| AppError::Git(format!("Failed to find HEAD commit: {}", e)))?;
+
+            repo.commit(
+                Some("HEAD"),
+                &signature,
+                &signature,
+                &format!("Cherry-pick {}", commit_hash),
+                &tree,
+                &[&head_commit],
+            ).map_err(|e| AppError::Git(format!("Failed to commit cherry-pick: {}", e)))?;
+
+            Ok(())
+        })();
+
+        if commit_result.is_err() {
+            Self::abort_to_head(&repo);
+        }
+        if let Err(e) = repo.cleanup_state() {
+            log::warn!("cleanup_state failed: {}", e);
+        }
+
+        commit_result?;
+
+        Ok(MergeResult {
+            success: true,
+            message: format!("Cherry-picked commit {}", &commit_hash[..std::cmp::min(8, commit_hash.len())]),
+            conflicts: vec![],
+        })
+    }
+
+    // ── Rebase (CLI) ────────────────────────────────────────────────────
+
+    pub fn rebase(path: &str, onto_branch: &str) -> Result<String, AppError> {
+        let mut cmd = Self::git_cmd(path);
+        cmd.args(["rebase", onto_branch]);
+        Self::run_with_timeout(cmd, 120)
     }
 
     // ── Git Log ─────────────────────────────────────────────────────────
