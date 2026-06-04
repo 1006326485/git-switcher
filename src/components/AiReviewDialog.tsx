@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef, memo } from "react";
+import { listen } from "@tauri-apps/api/event";
 import type { BranchInfo, ReviewResult } from "../lib/types";
 import * as api from "../lib/tauri";
 import { Modal, Tabs } from "./ui/primitives";
@@ -38,8 +39,11 @@ export const AiReviewDialog = memo(function AiReviewDialog({
   const [baseBranch, setBaseBranch] = useState("main");
   const [headBranch, setHeadBranch] = useState(currentBranch);
   const [loading, setLoading] = useState(false);
+  const [streamingText, setStreamingText] = useState("");
+  const [isStreaming, setIsStreaming] = useState(false);
   const [result, setResult] = useState<ReviewResult | null>(null);
   const mountedRef = useRef(true);
+  const unlistenRef = useRef<(() => void) | null>(null);
 
   // History state
   const [history, setHistory] = useState<ReviewResult[]>([]);
@@ -51,6 +55,16 @@ export const AiReviewDialog = memo(function AiReviewDialog({
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+    };
+  }, []);
+
+  // Clean up listener on unmount
+  useEffect(() => {
+    return () => {
+      if (unlistenRef.current) {
+        unlistenRef.current();
+        unlistenRef.current = null;
+      }
     };
   }, []);
 
@@ -97,18 +111,37 @@ export const AiReviewDialog = memo(function AiReviewDialog({
     }
     setLoading(true);
     setResult(null);
+    setStreamingText("");
+    setIsStreaming(true);
+
+    // Set up SSE chunk listener
+    if (unlistenRef.current) {
+      unlistenRef.current();
+    }
+    unlistenRef.current = await listen<string>("ai-review-chunk", (event) => {
+      if (mountedRef.current) {
+        setStreamingText((prev) => prev + event.payload);
+      }
+    });
+
     try {
-      const res = await api.aiReview(projectPath, baseBranch, headBranch);
+      const res = await api.aiReviewStreaming(projectPath, baseBranch, headBranch);
       if (mountedRef.current) {
         setResult(res);
+        setIsStreaming(false);
         onSuccess(`Review complete`);
       }
     } catch (e) {
       if (mountedRef.current) {
         onError(errorMessage(e) || "Review failed (check terminal for details)");
+        setIsStreaming(false);
       }
     } finally {
       if (mountedRef.current) setLoading(false);
+      if (unlistenRef.current) {
+        unlistenRef.current();
+        unlistenRef.current = null;
+      }
     }
   }, [projectPath, baseBranch, headBranch, onSuccess, onError]);
 
@@ -222,17 +255,29 @@ export const AiReviewDialog = memo(function AiReviewDialog({
             </button>
           </div>
 
-          {/* Loading state */}
-          {loading && (
+          {/* Loading / Streaming state */}
+          {loading && !isStreaming && (
             <div className="flex flex-col items-center justify-center py-12 text-gray-500 dark:text-gray-400">
               <div className="animate-spin text-3xl mb-3">&#x21BB;</div>
               <div className="text-sm font-medium">Analyzing code with AI...</div>
-              <div className="text-xs mt-1">This may take 30-60 seconds</div>
+              <div className="text-xs mt-1">Connecting to LLM...</div>
+            </div>
+          )}
+
+          {isStreaming && streamingText && (
+            <div className="relative">
+              <div className="absolute top-0 right-0 flex items-center gap-1.5 px-2 py-1 text-xs text-blue-500 dark:text-blue-400">
+                <span className="animate-pulse">&#x25CF;</span>
+                Streaming...
+              </div>
+              <div className="max-h-[60vh] overflow-y-auto pr-1 pt-6">
+                <MarkdownViewer content={streamingText} />
+              </div>
             </div>
           )}
 
           {/* Results */}
-          {result && (
+          {result && !isStreaming && (
             <div>
               {/* Meta bar */}
               <div className="flex items-center gap-3 mb-4 pb-3 border-b border-gray-200 dark:border-gray-700">
