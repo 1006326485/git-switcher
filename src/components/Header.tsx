@@ -20,6 +20,7 @@ interface HeaderProps {
   batchLoading: string | null;
   onFetchAll: () => void;
   onPullAll: () => void;
+  onPushAll: () => void;
 }
 
 const viewOptions: { value: ViewMode; icon: string; label: string }[] = [
@@ -53,6 +54,7 @@ export const Header = memo(function Header({
   batchLoading,
   onFetchAll,
   onPullAll,
+  onPushAll,
 }: HeaderProps) {
   return (
     <div className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-4 select-none shrink-0">
@@ -165,6 +167,7 @@ export const Header = memo(function Header({
                 batchLoading={batchLoading}
                 onFetchAll={onFetchAll}
                 onPullAll={onPullAll}
+                onPushAll={onPushAll}
               />
             </div>
             <div className="border-t border-gray-100 dark:border-gray-700 my-1" />

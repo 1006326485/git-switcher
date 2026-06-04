@@ -26,7 +26,8 @@ export function useBatchOps(toast: ToastApi, onRefreshAll: () => void, activeGro
     const unlistenDone = listen<string>("batch-done", (event) => {
       const op = event.payload;
       setLoading(null);
-      const label = op === "fetch" ? "Fetch" : op === "pull" ? "Pull" : op;
+      const labels: Record<string, string> = { fetch: "Fetch", pull: "Pull", push: "Push" };
+      const label = labels[op] ?? op;
       if (failedCount > 0) {
         callbacksRef.current.toast.error(`${label} completed with ${failedCount} failure(s)`);
       } else {
@@ -74,5 +75,16 @@ export function useBatchOps(toast: ToastApi, onRefreshAll: () => void, activeGro
     }
   }, [loading]);
 
-  return { batchLoading: loading, fetchAll, pullAll };
+  const pushAll = useCallback(async () => {
+    if (loading) return;
+    setLoading("push");
+    try {
+      await api.pushAll(groupRef.current ?? undefined);
+    } catch (e) {
+      callbacksRef.current.toast.error(String(e));
+      setLoading(null);
+    }
+  }, [loading]);
+
+  return { batchLoading: loading, fetchAll, pullAll, pushAll };
 }

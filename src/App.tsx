@@ -51,7 +51,7 @@ export default function App() {
     updateAlias,
   } = useProjects(toast, activeGroup);
 
-  const { batchLoading, fetchAll, pullAll } = useBatchOps(toast, refreshAll, activeGroup);
+  const { batchLoading, fetchAll, pullAll, pushAll } = useBatchOps(toast, refreshAll, activeGroup);
 
   const { viewMode, setViewMode } = useAppSettings(
     useCallback((msg: string) => toastRef.current.error(msg), [])
@@ -203,6 +203,7 @@ export default function App() {
             batchLoading={batchLoading}
             onFetchAll={fetchAll}
             onPullAll={pullAll}
+            onPushAll={pushAll}
           />
 
           {/* Main content */}

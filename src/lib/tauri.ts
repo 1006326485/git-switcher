@@ -52,8 +52,28 @@ export async function refreshProject(path: string): Promise<ProjectDetail> {
   return invoke("refresh_project", { path });
 }
 
-export async function gitGetLog(path: string, limit?: number, offset?: number): Promise<CommitInfo[]> {
-  return invoke("git_get_log", { path, limit, offset });
+export interface GitLogFilters {
+  author?: string;
+  message_contains?: string;
+  since?: number;
+  until?: number;
+}
+
+export async function gitGetLog(
+  path: string,
+  limit?: number,
+  offset?: number,
+  filters?: GitLogFilters,
+): Promise<CommitInfo[]> {
+  return invoke("git_get_log", {
+    path,
+    limit,
+    offset,
+    author: filters?.author ?? null,
+    message_contains: filters?.message_contains ?? null,
+    since: filters?.since ?? null,
+    until: filters?.until ?? null,
+  });
 }
 
 export async function gitGetFiles(path: string): Promise<GitFileEntry[]> {
@@ -172,18 +192,8 @@ export async function pullAll(groupId?: string): Promise<void> {
   return invoke("pull_all", { groupId: groupId ?? null });
 }
 
-// ── Stash ─────────────────────────────────────────────────────────────────
-
-export async function getStashList(path: string): Promise<StashInfo[]> {
-  return invoke("get_stash_list", { path });
-}
-
-export async function stashPopAt(path: string, index: number): Promise<string> {
-  return invoke("stash_pop_at", { path, index });
-}
-
-export async function stashDrop(path: string, index: number): Promise<void> {
-  return invoke("stash_drop", { path, index });
+export async function pushAll(groupId?: string): Promise<void> {
+  return invoke("push_all", { groupId: groupId ?? null });
 }
 
 // ── Diff ──────────────────────────────────────────────────────────────────

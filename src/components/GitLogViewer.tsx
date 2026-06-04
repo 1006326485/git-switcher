@@ -19,38 +19,77 @@ export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open
   const [error, setError] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
 
+  // Filter state
+  const [authorFilter, setAuthorFilter] = useState("");
+  const [messageFilter, setMessageFilter] = useState("");
+  const [sinceFilter, setSinceFilter] = useState("");
+  const [untilFilter, setUntilFilter] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
+
+  const buildFilters = useCallback((): api.GitLogFilters => {
+    const filters: api.GitLogFilters = {};
+    if (authorFilter.trim()) filters.author = authorFilter.trim();
+    if (messageFilter.trim()) filters.message_contains = messageFilter.trim();
+    if (sinceFilter) filters.since = Math.floor(new Date(sinceFilter).getTime() / 1000);
+    if (untilFilter) filters.until = Math.floor(new Date(untilFilter).getTime() / 1000);
+    return filters;
+  }, [authorFilter, messageFilter, sinceFilter, untilFilter]);
+
+  const fetchLogs = useCallback(
+    async (offset: number, append: boolean, filters: api.GitLogFilters) => {
+      const data = await api.gitGetLog(path, LIMIT, offset, filters);
+      if (append) {
+        setCommits((prev) => [...prev, ...data]);
+      } else {
+        setCommits(data);
+      }
+      setHasMore(data.length >= LIMIT);
+    },
+    [path],
+  );
+
+  // Initial load when modal opens
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
     setLoading(true);
     setError(null);
     setHasMore(true);
-    api
-      .gitGetLog(path, LIMIT, 0)
-      .then((data) => {
-        if (!cancelled) {
-          setCommits(data);
-          setHasMore(data.length >= LIMIT);
-        }
-      })
+    fetchLogs(0, false, {})
       .catch((e) => { if (!cancelled) setError(String(e)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [open, path]);
+  }, [open, path, fetchLogs]);
+
+  const handleApplyFilters = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    setHasMore(true);
+    fetchLogs(0, false, buildFilters())
+      .catch((e) => setError(String(e)))
+      .finally(() => setLoading(false));
+  }, [fetchLogs, buildFilters]);
 
   const handleLoadMore = useCallback(async () => {
     if (loadingMore || !hasMore) return;
     setLoadingMore(true);
     try {
-      const more = await api.gitGetLog(path, LIMIT, commits.length);
-      setCommits((prev) => [...prev, ...more]);
-      setHasMore(more.length >= LIMIT);
+      await fetchLogs(commits.length, true, buildFilters());
     } catch (e) {
       setError(String(e));
     } finally {
       setLoadingMore(false);
     }
-  }, [path, commits.length, loadingMore, hasMore]);
+  }, [commits.length, loadingMore, hasMore, fetchLogs, buildFilters]);
+
+  const handleClearFilters = useCallback(() => {
+    setAuthorFilter("");
+    setMessageFilter("");
+    setSinceFilter("");
+    setUntilFilter("");
+  }, []);
+
+  const hasActiveFilters = authorFilter.trim() || messageFilter.trim() || sinceFilter || untilFilter;
 
   const formatDate = useCallback((ts: number) => {
     const d = new Date(ts * 1000);
@@ -71,6 +110,82 @@ export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open
       subtitle={projectName}
       maxWidth="max-w-2xl"
     >
+      {/* Filter toggle */}
+      <div className="px-6 pb-2 flex items-center gap-2">
+        <button
+          onClick={() => setShowFilters(!showFilters)}
+          className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+            showFilters || hasActiveFilters
+              ? "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
+              : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600"
+          }`}
+        >
+          {hasActiveFilters ? "Filters (active)" : "Filters"}
+        </button>
+      </div>
+
+      {/* Filter inputs */}
+      {showFilters && (
+        <div className="px-6 pb-3 space-y-2 border-b border-gray-100 dark:border-gray-700/50">
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Author</label>
+              <input
+                type="text"
+                value={authorFilter}
+                onChange={(e) => setAuthorFilter(e.target.value)}
+                placeholder="Filter by author..."
+                className="w-full px-2.5 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Message</label>
+              <input
+                type="text"
+                value={messageFilter}
+                onChange={(e) => setMessageFilter(e.target.value)}
+                placeholder="Search in messages..."
+                className="w-full px-2.5 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Since</label>
+              <input
+                type="date"
+                value={sinceFilter}
+                onChange={(e) => setSinceFilter(e.target.value)}
+                className="w-full px-2.5 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Until</label>
+              <input
+                type="date"
+                value={untilFilter}
+                onChange={(e) => setUntilFilter(e.target.value)}
+                className="w-full px-2.5 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={handleApplyFilters}
+              className="px-3 py-1.5 rounded-md text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+            >
+              Apply
+            </button>
+            {hasActiveFilters && (
+              <button
+                onClick={handleClearFilters}
+                className="px-3 py-1.5 rounded-md text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="max-h-[60vh] overflow-y-auto" role="region" aria-label="Commit history">
         {loading ? (
           <div className="flex items-center justify-center h-32 text-gray-500">
@@ -82,7 +197,7 @@ export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open
           </div>
         ) : commits.length === 0 ? (
           <div className="flex items-center justify-center h-32 text-gray-500">
-            No commits yet
+            {hasActiveFilters ? "No commits match the filters" : "No commits yet"}
           </div>
         ) : (
           <>
