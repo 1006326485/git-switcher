@@ -1,13 +1,14 @@
+use r2d2::Pool;
+use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{Connection, params};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 
 use crate::AppError;
-use crate::models::{GitProject, Group};
+use crate::models::{GitProject, Group, ReviewResult};
 
 #[derive(Clone)]
 pub struct Database {
-    conn: Arc<Mutex<Connection>>,
+    pool: Pool<SqliteConnectionManager>,
 }
 
 impl Database {
@@ -15,7 +16,10 @@ impl Database {
     where
         F: FnOnce(&Connection) -> Result<T, AppError>,
     {
-        let conn = self.conn.lock().map_err(|e| AppError::Other(format!("Lock poisoned: {}", e)))?;
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| AppError::Other(format!("Failed to get connection: {}", e)))?;
         f(&conn)
     }
 
@@ -23,15 +27,29 @@ impl Database {
         std::fs::create_dir_all(app_data_dir)?;
 
         let db_path = app_data_dir.join("git-switcher.db");
-        let conn = Connection::open(&db_path)
-            .map_err(|e| AppError::Database(format!("Failed to open database: {}", e)))?;
+        let manager = SqliteConnectionManager::file(&db_path);
+        let pool = Pool::builder()
+            .max_size(5)
+            .build(manager)
+            .map_err(|e| AppError::Database(format!("Failed to create pool: {}", e)))?;
 
-        conn.execute_batch(
-            "PRAGMA foreign_keys = ON;
-             PRAGMA journal_mode = WAL;
-             PRAGMA busy_timeout = 5000;"
-        ).map_err(|e| AppError::Database(format!("Failed to set PRAGMA: {}", e)))?;
+        // Configure pragmas on a connection
+        {
+            let conn = pool
+                .get()
+                .map_err(|e| AppError::Database(format!("Failed to get connection: {}", e)))?;
+            conn.execute_batch(
+                "PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;",
+            )
+            .map_err(|e| AppError::Database(format!("Failed to set PRAGMA: {}", e)))?;
 
+            Self::run_migrations(&conn)?;
+        }
+
+        Ok(Self { pool })
+    }
+
+    fn run_migrations(conn: &Connection) -> Result<(), AppError> {
         // Step 1: Create tables with original columns (safe for both fresh and existing DBs)
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS groups (
@@ -57,7 +75,19 @@ impl Database {
                 PRIMARY KEY (project_id, group_id),
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
                 FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE
-            );"
+            );
+
+            CREATE TABLE IF NOT EXISTS reviews (
+                id              TEXT PRIMARY KEY,
+                project_path    TEXT NOT NULL,
+                base_branch     TEXT NOT NULL,
+                head_branch     TEXT NOT NULL,
+                summary         TEXT NOT NULL,
+                findings_json   TEXT NOT NULL DEFAULT '[]',
+                stats_json      TEXT NOT NULL DEFAULT '{}',
+                model           TEXT,
+                created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+            );",
         )
         .map_err(|e| AppError::Database(format!("Failed to create tables: {}", e)))?;
 
@@ -82,10 +112,7 @@ impl Database {
         }
 
         // Step 2b: Add group_id column to projects (for single-select group model)
-        let result = conn.execute(
-            "ALTER TABLE projects ADD COLUMN group_id TEXT",
-            [],
-        );
+        let result = conn.execute("ALTER TABLE projects ADD COLUMN group_id TEXT", []);
         if let Err(e) = result {
             let msg = e.to_string();
             if !msg.contains("duplicate column") {
@@ -103,31 +130,43 @@ impl Database {
                 ORDER BY g.sort_order, g.name LIMIT 1
             ) WHERE group_id IS NULL",
             [],
-        ).map_err(|e| AppError::Database(format!("Failed to migrate project groups: {}", e)))?;
+        )
+        .map_err(|e| AppError::Database(format!("Failed to migrate project groups: {}", e)))?;
 
         // Ensure a "Default" group exists for ungrouped projects
         let has_groups: bool = conn
-            .query_row("SELECT EXISTS(SELECT 1 FROM groups LIMIT 1)", [], |row| row.get(0))
+            .query_row("SELECT EXISTS(SELECT 1 FROM groups LIMIT 1)", [], |row| {
+                row.get(0)
+            })
             .unwrap_or(false);
         if !has_groups {
             conn.execute(
                 "INSERT INTO groups (id, name, color, sort_order, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![uuid::Uuid::new_v4().to_string(), "Default", "#6B7280", 0, chrono::Utc::now().to_rfc3339()],
-            ).map_err(|e| AppError::Database(format!("Failed to create default group: {}", e)))?;
+                params![
+                    uuid::Uuid::new_v4().to_string(),
+                    "Default",
+                    "#6B7280",
+                    0,
+                    chrono::Utc::now().to_rfc3339()
+                ],
+            )
+            .map_err(|e| AppError::Database(format!("Failed to create default group: {}", e)))?;
         }
 
         // Assign remaining ungrouped projects to the first group
         conn.execute(
             "UPDATE projects SET group_id = (SELECT id FROM groups ORDER BY sort_order, name LIMIT 1) WHERE group_id IS NULL",
             [],
-        ).map_err(|e| AppError::Database(format!("Failed to assign default group: {}", e)))?;
+        )
+        .map_err(|e| AppError::Database(format!("Failed to assign default group: {}", e)))?;
 
         // Fix orphaned projects: group_id references a non-existent group
         conn.execute(
             "UPDATE projects SET group_id = (SELECT id FROM groups ORDER BY sort_order, name LIMIT 1)
              WHERE group_id NOT IN (SELECT id FROM groups)",
             [],
-        ).map_err(|e| AppError::Database(format!("Failed to fix orphaned projects: {}", e)))?;
+        )
+        .map_err(|e| AppError::Database(format!("Failed to fix orphaned projects: {}", e)))?;
 
         // Drop the junction table
         conn.execute("DROP TABLE IF EXISTS project_groups", [])
@@ -138,13 +177,12 @@ impl Database {
             "CREATE INDEX IF NOT EXISTS idx_projects_sort ON projects(sort_order);
              CREATE INDEX IF NOT EXISTS idx_projects_path ON projects(path);
              CREATE INDEX IF NOT EXISTS idx_groups_sort ON groups(sort_order);
-             CREATE INDEX IF NOT EXISTS idx_projects_group ON projects(group_id);"
+             CREATE INDEX IF NOT EXISTS idx_projects_group ON projects(group_id);
+             CREATE INDEX IF NOT EXISTS idx_reviews_project ON reviews(project_path);",
         )
         .map_err(|e| AppError::Database(format!("Failed to create indexes: {}", e)))?;
 
-        Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
-        })
+        Ok(())
     }
 
     // ── Row mappers ─────────────────────────────────────────────────────
@@ -182,8 +220,14 @@ impl Database {
                 "INSERT INTO projects (id, name, path, alias, sort_order, group_id, created_at, updated_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 params![
-                    project.id, project.name, project.path, project.alias,
-                    project.sort_order, project.group_id, project.created_at, project.updated_at,
+                    project.id,
+                    project.name,
+                    project.path,
+                    project.alias,
+                    project.sort_order,
+                    project.group_id,
+                    project.created_at,
+                    project.updated_at,
                 ],
             )
             .map_err(|e| AppError::Database(format!("Failed to insert project: {}", e)))?;
@@ -200,7 +244,10 @@ impl Database {
             let projects = stmt
                 .query_map([], |row| Self::row_to_project(row))
                 .map_err(|e| AppError::Database(format!("Failed to query projects: {}", e)))?
-                .filter_map(|r| r.map_err(|e| log::warn!("skipping corrupt project row: {}", e)).ok())
+                .filter_map(|r| {
+                    r.map_err(|e| log::warn!("skipping corrupt project row: {}", e))
+                        .ok()
+                })
                 .collect();
 
             Ok(projects)
@@ -266,8 +313,12 @@ impl Database {
     }
 
     pub fn reorder_projects(&self, ordered_ids: &[String]) -> Result<(), AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Other(format!("Lock poisoned: {}", e)))?;
-        conn.execute("BEGIN", []).map_err(|e| AppError::Database(format!("Failed to begin transaction: {}", e)))?;
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| AppError::Other(format!("Failed to get connection: {}", e)))?;
+        conn.execute("BEGIN", [])
+            .map_err(|e| AppError::Database(format!("Failed to begin transaction: {}", e)))?;
         let result = (|| -> Result<(), AppError> {
             for (i, id) in ordered_ids.iter().enumerate() {
                 conn.execute(
@@ -279,7 +330,8 @@ impl Database {
             Ok(())
         })();
         if result.is_ok() {
-            conn.execute("COMMIT", []).map_err(|e| AppError::Database(format!("Failed to commit: {}", e)))?;
+            conn.execute("COMMIT", [])
+                .map_err(|e| AppError::Database(format!("Failed to commit: {}", e)))?;
         } else {
             if let Err(e) = conn.execute("ROLLBACK", []) {
                 log::error!("rollback failed: {}", e);
@@ -310,7 +362,10 @@ impl Database {
             let groups = stmt
                 .query_map([], |row| Self::row_to_group(row))
                 .map_err(|e| AppError::Database(format!("Failed to query groups: {}", e)))?
-                .filter_map(|r| r.map_err(|e| log::warn!("skipping corrupt group row: {}", e)).ok())
+                .filter_map(|r| {
+                    r.map_err(|e| log::warn!("skipping corrupt group row: {}", e))
+                        .ok()
+                })
                 .collect();
 
             Ok(groups)
@@ -408,7 +463,10 @@ impl Database {
             let projects = stmt
                 .query_map(params![group_id], |row| Self::row_to_project(row))
                 .map_err(|e| AppError::Database(format!("Failed to query get_projects_in_group: {}", e)))?
-                .filter_map(|r| r.map_err(|e| log::warn!("skipping corrupt project row: {}", e)).ok())
+                .filter_map(|r| {
+                    r.map_err(|e| log::warn!("skipping corrupt project row: {}", e))
+                        .ok()
+                })
                 .collect();
 
             Ok(projects)
@@ -422,6 +480,90 @@ impl Database {
                 params![new_group_id, old_group_id],
             )
             .map_err(|e| AppError::Database(format!("Failed to reassign group projects: {}", e)))?;
+            Ok(())
+        })
+    }
+
+    // ── Reviews ─────────────────────────────────────────────────────────
+
+    pub fn insert_review(&self, review: &ReviewResult, project_path: &str) -> Result<(), AppError> {
+        self.with_conn(|conn| {
+            let findings_json = serde_json::to_string(&review.findings)
+                .map_err(|e| AppError::Other(format!("Failed to serialize findings: {}", e)))?;
+            let stats_json = serde_json::to_string(&review.stats)
+                .map_err(|e| AppError::Other(format!("Failed to serialize stats: {}", e)))?;
+
+            conn.execute(
+                "INSERT INTO reviews (id, project_path, base_branch, head_branch, summary, findings_json, stats_json, model, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    review.id,
+                    project_path,
+                    review.base_branch,
+                    review.head_branch,
+                    review.summary,
+                    findings_json,
+                    stats_json,
+                    review.model,
+                    review.created_at,
+                ],
+            )
+            .map_err(|e| AppError::Database(format!("Failed to insert review: {}", e)))?;
+            Ok(())
+        })
+    }
+
+    pub fn get_reviews_for_project(&self, project_path: &str) -> Result<Vec<ReviewResult>, AppError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, base_branch, head_branch, summary, findings_json, stats_json, model, created_at
+                     FROM reviews WHERE project_path = ?1 ORDER BY created_at DESC",
+                )
+                .map_err(|e| AppError::Database(format!("Failed to prepare reviews query: {}", e)))?;
+
+            let reviews = stmt
+                .query_map(params![project_path], |row| {
+                    let findings_json: String = row.get(4)?;
+                    let stats_json: String = row.get(5)?;
+
+                    let findings = serde_json::from_str(&findings_json).unwrap_or_default();
+                    let stats = serde_json::from_str(&stats_json).unwrap_or(crate::models::DiffStats {
+                        files_changed: 0,
+                        total_additions: 0,
+                        total_deletions: 0,
+                    });
+
+                    Ok(ReviewResult {
+                        id: row.get(0)?,
+                        base_branch: row.get(1)?,
+                        head_branch: row.get(2)?,
+                        summary: row.get(3)?,
+                        findings,
+                        stats,
+                        model: row.get(6)?,
+                        created_at: row.get(7)?,
+                    })
+                })
+                .map_err(|e| AppError::Database(format!("Failed to query reviews: {}", e)))?
+                .filter_map(|r| {
+                    r.map_err(|e| log::warn!("skipping corrupt review row: {}", e))
+                        .ok()
+                })
+                .collect();
+
+            Ok(reviews)
+        })
+    }
+
+    pub fn delete_review(&self, id: &str) -> Result<(), AppError> {
+        self.with_conn(|conn| {
+            let affected = conn
+                .execute("DELETE FROM reviews WHERE id = ?1", params![id])
+                .map_err(|e| AppError::Database(format!("Failed to delete review: {}", e)))?;
+            if affected == 0 {
+                return Err(AppError::NotFound(format!("Review not found: {}", id)));
+            }
             Ok(())
         })
     }
