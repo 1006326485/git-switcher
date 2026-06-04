@@ -209,3 +209,12 @@ pub struct StashInfo {
     pub message: String,
     pub oid: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagInfo {
+    pub name: String,
+    pub oid: String,
+    pub target_oid: String,
+    pub tagger: Option<String>,
+    pub message: Option<String>,
+}

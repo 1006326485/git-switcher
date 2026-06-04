@@ -141,3 +141,11 @@ export interface StashInfo {
   oid: string;
 }
 
+export interface TagInfo {
+  name: string;
+  oid: string;
+  target_oid: string;
+  tagger: string | null;
+  message: string | null;
+}
+

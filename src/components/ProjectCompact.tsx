@@ -5,6 +5,7 @@ import { BranchDropdown } from "./BranchDropdown";
 import { GitOpsPanel } from "./GitOpsPanel";
 import { GitLogViewer } from "./GitLogViewer";
 import { BranchManager } from "./BranchManager";
+import { TagManager } from "./TagManager";
 import { AiReviewDialog } from "./AiReviewDialog";
 import { ProjectContextMenu } from "./ProjectContextMenu";
 import { GroupAssignDropdown } from "./ProjectGroupsPanel";
@@ -31,6 +32,7 @@ const ProjectCompactRow = memo(function ProjectCompactRow({
     logOpen,
     branchMgrOpen,
     aiReviewOpen,
+    tagMgrOpen,
     handleSwitch,
     handleRefresh,
     handleGitRefresh,
@@ -40,6 +42,8 @@ const ProjectCompactRow = memo(function ProjectCompactRow({
     handleCloseBranchMgr,
     handleOpenAiReview,
     handleCloseAiReview,
+    handleOpenTagMgr,
+    handleCloseTagMgr,
     handleRemove,
   } = useProjectRow({ detail, onSwitchBranch, onRefresh, onRemove });
 
@@ -100,6 +104,7 @@ const ProjectCompactRow = memo(function ProjectCompactRow({
             onSuccess={onSuccess}
             onError={onError}
             onOpenBranchManager={handleOpenBranchMgr}
+            onOpenTagManager={handleOpenTagMgr}
             onOpenLogViewer={handleOpenLog}
             onOpenAiReview={handleOpenAiReview}
           />
@@ -139,6 +144,15 @@ const ProjectCompactRow = memo(function ProjectCompactRow({
           open
           onClose={handleCloseBranchMgr}
           onRefresh={handleGitRefresh}
+          onSuccess={onSuccess}
+          onError={onError}
+        />
+      )}
+      {tagMgrOpen && (
+        <TagManager
+          path={project.path}
+          open
+          onClose={handleCloseTagMgr}
           onSuccess={onSuccess}
           onError={onError}
         />

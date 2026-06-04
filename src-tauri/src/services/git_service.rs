@@ -1,7 +1,7 @@
 use git2::{Repository, Status, StatusOptions, BranchType, build::CheckoutBuilder};
 
 use crate::AppError;
-use crate::models::{BranchInfo, CommitInfo, FileStatus, GitFileEntry, GitStatus, MergeResult, ProjectDetail, GitProject, Group, StashInfo};
+use crate::models::{BranchInfo, CommitInfo, FileStatus, GitFileEntry, GitStatus, MergeResult, ProjectDetail, GitProject, Group, StashInfo, TagInfo};
 
 pub struct GitService;
 
@@ -765,5 +765,71 @@ impl GitService {
             results.push(item);
         }
         results
+    }
+
+    // ── Tag Management ──────────────────────────────────────────────────
+
+    pub fn list_tags(path: &str) -> Result<Vec<TagInfo>, AppError> {
+        let repo = Self::open_repo(path)?;
+        let mut tags = Vec::new();
+
+        repo.tag_foreach(|oid, name_bytes| {
+            let name = match std::str::from_utf8(name_bytes) {
+                Ok(s) => s.strip_prefix("refs/tags/").unwrap_or(s).to_string(),
+                Err(_) => return true, // skip invalid UTF-8
+            };
+
+            let (target_oid, tagger, message) = match repo.find_tag(oid) {
+                Ok(tag) => (
+                    tag.target_id().to_string(),
+                    tag.tagger().map(|sig| {
+                        format!("{} <{}>", sig.name().unwrap_or(""), sig.email().unwrap_or(""))
+                    }),
+                    tag.message().map(|s| s.to_string()),
+                ),
+                Err(_) => {
+                    // Lightweight tag — oid is the target directly
+                    (oid.to_string(), None, None)
+                }
+            };
+
+            tags.push(TagInfo {
+                name,
+                oid: oid.to_string(),
+                target_oid,
+                tagger,
+                message,
+            });
+            true
+        })
+        .map_err(|e| AppError::Git(format!("Failed to list tags: {}", e)))?;
+
+        tags.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(tags)
+    }
+
+    pub fn create_tag(path: &str, name: &str, message: Option<&str>, target_ref: Option<&str>) -> Result<(), AppError> {
+        let repo = Self::open_repo(path)?;
+        let target = repo
+            .revparse_single(target_ref.unwrap_or("HEAD"))
+            .map_err(|e| AppError::Git(format!("Failed to resolve '{}': {}", target_ref.unwrap_or("HEAD"), e)))?;
+
+        if let Some(msg) = message {
+            let signature = Self::get_signature(&repo)?;
+            repo.tag(name, &target, &signature, msg, false)
+                .map_err(|e| AppError::Git(format!("Failed to create tag '{}': {}", name, e)))?;
+        } else {
+            repo.tag_lightweight(name, &target, false)
+                .map_err(|e| AppError::Git(format!("Failed to create tag '{}': {}", name, e)))?;
+        }
+
+        Ok(())
+    }
+
+    pub fn delete_tag(path: &str, name: &str) -> Result<(), AppError> {
+        let repo = Self::open_repo(path)?;
+        repo.tag_delete(name)
+            .map_err(|e| AppError::Git(format!("Failed to delete tag '{}': {}", name, e)))?;
+        Ok(())
     }
 }

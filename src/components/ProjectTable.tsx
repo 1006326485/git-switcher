@@ -4,6 +4,7 @@ import { StatusBadge, GroupDot, IconButton } from "./ui/primitives";
 import { BranchDropdown } from "./BranchDropdown";
 import { GitLogViewer } from "./GitLogViewer";
 import { BranchManager } from "./BranchManager";
+import { TagManager } from "./TagManager";
 import { AiReviewDialog } from "./AiReviewDialog";
 import { ProjectContextMenu } from "./ProjectContextMenu";
 import { GroupAssignDropdown } from "./ProjectGroupsPanel";
@@ -147,6 +148,7 @@ const TableRow = memo(function TableRow({
     logOpen,
     branchMgrOpen,
     aiReviewOpen,
+    tagMgrOpen,
     handleSwitch,
     handleRefresh,
     handleGitRefresh,
@@ -156,6 +158,8 @@ const TableRow = memo(function TableRow({
     handleCloseBranchMgr,
     handleOpenAiReview,
     handleCloseAiReview,
+    handleOpenTagMgr,
+    handleCloseTagMgr,
     handleRemove,
   } = useProjectRow({ detail, onSwitchBranch, onRefresh, onRemove });
 
@@ -225,6 +229,7 @@ const TableRow = memo(function TableRow({
               onSuccess={onSuccess}
               onError={onError}
               onOpenBranchManager={handleOpenBranchMgr}
+              onOpenTagManager={handleOpenTagMgr}
               onOpenLogViewer={handleOpenLog}
               onOpenAiReview={handleOpenAiReview}
             />
@@ -252,6 +257,15 @@ const TableRow = memo(function TableRow({
           open
           onClose={handleCloseBranchMgr}
           onRefresh={handleGitRefresh}
+          onSuccess={onSuccess}
+          onError={onError}
+        />
+      )}
+      {tagMgrOpen && (
+        <TagManager
+          path={project.path}
+          open
+          onClose={handleCloseTagMgr}
           onSuccess={onSuccess}
           onError={onError}
         />
