@@ -1,6 +1,8 @@
-import { memo } from "react";
+import { memo, useRef } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import type { ProjectDetail, ProjectRowCallbacks } from "../lib/types";
 import { StatusBadge, GroupDot, IconButton } from "./ui/primitives";
+import { DragHandle } from "./ui/DragHandle";
 import { BranchDropdown } from "./BranchDropdown";
 import { GitOpsPanel } from "./GitOpsPanel";
 import { GitLogViewer } from "./GitLogViewer";
@@ -9,20 +11,23 @@ import { AiReviewDialog } from "./AiReviewDialog";
 import { ProjectContextMenu } from "./ProjectContextMenu";
 import { GroupAssignDropdown } from "./ProjectGroupsPanel";
 import { useProjectRow } from "../hooks/useProjectRow";
+import { useSortableRow } from "../hooks/useSortableRow";
 
 interface ProjectCompactProps extends ProjectRowCallbacks {
   projects: ProjectDetail[];
+  sortable?: boolean;
 }
 
 const ProjectCompactRow = memo(function ProjectCompactRow({
   detail,
+  sortable,
   onSwitchBranch,
   onRefresh,
   onRemove,
   onSuccess,
   onError,
   onInfo,
-}: ProjectRowCallbacks & { detail: ProjectDetail }) {
+}: ProjectRowCallbacks & { detail: ProjectDetail; sortable?: boolean }) {
   const { project, current_branch, branches, status, group } = detail;
   const {
     switching,
@@ -43,11 +48,21 @@ const ProjectCompactRow = memo(function ProjectCompactRow({
     handleRemove,
   } = useProjectRow({ detail, onSwitchBranch, onRefresh, onRemove });
 
+  const { attributes, listeners, setNodeRef, style } = useSortableRow({
+    id: project.id,
+    sortable,
+  });
+
   const hasChanges = status.modified + status.staged + status.untracked > 0;
 
   return (
-    <div className="relative group">
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="relative group"
+    >
       <div className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-lg transition-colors">
+        {sortable && <DragHandle attributes={attributes} listeners={listeners} />}
         {/* Group dot */}
         <GroupDot color={group.color} name={group.name} size="sm" />
 
@@ -161,6 +176,7 @@ const ProjectCompactRow = memo(function ProjectCompactRow({
 
 export const ProjectCompact = memo(function ProjectCompact({
   projects,
+  sortable,
   onSwitchBranch,
   onRefresh,
   onRemove,
@@ -168,20 +184,56 @@ export const ProjectCompact = memo(function ProjectCompact({
   onError,
   onInfo,
 }: ProjectCompactProps) {
+  const parentRef = useRef<HTMLDivElement>(null);
+
+  const virtualizer = useVirtualizer({
+    count: projects.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 40,
+    overscan: 5,
+  });
+
   return (
-    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden divide-y divide-gray-100 dark:divide-gray-700/50">
-      {projects.map((detail) => (
-        <ProjectCompactRow
-          key={detail.project.id}
-          detail={detail}
-          onSwitchBranch={onSwitchBranch}
-          onRefresh={onRefresh}
-          onRemove={onRemove}
-          onSuccess={onSuccess}
-          onError={onError}
-          onInfo={onInfo}
-        />
-      ))}
+    <div
+      ref={parentRef}
+      className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg overflow-auto divide-y divide-gray-100 dark:divide-gray-700/50"
+      style={{ maxHeight: "100vh" }}
+    >
+      <div
+        style={{
+          height: `${virtualizer.getTotalSize()}px`,
+          position: "relative",
+        }}
+      >
+        {virtualizer.getVirtualItems().map((virtualRow) => {
+          const detail = projects[virtualRow.index];
+          return (
+            <div
+              key={virtualRow.key}
+              ref={virtualizer.measureElement}
+              data-index={virtualRow.index}
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                width: "100%",
+                transform: `translateY(${virtualRow.start}px)`,
+              }}
+            >
+              <ProjectCompactRow
+                detail={detail}
+                sortable={sortable}
+                onSwitchBranch={onSwitchBranch}
+                onRefresh={onRefresh}
+                onRemove={onRemove}
+                onSuccess={onSuccess}
+                onError={onError}
+                onInfo={onInfo}
+              />
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 });

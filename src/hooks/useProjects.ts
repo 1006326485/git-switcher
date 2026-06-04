@@ -211,6 +211,25 @@ export function useProjects(toast?: ToastApi, activeGroup?: string | null) {
     }
   }, []);
 
+  const updateAlias = useCallback(
+    async (id: string, alias: string) => {
+      try {
+        await api.setProjectAlias(id, alias);
+        setProjects((prev) =>
+          prev.map((p) =>
+            p.project.id === id
+              ? { ...p, project: { ...p.project, alias } }
+              : p
+          )
+        );
+      } catch (e) {
+        toastRef.current?.error(`Failed to update alias: ${e}`);
+        throw e;
+      }
+    },
+    []
+  );
+
   return {
     projects,
     loading,
@@ -222,5 +241,6 @@ export function useProjects(toast?: ToastApi, activeGroup?: string | null) {
     switchBranch,
     refreshProject,
     refreshAll,
+    updateAlias,
   };
 }

@@ -17,7 +17,7 @@ import { useAutoRefresh } from "./hooks/useAutoRefresh";
 import { useAppSettings } from "./hooks/useAppSettings";
 import { useCommandPalette } from "./hooks/useCommandPalette";
 import type { ProjectDetail } from "./lib/types";
-import { listProjectsInGroup } from "./lib/tauri";
+import { listProjectsInGroup, reorderProjects as apiReorderProjects } from "./lib/tauri";
 
 export default function App() {
   const { theme, setTheme } = useTheme();
@@ -48,6 +48,7 @@ export default function App() {
     switchBranch,
     refreshProject,
     refreshAll,
+    updateAlias,
   } = useProjects(toast, activeGroup);
 
   const { batchLoading, fetchAll, pullAll } = useBatchOps(toast, refreshAll, activeGroup);
@@ -131,6 +132,16 @@ export default function App() {
     onPullAll: pullAll,
   });
 
+  const handleReorder = useCallback(async (orderedIds: string[]) => {
+    try {
+      await apiReorderProjects(orderedIds);
+      await refreshAll();
+    } catch (e) {
+      toastRef.current.error(`Failed to reorder: ${e}`);
+      throw e;
+    }
+  }, [refreshAll]);
+
   // Keyboard shortcuts — Escape stays here (closes multiple dialogs)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -207,6 +218,8 @@ export default function App() {
               onSuccess={toast.success}
               onError={toast.error}
               onInfo={toast.info}
+              onReorder={handleReorder}
+              onAliasChange={updateAlias}
             />
           </main>
         </div>

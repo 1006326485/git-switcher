@@ -1,6 +1,8 @@
-import { memo } from "react";
+import { memo, useRef } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import type { ProjectDetail, ProjectRowCallbacks } from "../lib/types";
 import { StatusBadge, GroupDot, IconButton } from "./ui/primitives";
+import { DragHandle } from "./ui/DragHandle";
 import { BranchDropdown } from "./BranchDropdown";
 import { GitOpsPanel } from "./GitOpsPanel";
 import { GitLogViewer } from "./GitLogViewer";
@@ -9,20 +11,23 @@ import { AiReviewDialog } from "./AiReviewDialog";
 import { ProjectContextMenu } from "./ProjectContextMenu";
 import { GroupAssignDropdown } from "./ProjectGroupsPanel";
 import { useProjectRow } from "../hooks/useProjectRow";
+import { useSortableRow } from "../hooks/useSortableRow";
 
 interface ProjectListProps extends ProjectRowCallbacks {
   projects: ProjectDetail[];
+  sortable?: boolean;
 }
 
 const ProjectListRow = memo(function ProjectListRow({
   detail,
+  sortable,
   onSwitchBranch,
   onRefresh,
   onRemove,
   onSuccess,
   onError,
   onInfo,
-}: ProjectRowCallbacks & { detail: ProjectDetail }) {
+}: ProjectRowCallbacks & { detail: ProjectDetail; sortable?: boolean }) {
   const { project, current_branch, branches, status, group } = detail;
   const {
     switching,
@@ -43,8 +48,18 @@ const ProjectListRow = memo(function ProjectListRow({
     handleRemove,
   } = useProjectRow({ detail, onSwitchBranch, onRefresh, onRemove });
 
+  const { attributes, listeners, setNodeRef, style } = useSortableRow({
+    id: project.id,
+    sortable,
+  });
+
   return (
-    <div className="flex items-center gap-4 px-4 py-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:shadow-sm transition-shadow">
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="flex items-center gap-4 px-4 py-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:shadow-sm transition-shadow"
+    >
+      {sortable && <DragHandle attributes={attributes} listeners={listeners} />}
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <div className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
@@ -151,6 +166,7 @@ const ProjectListRow = memo(function ProjectListRow({
 
 export const ProjectList = memo(function ProjectList({
   projects,
+  sortable,
   onSwitchBranch,
   onRefresh,
   onRemove,
@@ -158,20 +174,53 @@ export const ProjectList = memo(function ProjectList({
   onError,
   onInfo,
 }: ProjectListProps) {
+  const parentRef = useRef<HTMLDivElement>(null);
+
+  const virtualizer = useVirtualizer({
+    count: projects.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 56,
+    overscan: 5,
+  });
+
   return (
-    <div className="flex flex-col gap-2">
-      {projects.map((detail) => (
-        <ProjectListRow
-          key={detail.project.id}
-          detail={detail}
-          onSwitchBranch={onSwitchBranch}
-          onRefresh={onRefresh}
-          onRemove={onRemove}
-          onSuccess={onSuccess}
-          onError={onError}
-          onInfo={onInfo}
-        />
-      ))}
+    <div ref={parentRef} style={{ overflow: "auto", maxHeight: "100vh" }}>
+      <div
+        style={{
+          height: `${virtualizer.getTotalSize()}px`,
+          position: "relative",
+        }}
+      >
+        {virtualizer.getVirtualItems().map((virtualRow) => {
+          const detail = projects[virtualRow.index];
+          return (
+            <div
+              key={virtualRow.key}
+              ref={virtualizer.measureElement}
+              data-index={virtualRow.index}
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                width: "100%",
+                transform: `translateY(${virtualRow.start}px)`,
+                paddingBottom: 8,
+              }}
+            >
+              <ProjectListRow
+                detail={detail}
+                sortable={sortable}
+                onSwitchBranch={onSwitchBranch}
+                onRefresh={onRefresh}
+                onRemove={onRemove}
+                onSuccess={onSuccess}
+                onError={onError}
+                onInfo={onInfo}
+              />
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 });

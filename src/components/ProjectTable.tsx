@@ -1,6 +1,8 @@
-import { useState, useCallback, useMemo, memo } from "react";
+import { useState, useCallback, useMemo, memo, useRef } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import type { ProjectDetail, ProjectRowCallbacks } from "../lib/types";
 import { StatusBadge, GroupDot, IconButton } from "./ui/primitives";
+import { DragHandle } from "./ui/DragHandle";
 import { BranchDropdown } from "./BranchDropdown";
 import { GitLogViewer } from "./GitLogViewer";
 import { BranchManager } from "./BranchManager";
@@ -8,13 +10,18 @@ import { AiReviewDialog } from "./AiReviewDialog";
 import { ProjectContextMenu } from "./ProjectContextMenu";
 import { GroupAssignDropdown } from "./ProjectGroupsPanel";
 import { useProjectRow } from "../hooks/useProjectRow";
+import { useSortableRow } from "../hooks/useSortableRow";
 
 interface ProjectTableProps extends ProjectRowCallbacks {
   projects: ProjectDetail[];
+  sortable?: boolean;
 }
 
 type SortKey = "name" | "branch" | "modified" | "staged" | "untracked" | "ahead" | "behind";
 type SortDir = "asc" | "desc";
+
+const TABLE_GRID_COLS = "minmax(160px, 1.5fr) minmax(120px, 1fr) repeat(5, 80px) 96px";
+const TABLE_GRID_COLS_SORTABLE = `32px ${TABLE_GRID_COLS}`;
 
 const SortableHeader = memo(function SortableHeader({
   label,
@@ -31,8 +38,7 @@ const SortableHeader = memo(function SortableHeader({
 }) {
   const active = currentSort === sortKey;
   return (
-    <th
-      scope="col"
+    <div
       role="columnheader"
       tabIndex={0}
       aria-sort={active ? (currentDir === "asc" ? "ascending" : "descending") : "none"}
@@ -46,12 +52,13 @@ const SortableHeader = memo(function SortableHeader({
           <span className="text-gray-400">{currentDir === "asc" ? "▲" : "▼"}</span>
         )}
       </span>
-    </th>
+    </div>
   );
 });
 
 export const ProjectTable = memo(function ProjectTable({
   projects,
+  sortable,
   onSwitchBranch,
   onRefresh,
   onRemove,
@@ -94,51 +101,93 @@ export const ProjectTable = memo(function ProjectTable({
     return copy;
   }, [projects, sortKey, sortDir]);
 
+  const parentRef = useRef<HTMLDivElement>(null);
+
+  const virtualizer = useVirtualizer({
+    count: sorted.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 48,
+    overscan: 5,
+  });
+
   return (
     <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
-      <table className="w-full" aria-label="Git projects">
-        <thead className="bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700">
-          <tr>
-            <SortableHeader label="Name" sortKey="name" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
-            <SortableHeader label="Branch" sortKey="branch" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
-            <SortableHeader label="Modified" sortKey="modified" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
-            <SortableHeader label="Staged" sortKey="staged" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
-            <SortableHeader label="Untracked" sortKey="untracked" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
-            <SortableHeader label="Ahead" sortKey="ahead" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
-            <SortableHeader label="Behind" sortKey="behind" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
-            <th scope="col" className="px-3 py-2.5 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase w-24">
-              Actions
-            </th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">
-          {sorted.map((detail) => (
-            <TableRow
-              key={detail.project.id}
-              detail={detail}
-              onSwitchBranch={onSwitchBranch}
-              onRefresh={onRefresh}
-              onRemove={onRemove}
-              onSuccess={onSuccess}
-              onError={onError}
-              onInfo={onInfo}
-            />
-          ))}
-        </tbody>
-      </table>
+      <div
+        className="bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700"
+        style={{
+          display: "grid",
+          gridTemplateColumns: sortable ? TABLE_GRID_COLS_SORTABLE : TABLE_GRID_COLS,
+          alignItems: "center",
+        }}
+        role="row"
+        aria-label="Git projects"
+      >
+        {sortable && <div className="w-8 px-1 py-2.5" role="columnheader" />}
+        <SortableHeader label="Name" sortKey="name" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
+        <SortableHeader label="Branch" sortKey="branch" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
+        <SortableHeader label="Modified" sortKey="modified" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
+        <SortableHeader label="Staged" sortKey="staged" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
+        <SortableHeader label="Untracked" sortKey="untracked" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
+        <SortableHeader label="Ahead" sortKey="ahead" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
+        <SortableHeader label="Behind" sortKey="behind" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
+        <div className="px-3 py-2.5 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase" role="columnheader">
+          Actions
+        </div>
+      </div>
+      <div
+        ref={parentRef}
+        style={{ overflow: "auto", maxHeight: "calc(100vh - 40px)" }}
+      >
+        <div
+          style={{
+            height: `${virtualizer.getTotalSize()}px`,
+            position: "relative",
+          }}
+        >
+          {virtualizer.getVirtualItems().map((virtualRow) => {
+            const detail = sorted[virtualRow.index];
+            return (
+              <div
+                key={virtualRow.key}
+                ref={virtualizer.measureElement}
+                data-index={virtualRow.index}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: "100%",
+                  transform: `translateY(${virtualRow.start}px)`,
+                }}
+              >
+                <TableRow
+                  detail={detail}
+                  sortable={sortable}
+                  onSwitchBranch={onSwitchBranch}
+                  onRefresh={onRefresh}
+                  onRemove={onRemove}
+                  onSuccess={onSuccess}
+                  onError={onError}
+                  onInfo={onInfo}
+                />
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 });
 
 const TableRow = memo(function TableRow({
   detail,
+  sortable,
   onSwitchBranch,
   onRefresh,
   onRemove,
   onSuccess,
   onError,
   onInfo: _onInfo,
-}: ProjectRowCallbacks & { detail: ProjectDetail }) {
+}: ProjectRowCallbacks & { detail: ProjectDetail; sortable?: boolean }) {
   const { project, current_branch, branches, status, group } = detail;
   const {
     switching,
@@ -159,10 +208,24 @@ const TableRow = memo(function TableRow({
     handleRemove,
   } = useProjectRow({ detail, onSwitchBranch, onRefresh, onRemove });
 
+  const { attributes, listeners, setNodeRef, style } = useSortableRow({
+    id: project.id,
+    sortable,
+  });
+
   return (
     <>
-      <tr className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
-        <td className="px-3 py-2">
+      <div
+        ref={setNodeRef}
+        style={{ ...style, display: "grid", gridTemplateColumns: sortable ? TABLE_GRID_COLS_SORTABLE : TABLE_GRID_COLS, alignItems: "center" }}
+        className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors border-b border-gray-100 dark:border-gray-700/50"
+      >
+        {sortable && (
+          <div className="px-1 py-2">
+            <DragHandle attributes={attributes} listeners={listeners} />
+          </div>
+        )}
+        <div className="px-3 py-2">
           <div className="flex items-center gap-1.5">
             <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate max-w-50">
               {project.alias || project.name}
@@ -173,36 +236,36 @@ const TableRow = memo(function TableRow({
             {project.path}
           </div>
           {error && <div className="text-xs text-red-600 dark:text-red-400 mt-0.5">{error}</div>}
-        </td>
-        <td className="px-3 py-2">
+        </div>
+        <div className="px-3 py-2">
           <BranchDropdown
             currentBranch={current_branch}
             branches={branches}
             onSwitch={handleSwitch}
             loading={switching}
           />
-        </td>
-        <td className="px-3 py-2 text-sm text-center">
+        </div>
+        <div className="px-3 py-2 text-sm text-center">
           <StatusBadge type="modified" count={status.modified} variant="text" />
           {status.modified === 0 && <span className="text-gray-300 dark:text-gray-600">—</span>}
-        </td>
-        <td className="px-3 py-2 text-sm text-center">
+        </div>
+        <div className="px-3 py-2 text-sm text-center">
           <StatusBadge type="staged" count={status.staged} variant="text" />
           {status.staged === 0 && <span className="text-gray-300 dark:text-gray-600">—</span>}
-        </td>
-        <td className="px-3 py-2 text-sm text-center">
+        </div>
+        <div className="px-3 py-2 text-sm text-center">
           <StatusBadge type="untracked" count={status.untracked} variant="text" />
           {status.untracked === 0 && <span className="text-gray-300 dark:text-gray-600">—</span>}
-        </td>
-        <td className="px-3 py-2 text-sm text-center">
+        </div>
+        <div className="px-3 py-2 text-sm text-center">
           <StatusBadge type="ahead" count={status.ahead} variant="text" />
           {status.ahead === 0 && <span className="text-gray-300 dark:text-gray-600">—</span>}
-        </td>
-        <td className="px-3 py-2 text-sm text-center">
+        </div>
+        <div className="px-3 py-2 text-sm text-center">
           <StatusBadge type="behind" count={status.behind} variant="text" />
           {status.behind === 0 && <span className="text-gray-300 dark:text-gray-600">—</span>}
-        </td>
-        <td className="px-3 py-2 text-right">
+        </div>
+        <div className="px-3 py-2 text-right">
           <div className="flex items-center justify-end gap-0.5">
             <GroupAssignDropdown
               projectId={project.id}
@@ -234,8 +297,8 @@ const TableRow = memo(function TableRow({
               </svg>
             </IconButton>
           </div>
-        </td>
-      </tr>
+        </div>
+      </div>
       {logOpen && (
         <GitLogViewer
           path={project.path}

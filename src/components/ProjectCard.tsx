@@ -1,6 +1,7 @@
-import { memo } from "react";
+import { useState, useCallback, useRef, memo } from "react";
 import type { ProjectDetail, ProjectRowCallbacks } from "../lib/types";
 import { StatusBadge, GroupDot, IconButton } from "./ui/primitives";
+import { DragHandle } from "./ui/DragHandle";
 import { BranchDropdown } from "./BranchDropdown";
 import { GitOpsPanel } from "./GitOpsPanel";
 import { GitLogViewer } from "./GitLogViewer";
@@ -10,8 +11,16 @@ import { ProjectContextMenu } from "./ProjectContextMenu";
 import { GroupAssignDropdown } from "./ProjectGroupsPanel";
 import { useProjectRow } from "../hooks/useProjectRow";
 
-interface ProjectCardProps extends ProjectRowCallbacks {
+interface DragHandleProps {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  attributes?: Record<string, any>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  listeners?: Record<string, any>;
+}
+
+interface ProjectCardProps extends ProjectRowCallbacks, DragHandleProps {
   detail: ProjectDetail;
+  onAliasChange?: (id: string, alias: string) => Promise<void>;
 }
 
 export const ProjectCard = memo(function ProjectCard({
@@ -22,6 +31,9 @@ export const ProjectCard = memo(function ProjectCard({
   onSuccess,
   onError,
   onInfo,
+  onAliasChange,
+  attributes: dragAttributes,
+  listeners: dragListeners,
 }: ProjectCardProps) {
   const {
     project, current_branch, branches, status, group,
@@ -37,6 +49,30 @@ export const ProjectCard = memo(function ProjectCard({
     handleRemove,
   } = useProjectRow({ detail, onSwitchBranch, onRefresh, onRemove });
 
+  // Inline alias editing
+  const [editing, setEditing] = useState(false);
+  const [aliasValue, setAliasValue] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const startEdit = useCallback(() => {
+    setAliasValue(project.alias || project.name);
+    setEditing(true);
+    requestAnimationFrame(() => inputRef.current?.select());
+  }, [project.alias, project.name]);
+
+  const commitEdit = useCallback(async () => {
+    const trimmed = aliasValue.trim();
+    if (!onAliasChange) { setEditing(false); return; }
+    if (trimmed && trimmed !== (project.alias || project.name)) {
+      try {
+        await onAliasChange(project.id, trimmed);
+      } catch { /* toast handles error */ }
+    }
+    setEditing(false);
+  }, [aliasValue, onAliasChange, project.id, project.alias, project.name]);
+
+  const cancelEdit = useCallback(() => setEditing(false), []);
+
   const totalChanges = status.modified + status.staged + status.untracked;
   const hasUpstream = status.ahead > 0 || status.behind > 0;
 
@@ -46,9 +82,29 @@ export const ProjectCard = memo(function ProjectCard({
       <div className="px-4 pt-4 pb-2 flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 truncate">
-              {project.alias || project.name}
-            </h3>
+            <DragHandle attributes={dragAttributes} listeners={dragListeners} width={12} height={16} />
+            {editing ? (
+              <input
+                ref={inputRef}
+                type="text"
+                value={aliasValue}
+                onChange={(e) => setAliasValue(e.target.value)}
+                onBlur={commitEdit}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commitEdit();
+                  if (e.key === "Escape") cancelEdit();
+                }}
+                className="text-base font-semibold text-gray-900 dark:text-gray-100 bg-gray-100 dark:bg-gray-700 border border-blue-400 dark:border-blue-500 rounded px-1 py-0.5 outline-none w-full min-w-0"
+              />
+            ) : (
+              <h3
+                className="text-base font-semibold text-gray-900 dark:text-gray-100 truncate cursor-text"
+                title="Double-click to edit alias"
+                onDoubleClick={startEdit}
+              >
+                {project.alias || project.name}
+              </h3>
+            )}
             <GroupDot color={group.color} name={group.name} size="sm" />
           </div>
           <p
