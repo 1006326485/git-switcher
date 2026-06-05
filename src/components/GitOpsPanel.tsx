@@ -217,12 +217,12 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
       {expanded && (
         <div className="px-4 pb-3 space-y-3">
           {/* Action buttons */}
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex flex-wrap gap-1.5 min-w-0">
             <button
               onClick={handleFetch}
               disabled={isLoading("fetch")}
               aria-label="Fetch from remote"
-              className="px-2.5 py-1.5 rounded-md text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50 transition-colors"
+              className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-[var(--surface-2)] text-gray-700 dark:text-gray-300 border border-[var(--border-color)] hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50 transition-colors duration-150 active:scale-[0.98]"
             >
               {isLoading("fetch") ? "Fetching..." : "Fetch"}
             </button>
@@ -230,7 +230,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
               onClick={handlePull}
               disabled={isLoading("pull")}
               aria-label="Pull from remote"
-              className="px-2.5 py-1.5 rounded-md text-xs font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-900/50 disabled:opacity-50 transition-colors"
+              className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-blue-100 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800/50 hover:bg-blue-200 dark:hover:bg-blue-900/40 disabled:opacity-50 transition-colors duration-150 active:scale-[0.98]"
             >
               {isLoading("pull") ? "Pulling..." : "Pull"}
             </button>
@@ -238,7 +238,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
               onClick={handlePush}
               disabled={isLoading("push")}
               aria-label="Push to remote"
-              className="px-2.5 py-1.5 rounded-md text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/50 disabled:opacity-50 transition-colors"
+              className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-green-100 dark:bg-green-900/20 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800/50 hover:bg-green-200 dark:hover:bg-green-900/40 disabled:opacity-50 transition-colors duration-150 active:scale-[0.98]"
             >
               {isLoading("push") ? "Pushing..." : "Push"}
             </button>
@@ -246,7 +246,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
               onClick={handleStash}
               disabled={isLoading("stash")}
               aria-label="Stash changes"
-              className="px-2.5 py-1.5 rounded-md text-xs font-medium bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 hover:bg-yellow-200 dark:hover:bg-yellow-900/50 disabled:opacity-50 transition-colors"
+              className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-amber-100 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/50 hover:bg-amber-200 dark:hover:bg-amber-900/40 disabled:opacity-50 transition-colors duration-150 active:scale-[0.98]"
             >
               {isLoading("stash") ? "Stashing..." : "Stash"}
             </button>
@@ -257,13 +257,13 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
               onKeyDown={(e) => e.key === "Enter" && handleStash()}
               placeholder="Stash message (optional)"
               aria-label="Stash message"
-              className="px-2 py-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-xs w-40 focus:outline-none focus:ring-2 focus:ring-yellow-500"
+              className="px-2 py-1 rounded-lg border border-[var(--border-color)] bg-[var(--surface-1)] text-xs min-w-0 flex-1 basis-24 focus:outline-none focus:ring-2 focus:ring-yellow-500"
             />
             <button
               onClick={handlePop}
               disabled={isLoading("pop")}
               aria-label="Pop stash"
-              className="px-2.5 py-1.5 rounded-md text-xs font-medium bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 hover:bg-purple-200 dark:hover:bg-purple-900/50 disabled:opacity-50 transition-colors"
+              className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-purple-100 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/50 hover:bg-purple-200 dark:hover:bg-purple-900/40 disabled:opacity-50 transition-colors duration-150 active:scale-[0.98]"
             >
               {isLoading("pop") ? "Popping..." : "Pop"}
             </button>
@@ -271,7 +271,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
               onClick={handleToggleStashList}
               aria-label="Toggle stash list"
               aria-expanded={showStashList}
-              className="px-2.5 py-1.5 rounded-md text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+              className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-[var(--surface-2)] text-gray-700 dark:text-gray-300 border border-[var(--border-color)] hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors duration-150 active:scale-[0.98]"
             >
               Stash List {stashList.length > 0 ? `(${stashList.length})` : ""}
             </button>
@@ -294,7 +294,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
                     <button
                       onClick={() => handleStashApply(s.index)}
                       disabled={isLoading("stash_apply")}
-                      className="px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-900/50 disabled:opacity-50"
+                      className="px-1.5 py-0.5 rounded-lg bg-blue-100 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800/50 hover:bg-blue-200 dark:hover:bg-blue-900/40 disabled:opacity-50 transition-colors duration-150 active:scale-[0.98]"
                       aria-label={`Apply stash@{${s.index}}`}
                       title="Apply"
                     >
@@ -303,7 +303,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
                     <button
                       onClick={() => handleStashPopAt(s.index)}
                       disabled={isLoading("pop")}
-                      className="px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 hover:bg-purple-200 dark:hover:bg-purple-900/50 disabled:opacity-50"
+                      className="px-1.5 py-0.5 rounded-lg bg-purple-100 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/50 hover:bg-purple-200 dark:hover:bg-purple-900/40 disabled:opacity-50 transition-colors duration-150 active:scale-[0.98]"
                       aria-label={`Pop stash@{${s.index}}`}
                       title="Pop"
                     >
@@ -312,7 +312,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
                     <button
                       onClick={() => handleStashDrop(s.index)}
                       disabled={isLoading("stash_drop")}
-                      className="px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 hover:bg-red-200 dark:hover:bg-red-900/50 disabled:opacity-50"
+                      className="px-1.5 py-0.5 rounded-lg bg-red-100 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800/50 hover:bg-red-200 dark:hover:bg-red-900/40 disabled:opacity-50 transition-colors duration-150 active:scale-[0.98]"
                       aria-label={`Drop stash@{${s.index}}`}
                       title="Drop"
                     >
@@ -332,7 +332,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
                 <button
                   onClick={handleStageAll}
                   disabled={isLoading("stage_all")}
-                  className="px-2 py-0.5 rounded text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/50 disabled:opacity-50 transition-colors"
+                  className="px-2 py-0.5 rounded-lg text-xs font-medium bg-green-100 dark:bg-green-900/20 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800/50 hover:bg-green-200 dark:hover:bg-green-900/40 disabled:opacity-50 transition-colors duration-150 active:scale-[0.98]"
                   aria-label="Stage all files"
                 >
                   {isLoading("stage_all") ? "Staging..." : "Stage All"}
@@ -340,7 +340,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
                 <button
                   onClick={handleUnstageAll}
                   disabled={isLoading("unstage_all")}
-                  className="px-2 py-0.5 rounded text-xs font-medium bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 hover:bg-red-200 dark:hover:bg-red-900/50 disabled:opacity-50 transition-colors"
+                  className="px-2 py-0.5 rounded-lg text-xs font-medium bg-red-100 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800/50 hover:bg-red-200 dark:hover:bg-red-900/40 disabled:opacity-50 transition-colors duration-150 active:scale-[0.98]"
                   aria-label="Unstage all files"
                 >
                   {isLoading("unstage_all") ? "Unstaging..." : "Unstage All"}
@@ -407,7 +407,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
           )}
 
           {/* Commit form */}
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2 min-w-0">
             <input
               type="text"
               value={commitMsg}
@@ -415,37 +415,39 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
               onKeyDown={(e) => e.key === "Enter" && handleCommit()}
               placeholder="Commit message..."
               aria-label="Commit message"
-              className="flex-1 px-3 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="flex-1 min-w-0 px-3 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--surface-1)] text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
-            <button
-              onClick={handleGenerateMsg}
-              disabled={generatingMsg}
-              title="Generate commit message with AI"
-              aria-label="Generate commit message with AI"
-              className="px-2 py-1.5 rounded-md text-xs font-medium bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 hover:bg-purple-200 dark:hover:bg-purple-900/50 disabled:opacity-50 transition-colors"
-            >
-              {generatingMsg ? (
-                <span className="animate-spin inline-block">&#x21BB;</span>
-              ) : (
-                <AiGenerateIcon />
-              )}
-            </button>
-            <button
-              onClick={handleToggleDiff}
-              title="Preview staged diff"
-              aria-label="Preview staged diff"
-              aria-expanded={showDiff}
-              className={`px-2 py-1.5 rounded-md text-xs font-medium transition-colors ${showDiff ? "bg-teal-200 dark:bg-teal-800/50 text-teal-800 dark:text-teal-200" : "bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 hover:bg-teal-200 dark:hover:bg-teal-900/50"}`}
-            >
-              {showDiff ? "Hide Diff" : "Preview Diff"}
-            </button>
-            <button
-              onClick={handleCommit}
-              disabled={!commitMsg.trim() || isLoading("commit")}
-              className="px-3 py-1.5 rounded-md text-xs font-medium bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white transition-colors"
-            >
-              {isLoading("commit") ? "Committing..." : "Commit"}
-            </button>
+            <div className="flex gap-2 shrink-0">
+              <button
+                onClick={handleGenerateMsg}
+                disabled={generatingMsg}
+                title="Generate commit message with AI"
+                aria-label="Generate commit message with AI"
+                className="px-2 py-1.5 rounded-lg text-xs font-medium bg-purple-100 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/50 hover:bg-purple-200 dark:hover:bg-purple-900/40 disabled:opacity-50 transition-colors duration-150 active:scale-[0.98]"
+              >
+                {generatingMsg ? (
+                  <span className="animate-spin inline-block">&#x21BB;</span>
+                ) : (
+                  <AiGenerateIcon />
+                )}
+              </button>
+              <button
+                onClick={handleToggleDiff}
+                title="Preview staged diff"
+                aria-label="Preview staged diff"
+                aria-expanded={showDiff}
+                className={`px-2 py-1.5 rounded-lg text-xs font-medium transition-colors duration-150 active:scale-[0.98] ${showDiff ? "bg-teal-200 dark:bg-teal-800/50 text-teal-800 dark:text-teal-200 border border-teal-300 dark:border-teal-700/50" : "bg-teal-100 dark:bg-teal-900/20 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800/50 hover:bg-teal-200 dark:hover:bg-teal-900/40"}`}
+              >
+                {showDiff ? "Hide Diff" : "Preview Diff"}
+              </button>
+              <button
+                onClick={handleCommit}
+                disabled={!commitMsg.trim() || isLoading("commit")}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:bg-gray-400 text-white transition-colors duration-150 active:scale-[0.98]"
+              >
+                {isLoading("commit") ? "Committing..." : "Commit"}
+              </button>
+            </div>
           </div>
 
           {/* Staged diff preview */}

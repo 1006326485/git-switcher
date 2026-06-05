@@ -27,14 +27,14 @@ export const ToastContainer = memo(function ToastContainer({ toasts, onRemove, o
   if (toasts.length === 0) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-100 flex flex-col gap-2 pointer-events-none" role="status" aria-live="polite" aria-atomic="true">
+    <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none" role="status" aria-live="polite" aria-atomic="true">
       {toasts.map((toast) => (
         <div
           key={toast.id}
           role={toast.type === "error" ? "alert" : undefined}
           onMouseEnter={() => onPause?.(toast.id)}
           onMouseLeave={() => onResume?.(toast.id)}
-          className={`pointer-events-auto flex items-center gap-2 px-4 py-3 rounded-lg border shadow-lg text-sm font-medium animate-[slideIn_0.2s_ease-out] ${
+          className={`pointer-events-auto flex items-center gap-2 px-4 py-3 rounded-xl border shadow-lg dark:ring-1 dark:ring-white/10 text-sm font-medium animate-[slideIn_0.2s_ease-out] ${
             typeStyles[toast.type]
           }`}
         >

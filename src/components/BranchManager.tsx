@@ -230,7 +230,7 @@ export const BranchManager = memo(function BranchManager({
               />
             </div>
             <PrimaryButton
-              color="red"
+              variant="danger"
               onClick={openConfirmDelete}
               disabled={!selectedBranch || loading}
             >
@@ -254,7 +254,7 @@ export const BranchManager = memo(function BranchManager({
               />
             </div>
             <PrimaryButton
-              color="green"
+              variant="primary"
               onClick={openConfirmMerge}
               disabled={!selectedBranch || loading}
             >
@@ -275,7 +275,7 @@ export const BranchManager = memo(function BranchManager({
                 />
               </div>
               <PrimaryButton
-                color="blue"
+                variant="primary"
                 onClick={openConfirmRebase}
                 disabled={!rebaseBranch || loading}
               >
@@ -301,7 +301,7 @@ export const BranchManager = memo(function BranchManager({
               />
             </div>
             <PrimaryButton
-              color="blue"
+              variant="primary"
               onClick={openConfirmCherryPick}
               disabled={!commitHash.trim() || loading}
             >

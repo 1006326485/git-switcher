@@ -1,5 +1,80 @@
 @import "tailwindcss";
 
+/* ═══ Design Tokens ═══ */
+:root {
+  /* Surface layers */
+  --surface-0: var(--color-gray-50);
+  --surface-1: white;
+  --surface-2: var(--color-gray-100);
+
+  /* Border */
+  --border-color: var(--color-gray-200);
+
+  /* Accent */
+  --accent: var(--color-blue-600);
+  --accent-hover: var(--color-blue-700);
+
+  /* Semantic status — backgrounds */
+  --status-modified-bg: var(--color-yellow-100);
+  --status-staged-bg: var(--color-green-100);
+  --status-untracked-bg: var(--color-gray-100);
+  --status-ahead-bg: var(--color-blue-100);
+  --status-behind-bg: var(--color-purple-100);
+  --status-error-bg: var(--color-red-100);
+
+  /* Semantic status — text */
+  --status-modified-text: var(--color-yellow-800);
+  --status-staged-text: var(--color-green-800);
+  --status-untracked-text: var(--color-gray-700);
+  --status-ahead-text: var(--color-blue-800);
+  --status-behind-text: var(--color-purple-800);
+  --status-error-text: var(--color-red-800);
+}
+
+.dark {
+  --surface-0: #0f1117;
+  --surface-1: #1a1d27;
+  --surface-2: #252836;
+  --border-color: rgba(55, 65, 81, 0.5);
+  --accent: var(--color-blue-500);
+  --accent-hover: var(--color-blue-600);
+
+  /* Dark mode status — softer backgrounds, brighter text */
+  --status-modified-bg: var(--color-yellow-900);
+  --status-staged-bg: var(--color-green-900);
+  --status-untracked-bg: var(--color-gray-800);
+  --status-ahead-bg: var(--color-blue-900);
+  --status-behind-bg: var(--color-purple-900);
+  --status-error-bg: var(--color-red-900);
+
+  --status-modified-text: var(--color-yellow-300);
+  --status-staged-text: var(--color-green-300);
+  --status-untracked-text: var(--color-gray-300);
+  --status-ahead-text: var(--color-blue-300);
+  --status-behind-text: var(--color-purple-300);
+  --status-error-text: var(--color-red-300);
+}
+
+/* ═══ Component Specifications ═══
+ *
+ * Border radius:
+ *   - Cards/containers: 0.75rem (rounded-xl)
+ *   - Inputs/buttons:    0.5rem  (rounded-lg)
+ *   - Badges/pills:      9999px  (rounded-full)
+ *
+ * Spacing:
+ *   - Card padding:      1rem    (p-4)
+ *   - Row padding:       1rem 0.75rem (px-4 py-3)
+ *   - Compact padding:   0.75rem 0.5rem (px-3 py-2)
+ *   - Grid gap:          1rem    (gap-4)
+ *   - Section gap:       1.5rem  (gap-6)
+ *
+ * Transitions:
+ *   - Micro:             150ms ease-out
+ *   - Dropdown entrance: fadeIn 0.15s ease-out
+ *   - Toast entrance:    slideIn 0.2s ease-out
+ */
+
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* Scrollbar styling */

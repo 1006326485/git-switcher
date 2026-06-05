@@ -2,7 +2,9 @@ import { useState, useCallback, useMemo, memo } from "react";
 import type { ProjectDetail } from "../lib/types";
 import { StatusBadge, GroupDot } from "./ui/primitives";
 import { BranchDropdown } from "./BranchDropdown";
+import { GitOpsPanel } from "./GitOpsPanel";
 import { ProjectRowShell } from "./ProjectRowShell";
+import { useProjectActions } from "../context/ProjectContext";
 
 interface ProjectTableProps {
   projects: ProjectDetail[];
@@ -38,7 +40,7 @@ const SortableHeader = memo(function SortableHeader({
       <span className="inline-flex items-center gap-1">
         {label}
         {active && (
-          <span className="text-gray-400">{currentDir === "asc" ? "▲" : "▼"}</span>
+          <span className="text-[var(--accent)]">{currentDir === "asc" ? "▲" : "▼"}</span>
         )}
       </span>
     </th>
@@ -82,9 +84,9 @@ export const ProjectTable = memo(function ProjectTable({ projects }: ProjectTabl
   }, [projects, sortKey, sortDir]);
 
   return (
-    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+    <div className="bg-[var(--surface-1)] border border-[var(--border-color)] rounded-xl overflow-hidden">
       <table className="w-full" aria-label="Git projects">
-        <thead className="bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700">
+        <thead className="bg-[var(--surface-2)] border-b border-[var(--border-color)]">
           <tr>
             <SortableHeader label="Name" sortKey="name" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
             <SortableHeader label="Branch" sortKey="branch" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
@@ -109,6 +111,7 @@ export const ProjectTable = memo(function ProjectTable({ projects }: ProjectTabl
 });
 
 const TableRow = memo(function TableRow({ detail }: { detail: ProjectDetail }) {
+  const { onSuccess, onError, onInfo } = useProjectActions();
   const { project, group } = detail;
 
   return (
@@ -116,9 +119,12 @@ const TableRow = memo(function TableRow({ detail }: { detail: ProjectDetail }) {
       {({ detail: d, row, actionButtons, errorBanner }) => {
         const { current_branch, branches, status } = d;
 
+        const StatusOrDash = ({ type, count }: { type: "modified" | "staged" | "untracked" | "ahead" | "behind"; count: number }) =>
+          count > 0 ? <StatusBadge type={type} count={count} variant="text" /> : <span className="text-gray-300 dark:text-gray-600">—</span>;
+
         return (
           <>
-            <tr className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+            <tr className="hover:bg-[var(--surface-2)] transition-colors duration-150">
               <td className="px-3 py-2">
                 <div className="flex items-center gap-1.5">
                   <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate max-w-50">
@@ -126,7 +132,7 @@ const TableRow = memo(function TableRow({ detail }: { detail: ProjectDetail }) {
                   </div>
                   <GroupDot color={group.color} name={group.name} size="xs" />
                 </div>
-                <div className="text-xs text-gray-500 dark:text-gray-400 truncate max-w-50">
+                <div className="text-xs text-gray-500 dark:text-gray-400 truncate max-w-50" title={project.path}>
                   {project.path}
                 </div>
                 {errorBanner}
@@ -140,29 +146,35 @@ const TableRow = memo(function TableRow({ detail }: { detail: ProjectDetail }) {
                 />
               </td>
               <td className="px-3 py-2 text-sm text-center">
-                <StatusBadge type="modified" count={status.modified} variant="text" />
-                {status.modified === 0 && <span className="text-gray-300 dark:text-gray-600">—</span>}
+                <StatusOrDash type="modified" count={status.modified} />
               </td>
               <td className="px-3 py-2 text-sm text-center">
-                <StatusBadge type="staged" count={status.staged} variant="text" />
-                {status.staged === 0 && <span className="text-gray-300 dark:text-gray-600">—</span>}
+                <StatusOrDash type="staged" count={status.staged} />
               </td>
               <td className="px-3 py-2 text-sm text-center">
-                <StatusBadge type="untracked" count={status.untracked} variant="text" />
-                {status.untracked === 0 && <span className="text-gray-300 dark:text-gray-600">—</span>}
+                <StatusOrDash type="untracked" count={status.untracked} />
               </td>
               <td className="px-3 py-2 text-sm text-center">
-                <StatusBadge type="ahead" count={status.ahead} variant="text" />
-                {status.ahead === 0 && <span className="text-gray-300 dark:text-gray-600">—</span>}
+                <StatusOrDash type="ahead" count={status.ahead} />
               </td>
               <td className="px-3 py-2 text-sm text-center">
-                <StatusBadge type="behind" count={status.behind} variant="text" />
-                {status.behind === 0 && <span className="text-gray-300 dark:text-gray-600">—</span>}
+                <StatusOrDash type="behind" count={status.behind} />
               </td>
               <td className="px-3 py-2 text-right">
                 <div className="flex items-center justify-end gap-0.5">
                   {actionButtons}
                 </div>
+              </td>
+            </tr>
+            <tr>
+              <td colSpan={8} className="p-0">
+                <GitOpsPanel
+                  path={project.path}
+                  onRefresh={row.handleGitRefresh}
+                  onSuccess={onSuccess}
+                  onError={onError}
+                  onInfo={onInfo}
+                />
               </td>
             </tr>
           </>

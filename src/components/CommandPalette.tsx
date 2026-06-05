@@ -42,6 +42,15 @@ export const CommandPalette = memo(function CommandPalette({
     setSelectedIndex(0);
   }, [query]);
 
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [open, onClose]);
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -66,7 +75,7 @@ export const CommandPalette = memo(function CommandPalette({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-lg bg-white dark:bg-gray-900 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden"
+        className="w-full max-w-lg bg-(--surface-1) rounded-xl shadow-2xl border border-(--border-color) overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         <input
@@ -75,7 +84,7 @@ export const CommandPalette = memo(function CommandPalette({
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Type a command..."
-          className="w-full px-4 py-3 text-sm bg-transparent border-b border-gray-200 dark:border-gray-700 outline-none text-gray-900 dark:text-gray-100 placeholder-gray-400"
+          className="w-full px-4 py-3 text-sm bg-transparent border-b border-(--border-color) outline-none text-gray-900 dark:text-gray-100 placeholder-gray-400"
         />
         <div className="max-h-80 overflow-y-auto">
           {filtered.map((cmd, i) => (
@@ -84,7 +93,7 @@ export const CommandPalette = memo(function CommandPalette({
               className={`w-full px-4 py-2 text-left text-sm flex items-center justify-between ${
                 i === selectedIndex
                   ? "bg-blue-50 dark:bg-blue-900/30"
-                  : "hover:bg-gray-50 dark:hover:bg-gray-800"
+                  : "hover:bg-(--surface-2)"
               } text-gray-900 dark:text-gray-100`}
               onClick={() => {
                 cmd.action();

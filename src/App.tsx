@@ -17,7 +17,7 @@ import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useAutoRefresh } from "./hooks/useAutoRefresh";
 import { useAppSettings } from "./hooks/useAppSettings";
 import { useCommandPalette } from "./hooks/useCommandPalette";
-import type { ProjectDetail } from "./lib/types";
+import type { ProjectDetail, ViewMode } from "./lib/types";
 import { listProjectsInGroup, reorderProjects as apiReorderProjects } from "./lib/tauri";
 
 export default function App() {
@@ -95,9 +95,18 @@ export default function App() {
   const handleRemoveRequest = useCallback(async (id: string) => {
     const project = projectsRef.current.find((p) => p.project.id === id);
     if (project) {
-      setConfirmDelete({ id, name: project.project.name });
+      if (localStorage.getItem("skip-remove-confirm") === "skip") {
+        try {
+          await removeProject(id);
+          toastRef.current.success(`Removed "${project.project.name}"`);
+        } catch (e) {
+          toastRef.current.error(`Failed to remove: ${e}`);
+        }
+      } else {
+        setConfirmDelete({ id, name: project.project.name });
+      }
     }
-  }, []);
+  }, [removeProject]);
 
   const confirmDeleteRef = useRef(confirmDelete);
   confirmDeleteRef.current = confirmDelete;
@@ -146,15 +155,31 @@ export default function App() {
   // Keyboard shortcuts — Escape stays here (closes multiple dialogs)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+      // View mode shortcuts: Ctrl/Cmd+1 through Ctrl/Cmd+5
+      if (e.ctrlKey || e.metaKey) {
+        const viewModes: ViewMode[] = ["card", "list", "compact", "table", "dashboard"];
+        const num = parseInt(e.key, 10);
+        if (num >= 1 && num <= 5) {
+          e.preventDefault();
+          setViewMode(viewModes[num - 1]);
+          return;
+        }
+      }
+
       if (e.key === "Escape") {
         setDialogOpen(false);
         setConfirmDelete(null);
         setExportImportOpen(false);
+        setSettingsOpen(false);
+        setPaletteOpen(false);
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, []);
+  }, [setViewMode]);
 
   useKeyboardShortcuts({
     onAddProject: handleAddProject,
@@ -178,19 +203,19 @@ export default function App() {
   );
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col">
+    <div className="min-h-screen bg-[var(--surface-0)] flex flex-col">
       {/* Title bar — draggable, spans full width above sidebar */}
       <div
         data-tauri-drag-region
         role="presentation"
-        className="h-6 bg-white dark:bg-gray-900 pl-20 select-none shrink-0"
+        className="h-8 bg-[var(--surface-1)] pl-20 select-none shrink-0"
       />
 
       <ProjectProvider value={projectActions}>
         <div className="flex flex-1 overflow-hidden">
           {/* Sidebar */}
           {showSidebar && (
-            <aside className="w-56 shrink-0 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 p-4 overflow-y-auto">
+            <aside className="w-56 shrink-0 bg-[var(--surface-1)] border-r border-[var(--border-color)] p-4 overflow-y-auto transition-all duration-200">
               <ProjectGroupsPanel
                 activeGroup={activeGroup}
                 onGroupChange={setActiveGroup}
@@ -246,7 +271,14 @@ export default function App() {
       <ConfirmDialog
         open={confirmDelete !== null}
         title="Remove Project"
-        message={`Are you sure you want to remove "${confirmDelete?.name}"? This only removes it from the app, not from disk.`}
+        skipKey="skip-remove-confirm"
+        message={
+          <>
+            Are you sure you want to remove{" "}
+            <span className="font-semibold text-(--accent)">{confirmDelete?.name}</span>
+            ? This only removes it from the app, not from disk.
+          </>
+        }
         confirmLabel="Remove"
         onConfirm={handleConfirmDelete}
         onCancel={handleCancelDelete}

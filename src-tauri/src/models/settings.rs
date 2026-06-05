@@ -21,6 +21,7 @@ pub enum ViewMode {
     List,
     Compact,
     Table,
+    Dashboard,
 }
 
 impl Default for ViewMode {

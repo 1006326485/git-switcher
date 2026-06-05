@@ -144,11 +144,11 @@ export const AddProjectDialog = memo(function AddProjectDialog({
                   onChange={(e) => setInitPath(e.target.value)}
                   placeholder="/path/to/new/repo"
                   aria-label="Repository path"
-                  className="flex-1 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400"
+                  className="flex-1 px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--surface-1)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
                 />
                 <button
                   onClick={handlePickInitPath}
-                  className="px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm transition-colors"
+                  className="px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--surface-2)] hover:bg-gray-200 dark:hover:bg-gray-600 text-sm transition-colors duration-150 active:scale-[0.98]"
                 >
                   Browse
                 </button>
@@ -164,13 +164,13 @@ export const AddProjectDialog = memo(function AddProjectDialog({
                 onChange={(e) => setInitName(e.target.value)}
                 placeholder="My Project"
                 aria-label="Project name"
-                className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400"
+                className="w-full px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--surface-1)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
               />
             </div>
             <button
               onClick={handleInit}
               disabled={loading || !initPath || !initName}
-              className="w-full px-4 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium text-sm transition-colors"
+              className="w-full px-4 py-2.5 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:bg-gray-400 text-white font-medium text-sm transition-colors duration-150 active:scale-[0.98]"
             >
               {loading ? "Creating..." : "Initialize Repository"}
             </button>

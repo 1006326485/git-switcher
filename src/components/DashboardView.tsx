@@ -68,14 +68,63 @@ export const DashboardView = memo(function DashboardView({ projects }: Dashboard
     <div className="space-y-6">
       {/* Summary cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <StatCard label="Total Projects" value={stats.total} color="blue" />
-        <StatCard label="With Changes" value={stats.withChanges} color="yellow" />
-        <StatCard label="Ahead" value={stats.ahead} color="green" />
-        <StatCard label="Behind" value={stats.behind} color="red" />
+        <StatCard
+          label="Total Projects"
+          value={stats.total}
+          color="blue"
+          icon={
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
+            </svg>
+          }
+        />
+        <StatCard
+          label="With Changes"
+          value={stats.withChanges}
+          color="yellow"
+          icon={
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+            </svg>
+          }
+        />
+        <StatCard
+          label="Ahead"
+          value={stats.ahead}
+          color="green"
+          icon={
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 10.5L12 3m0 0l7.5 7.5M12 3v18" />
+            </svg>
+          }
+        />
+        <StatCard
+          label="Behind"
+          value={stats.behind}
+          color="red"
+          icon={
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 13.5L12 21m0 0l-7.5-7.5M12 21V3" />
+            </svg>
+          }
+        />
       </div>
 
+      {/* Visualization row */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <BranchDistribution branches={stats.topBranches} />
+        <SyncRing
+          ahead={projects.filter((p) => p.status.ahead > 0).length}
+          behind={projects.filter((p) => p.status.behind > 0).length}
+          synced={stats.upToDate}
+        />
+      </div>
+
+      {/* Change heat bar */}
+      <ChangeHeatBar projects={projects} />
+
       {/* File changes summary */}
-      <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-4">
+      <div className="bg-(--surface-1) rounded-xl border border-(--border-color) p-4">
         <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">File Changes</h3>
         <div className="grid grid-cols-3 gap-4 text-center">
           <div>
@@ -94,7 +143,7 @@ export const DashboardView = memo(function DashboardView({ projects }: Dashboard
       </div>
 
       {/* Sync status */}
-      <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-4">
+      <div className="bg-(--surface-1) rounded-xl border border-(--border-color) p-4">
         <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Sync Status</h3>
         <div className="grid grid-cols-2 gap-4 text-center">
           <div>
@@ -110,7 +159,7 @@ export const DashboardView = memo(function DashboardView({ projects }: Dashboard
 
       {/* Top branches */}
       {stats.topBranches.length > 0 && (
-        <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-4">
+        <div className="bg-(--surface-1) rounded-xl border border-(--border-color) p-4">
           <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Active Branches</h3>
           <div className="space-y-2">
             {stats.topBranches.map(([branch, count]) => (
@@ -125,7 +174,7 @@ export const DashboardView = memo(function DashboardView({ projects }: Dashboard
 
       {/* Conflict risk */}
       {stats.conflictRisk.length > 0 && (
-        <div className="bg-white dark:bg-gray-900 rounded-lg border border-red-200 dark:border-red-900 p-4">
+        <div className="bg-(--surface-1) rounded-xl border border-red-200 dark:border-red-900 p-4">
           <h3 className="text-sm font-semibold text-red-600 dark:text-red-400 mb-3">Conflict Risk</h3>
           <div className="space-y-1">
             {stats.conflictRisk.map((p) => (
@@ -143,7 +192,7 @@ export const DashboardView = memo(function DashboardView({ projects }: Dashboard
 
       {/* Stale projects */}
       {stats.stale.length > 0 && (
-        <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-4">
+        <div className="bg-(--surface-1) rounded-xl border border-(--border-color) p-4">
           <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
             Inactive Projects ({stats.stale.length})
           </h3>
@@ -164,7 +213,7 @@ export const DashboardView = memo(function DashboardView({ projects }: Dashboard
 
       {/* Projects needing attention */}
       {stats.withChangesList.length > 0 && (
-        <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-4">
+        <div className="bg-(--surface-1) rounded-xl border border-(--border-color) p-4">
           <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Needs Attention</h3>
           <div className="space-y-1">
             {stats.withChangesList.slice(0, 10).map((p) => (
@@ -186,17 +235,174 @@ export const DashboardView = memo(function DashboardView({ projects }: Dashboard
   );
 });
 
-function StatCard({ label, value, color }: { label: string; value: number; color: string }) {
-  const colorClasses: Record<string, string> = {
-    blue: "bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300",
-    yellow: "bg-yellow-50 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-300",
-    green: "bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300",
-    red: "bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300",
+function StatCard({
+  label,
+  value,
+  color,
+  icon,
+}: {
+  label: string;
+  value: number;
+  color: "blue" | "yellow" | "green" | "red";
+  icon: React.ReactNode;
+}) {
+  const gradients: Record<string, string> = {
+    blue: "from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-900/10 border-blue-200 dark:border-blue-800/50",
+    yellow: "from-yellow-50 to-yellow-100 dark:from-yellow-900/20 dark:to-yellow-900/10 border-yellow-200 dark:border-yellow-800/50",
+    green: "from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-900/10 border-green-200 dark:border-green-800/50",
+    red: "from-red-50 to-red-100 dark:from-red-900/20 dark:to-red-900/10 border-red-200 dark:border-red-800/50",
+  };
+  const textColors: Record<string, string> = {
+    blue: "text-blue-700 dark:text-blue-300",
+    yellow: "text-yellow-700 dark:text-yellow-300",
+    green: "text-green-700 dark:text-green-300",
+    red: "text-red-700 dark:text-red-300",
   };
   return (
-    <div className={`rounded-lg p-4 ${colorClasses[color] || colorClasses.blue}`}>
-      <div className="text-3xl font-bold">{value}</div>
-      <div className="text-xs opacity-75 mt-1">{label}</div>
+    <div className={`rounded-xl p-4 border bg-gradient-to-br ${gradients[color]}`}>
+      <div className="flex items-center justify-between mb-2">
+        <span className={`text-xs font-medium opacity-75 ${textColors[color]}`}>{label}</span>
+        <span className={`${textColors[color]} opacity-60`}>{icon}</span>
+      </div>
+      <div className={`text-4xl font-bold ${textColors[color]}`}>{value}</div>
+    </div>
+  );
+}
+
+function BranchDistribution({ branches }: { branches: [string, number][] }) {
+  const total = branches.reduce((sum, [, count]) => sum + count, 0);
+  const palette = [
+    "bg-blue-500", "bg-green-500", "bg-amber-500", "bg-purple-500", "bg-pink-500",
+  ];
+
+  return (
+    <div className="bg-(--surface-1) rounded-xl border border-(--border-color) p-4">
+      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
+        Branch Distribution
+      </h3>
+      <div className="flex rounded-full h-3 overflow-hidden mb-3">
+        {branches.map(([branch, count], i) => (
+          <div
+            key={branch}
+            className={`${palette[i % palette.length]} transition-all duration-500`}
+            style={{ width: `${(count / total) * 100}%` }}
+            title={`${branch}: ${count} projects`}
+          />
+        ))}
+      </div>
+      <div className="space-y-1.5">
+        {branches.map(([branch, count], i) => (
+          <div key={branch} className="flex items-center gap-2 text-sm">
+            <span className={`w-2.5 h-2.5 rounded-full ${palette[i % palette.length]}`} />
+            <span className="font-mono text-gray-700 dark:text-gray-300 truncate flex-1">{branch}</span>
+            <span className="text-gray-500 text-xs">{count}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SyncRing({ ahead, behind, synced }: { ahead: number; behind: number; synced: number }) {
+  const total = ahead + behind + synced;
+  if (total === 0) return null;
+
+  const aheadPct = (ahead / total) * 100;
+  const behindPct = (behind / total) * 100;
+
+  return (
+    <div className="bg-(--surface-1) rounded-xl border border-(--border-color) p-4">
+      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
+        Sync Status
+      </h3>
+      <div className="flex items-center gap-4">
+        <div
+          className="w-20 h-20 rounded-full shrink-0"
+          style={{
+            background: `conic-gradient(
+              #22c55e 0% ${aheadPct}%,
+              #ef4444 ${aheadPct}% ${aheadPct + behindPct}%,
+              #6b7280 ${aheadPct + behindPct}% 100%
+            )`,
+          }}
+        >
+          <div className="w-14 h-14 rounded-full bg-(--surface-1) m-auto mt-3 flex items-center justify-center">
+            <span className="text-lg font-bold text-gray-700 dark:text-gray-300">{total}</span>
+          </div>
+        </div>
+        <div className="space-y-1.5 text-sm">
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-green-500" />
+            <span className="text-gray-600 dark:text-gray-400">Ahead: {ahead}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-red-500" />
+            <span className="text-gray-600 dark:text-gray-400">Behind: {behind}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-gray-500" />
+            <span className="text-gray-600 dark:text-gray-400">Synced: {synced}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ChangeHeatBar({ projects }: { projects: ProjectDetail[] }) {
+  const withChanges = projects
+    .filter((p) => p.status.modified + p.status.staged + p.status.untracked > 0)
+    .sort(
+      (a, b) =>
+        b.status.modified +
+        b.status.staged +
+        b.status.untracked -
+        (a.status.modified + a.status.staged + a.status.untracked)
+    )
+    .slice(0, 10);
+
+  if (withChanges.length === 0) return null;
+
+  const maxChanges = Math.max(
+    ...withChanges.map((p) => p.status.modified + p.status.staged + p.status.untracked)
+  );
+
+  return (
+    <div className="bg-(--surface-1) rounded-xl border border-(--border-color) p-4">
+      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
+        Change Activity
+      </h3>
+      <div className="space-y-2">
+        {withChanges.map((p) => {
+          const total = p.status.modified + p.status.staged + p.status.untracked;
+          const pct = (total / maxChanges) * 100;
+          return (
+            <div key={p.project.id} className="flex items-center gap-3">
+              <span className="text-xs text-gray-600 dark:text-gray-400 w-24 truncate text-right">
+                {p.project.alias || p.project.name}
+              </span>
+              <div className="flex-1 flex rounded-full h-3 overflow-hidden bg-gray-100 dark:bg-gray-800">
+                <div
+                  className="bg-yellow-500 transition-all duration-500"
+                  style={{ width: `${(p.status.modified / total) * pct}%` }}
+                  title={`${p.status.modified} modified`}
+                />
+                <div
+                  className="bg-green-500 transition-all duration-500"
+                  style={{ width: `${(p.status.staged / total) * pct}%` }}
+                  title={`${p.status.staged} staged`}
+                />
+                <div
+                  className="bg-gray-400 transition-all duration-500"
+                  style={{ width: `${(p.status.untracked / total) * pct}%` }}
+                  title={`${p.status.untracked} untracked`}
+                />
+              </div>
+              <span className="text-xs text-gray-500 w-8 text-right">{total}</span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

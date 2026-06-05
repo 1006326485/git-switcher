@@ -147,7 +147,7 @@ export const BranchDropdown = memo(function BranchDropdown({
         <div
           ref={portalRef}
           style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width, zIndex: 9999 }}
-          className="max-h-80 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg overflow-hidden"
+          className="max-h-80 bg-(--surface-1) border border-(--border-color) rounded-xl shadow-lg overflow-hidden animate-[fadeIn_0.15s_ease-out]"
         >
           <div className="p-2 border-b border-gray-200 dark:border-gray-700">
             <input

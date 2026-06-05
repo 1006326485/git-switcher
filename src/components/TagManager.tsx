@@ -168,7 +168,7 @@ export const TagManager = memo(function TagManager({
               </div>
             )}
             <PrimaryButton
-              color="red"
+              variant="danger"
               onClick={openConfirmDelete}
               disabled={!selectedTag || loading}
             >

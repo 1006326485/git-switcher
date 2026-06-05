@@ -58,7 +58,7 @@ export const Header = memo(function Header({
   onPushAll,
 }: HeaderProps) {
   return (
-    <div className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-4 select-none shrink-0">
+    <div className="bg-[var(--surface-1)] border-b border-[var(--border-color)] px-4 select-none shrink-0">
       <div className="flex items-center justify-between h-11">
         {/* ── Left: Brand ────────────────────────────────────────────── */}
         <div className="flex items-center gap-2">
@@ -96,7 +96,7 @@ export const Header = memo(function Header({
               autoCorrect="off"
               autoComplete="off"
               spellCheck={false}
-              className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/80 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400 dark:focus:border-blue-500 transition-all"
+              className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--surface-2)] text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400 dark:focus:border-blue-500 transition-all duration-150"
             />
           </div>
         </div>
@@ -115,7 +115,7 @@ export const Header = memo(function Header({
           <button
             onClick={onAddProject}
             aria-label="Add project"
-            className="h-8 px-3 rounded-lg bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-sm font-medium transition-all flex items-center gap-1.5 shadow-sm shadow-blue-600/20"
+            className="h-8 px-3 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] active:scale-[0.98] text-white text-sm font-medium transition-all duration-150 flex items-center gap-1.5 shadow-sm shadow-blue-600/20"
           >
             <PlusIcon />
             Add

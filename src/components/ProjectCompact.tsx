@@ -1,11 +1,8 @@
 import { memo } from "react";
 import type { ProjectDetail } from "../lib/types";
-import { StatusBadge, GroupDot, IconButton } from "./ui/primitives";
-import { ClockIcon, CloseIcon } from "./ui/icons";
+import { StatusBadge, GroupDot } from "./ui/primitives";
 import { BranchDropdown } from "./BranchDropdown";
 import { GitOpsPanel } from "./GitOpsPanel";
-import { ProjectContextMenu } from "./ProjectContextMenu";
-import { GroupAssignDropdown } from "./ProjectGroupsPanel";
 import { ProjectRowShell } from "./ProjectRowShell";
 import { useProjectActions } from "../context/ProjectContext";
 
@@ -19,13 +16,13 @@ const ProjectCompactRow = memo(function ProjectCompactRow({ detail }: { detail: 
 
   return (
     <ProjectRowShell detail={detail}>
-      {({ detail: d, row }) => {
+      {({ detail: d, row, actionButtons, errorBanner }) => {
         const { current_branch, branches, status } = d;
         const hasChanges = status.modified + status.staged + status.untracked > 0;
 
         return (
           <div className="relative group">
-            <div className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-lg transition-colors">
+            <div className="flex items-center gap-3 px-3 py-2 hover:bg-[var(--surface-2)] rounded-lg transition-colors duration-150">
               {/* Group dot */}
               <GroupDot color={group.color} name={group.name} size="sm" />
 
@@ -55,39 +52,13 @@ const ProjectCompactRow = memo(function ProjectCompactRow({ detail }: { detail: 
                 )}
               </div>
 
-              {/* Action buttons */}
-              <div className="flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-                <GroupAssignDropdown
-                  projectId={project.id}
-                  currentGroup={group}
-                  onRefresh={row.handleGitRefresh}
-                  onError={onError}
-                />
-                <IconButton onClick={row.handleOpenLog} title="Commit history" hoverColor="purple">
-                  <ClockIcon size={12} />
-                </IconButton>
-                <IconButton onClick={row.handleRefresh} title="Refresh" hoverColor="gray">
-                  <span className={row.refreshing ? "animate-spin inline-block text-sm" : "text-sm"}>
-                    &#x21BB;
-                  </span>
-                </IconButton>
-                <ProjectContextMenu
-                  path={project.path}
-                  onSuccess={onSuccess}
-                  onError={onError}
-                  onOpenBranchManager={row.handleOpenBranchMgr}
-                  onOpenLogViewer={row.handleOpenLog}
-                  onOpenAiReview={row.handleOpenAiReview}
-                />
-                <IconButton onClick={row.handleRemove} title="Remove" hoverColor="red">
-                  <CloseIcon size={12} />
-                </IconButton>
+              {/* Action buttons — visible on hover */}
+              <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                {actionButtons}
               </div>
             </div>
 
-            {row.error && (
-              <div className="pl-6 pr-3 pb-2 text-xs text-red-600 dark:text-red-400">{row.error}</div>
-            )}
+            {errorBanner}
 
             <GitOpsPanel
               path={project.path}
@@ -105,7 +76,7 @@ const ProjectCompactRow = memo(function ProjectCompactRow({ detail }: { detail: 
 
 export const ProjectCompact = memo(function ProjectCompact({ projects }: ProjectCompactProps) {
   return (
-    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden divide-y divide-gray-100 dark:divide-gray-700/50">
+    <div className="bg-[var(--surface-1)] border border-[var(--border-color)] rounded-xl overflow-hidden divide-y divide-gray-100 dark:divide-gray-700/50">
       {projects.map((detail) => (
         <ProjectCompactRow key={detail.project.id} detail={detail} />
       ))}

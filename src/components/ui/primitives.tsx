@@ -127,7 +127,7 @@ export const DropdownMenu = memo(function DropdownMenu({
             ref={dropdownRef}
             role="menu"
             style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 9999 }}
-            className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg py-1.5 min-w-[200px] animate-[fadeIn_0.12s_ease-out]"
+            className="bg-(--surface-1) border border-(--border-color) rounded-xl shadow-lg py-1.5 min-w-50 animate-[fadeIn_0.15s_ease-out]"
           >
             <div onClick={() => setTimeout(() => setOpen(false), 0)}>
               {children}
@@ -244,10 +244,10 @@ export const Modal = memo(function Modal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true" aria-labelledby={titleId}>
-      <div className="absolute inset-0 bg-black/50 dark:bg-black/70" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/50 dark:bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div
         ref={contentRef}
-        className={`relative bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full ${maxWidth} mx-4`}
+        className={`relative bg-[var(--surface-1)] rounded-2xl shadow-xl w-full ${maxWidth} mx-4`}
       >
         {/* Header */}
         <div className="px-6 pt-5 pb-3 flex items-center justify-between border-b border-gray-200 dark:border-gray-700">
@@ -445,24 +445,27 @@ export const PrimaryButton = memo(function PrimaryButton({
   children,
   onClick,
   disabled,
-  color = "blue",
+  variant = "primary",
 }: {
   children: React.ReactNode;
   onClick?: () => void;
   disabled?: boolean;
-  color?: "blue" | "green" | "red";
+  variant?: "primary" | "secondary" | "danger";
 }) {
-  const colors = {
-    blue: "bg-blue-600 hover:bg-blue-700 active:bg-blue-800 shadow-blue-600/20",
-    green: "bg-green-600 hover:bg-green-700 active:bg-green-800 shadow-green-600/20",
-    red: "bg-red-600 hover:bg-red-700 active:bg-red-800 shadow-red-600/20",
+  const variants = {
+    primary:
+      "bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white shadow-sm shadow-blue-600/20 active:scale-[0.98]",
+    secondary:
+      "bg-[var(--surface-2)] text-gray-700 dark:text-gray-300 border border-[var(--border-color)] hover:bg-gray-200 dark:hover:bg-gray-600 active:scale-[0.98]",
+    danger:
+      "bg-red-600 hover:bg-red-700 text-white shadow-sm shadow-red-600/20 active:scale-[0.98]",
   };
 
   return (
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`h-8 px-3 rounded-lg text-white text-sm font-medium transition-all flex items-center gap-1.5 shadow-sm disabled:bg-gray-400 disabled:shadow-none ${colors[color]}`}
+      className={`h-8 px-3 rounded-lg text-sm font-medium transition-all duration-150 flex items-center gap-1.5 disabled:bg-gray-400 disabled:shadow-none disabled:active:scale-100 ${variants[variant]}`}
     >
       {children}
     </button>
@@ -485,7 +488,7 @@ export const IconButton = memo(function IconButton({
   hoverColor?: "gray" | "red" | "blue" | "purple";
 }) {
   const hover = {
-    gray: "hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800",
+    gray: "hover:text-gray-600 dark:hover:text-gray-300 hover:bg-[var(--surface-2)]",
     red: "hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20",
     blue: "hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20",
     purple: "hover:text-purple-500 hover:bg-purple-50 dark:hover:bg-purple-900/20",
@@ -497,7 +500,7 @@ export const IconButton = memo(function IconButton({
       disabled={disabled}
       title={title}
       aria-label={title}
-      className={`p-1.5 rounded-md text-gray-400 transition-colors disabled:opacity-50 ${hover[hoverColor]}`}
+      className={`p-1.5 rounded-lg text-gray-400 transition-colors duration-150 disabled:opacity-50 active:scale-[0.95] ${hover[hoverColor]}`}
     >
       {children}
     </button>

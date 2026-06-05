@@ -13,7 +13,7 @@ export const BatchOpsToolbar = memo(function BatchOpsToolbar({ batchLoading, onF
       <button
         onClick={onFetchAll}
         disabled={!!batchLoading}
-        className="w-full text-left px-3 py-2 text-sm flex items-center gap-3 transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50 text-gray-700 dark:text-gray-300 disabled:opacity-50"
+        className="w-full text-left px-3 py-2 text-sm flex items-center gap-3 transition-colors duration-150 hover:bg-[var(--surface-2)] text-gray-700 dark:text-gray-300 disabled:opacity-50 active:scale-[0.98]"
       >
         <span className="shrink-0 w-5 h-5 flex items-center justify-center text-gray-400 dark:text-gray-500">
           {batchLoading === "fetch" ? (
@@ -36,7 +36,7 @@ export const BatchOpsToolbar = memo(function BatchOpsToolbar({ batchLoading, onF
       <button
         onClick={onPullAll}
         disabled={!!batchLoading}
-        className="w-full text-left px-3 py-2 text-sm flex items-center gap-3 transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50 text-gray-700 dark:text-gray-300 disabled:opacity-50"
+        className="w-full text-left px-3 py-2 text-sm flex items-center gap-3 transition-colors duration-150 hover:bg-[var(--surface-2)] text-gray-700 dark:text-gray-300 disabled:opacity-50 active:scale-[0.98]"
       >
         <span className="shrink-0 w-5 h-5 flex items-center justify-center text-gray-400 dark:text-gray-500">
           {batchLoading === "pull" ? (
@@ -60,7 +60,7 @@ export const BatchOpsToolbar = memo(function BatchOpsToolbar({ batchLoading, onF
       <button
         onClick={onPushAll}
         disabled={!!batchLoading}
-        className="w-full text-left px-3 py-2 text-sm flex items-center gap-3 transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50 text-gray-700 dark:text-gray-300 disabled:opacity-50"
+        className="w-full text-left px-3 py-2 text-sm flex items-center gap-3 transition-colors duration-150 hover:bg-[var(--surface-2)] text-gray-700 dark:text-gray-300 disabled:opacity-50 active:scale-[0.98]"
       >
         <span className="shrink-0 w-5 h-5 flex items-center justify-center text-gray-400 dark:text-gray-500">
           {batchLoading === "push" ? (
