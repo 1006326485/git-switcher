@@ -1,10 +1,10 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::State;
 
-use crate::AppError;
 use crate::models::{AppSettings, LlmConfig};
+use crate::AppError;
 
 const KEYCHAIN_SERVICE: &str = "git-switcher";
 const KEYCHAIN_USER: &str = "llm-api-key";
@@ -19,11 +19,14 @@ impl SettingsStore {
     where
         F: FnOnce(&AppSettings) -> Result<T, AppError>,
     {
-        let settings = self.settings.lock().map_err(|e| AppError::Other(format!("Lock poisoned: {}", e)))?;
+        let settings = self
+            .settings
+            .lock()
+            .map_err(|e| AppError::Other(format!("Lock poisoned: {}", e)))?;
         f(&settings)
     }
 
-    pub fn new(app_data_dir: &PathBuf) -> Self {
+    pub fn new(app_data_dir: &Path) -> Self {
         let path = app_data_dir.join("settings.json");
         let settings = if path.exists() {
             match fs::read_to_string(&path) {
@@ -71,7 +74,10 @@ impl SettingsStore {
     pub fn update_all(&self, new_settings: &AppSettings) -> Result<(), AppError> {
         // Write to disk first so in-memory and disk stay consistent on failure
         self.save(new_settings)?;
-        let mut settings = self.settings.lock().map_err(|e| AppError::Other(format!("Lock poisoned: {}", e)))?;
+        let mut settings = self
+            .settings
+            .lock()
+            .map_err(|e| AppError::Other(format!("Lock poisoned: {}", e)))?;
         *settings = new_settings.clone();
         Ok(())
     }
@@ -90,7 +96,10 @@ pub fn get_settings(store: State<'_, SettingsStore>) -> Result<AppSettings, AppE
 }
 
 #[tauri::command]
-pub fn update_settings(new_settings: AppSettings, store: State<'_, SettingsStore>) -> Result<AppSettings, AppError> {
+pub fn update_settings(
+    new_settings: AppSettings,
+    store: State<'_, SettingsStore>,
+) -> Result<AppSettings, AppError> {
     store.update_all(&new_settings)?;
     Ok(new_settings)
 }
@@ -119,7 +128,8 @@ pub fn update_settings_partial(
 pub fn set_llm_api_key(key: String, store: State<'_, SettingsStore>) -> Result<(), AppError> {
     let entry = keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_USER)
         .map_err(|e| AppError::Other(format!("Keychain error: {}", e)))?;
-    entry.set_password(&key)
+    entry
+        .set_password(&key)
         .map_err(|e| AppError::Other(format!("Failed to store key: {}", e)))?;
     // Mark key as stored in keyring and clear plaintext from settings
     let mut settings = store.get_all()?;

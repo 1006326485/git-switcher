@@ -1,10 +1,10 @@
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
-use rusqlite::{Connection, params};
+use rusqlite::{params, Connection};
 use std::path::PathBuf;
 
-use crate::AppError;
 use crate::models::{GitProject, Group, ReviewResult};
+use crate::AppError;
 
 #[derive(Clone)]
 pub struct Database {
@@ -242,7 +242,7 @@ impl Database {
                 .map_err(|e| AppError::Database(format!("Failed to prepare statement: {}", e)))?;
 
             let projects = stmt
-                .query_map([], |row| Self::row_to_project(row))
+                .query_map([], Self::row_to_project)
                 .map_err(|e| AppError::Database(format!("Failed to query projects: {}", e)))?
                 .filter_map(|r| {
                     r.map_err(|e| log::warn!("skipping corrupt project row: {}", e))
@@ -259,7 +259,7 @@ impl Database {
             conn.query_row(
                 "SELECT id, name, path, alias, sort_order, group_id, last_active_at, last_commit_hash, created_at, updated_at FROM projects WHERE path = ?1",
                 params![path],
-                |row| Self::row_to_project(row),
+                Self::row_to_project,
             )
             .map_err(|e| AppError::NotFound(format!("Project not found at path '{}': {}", path, e)))
         })
@@ -360,7 +360,7 @@ impl Database {
                 .map_err(|e| AppError::Database(format!("Failed to prepare groups: {}", e)))?;
 
             let groups = stmt
-                .query_map([], |row| Self::row_to_group(row))
+                .query_map([], Self::row_to_group)
                 .map_err(|e| AppError::Database(format!("Failed to query groups: {}", e)))?
                 .filter_map(|r| {
                     r.map_err(|e| log::warn!("skipping corrupt group row: {}", e))
@@ -377,7 +377,7 @@ impl Database {
             conn.query_row(
                 "SELECT id, name, color, sort_order, created_at FROM groups WHERE id = ?1",
                 params![id],
-                |row| Self::row_to_group(row),
+                Self::row_to_group,
             )
             .map_err(|e| AppError::NotFound(format!("Group not found: {}", e)))
         })
@@ -425,16 +425,25 @@ impl Database {
 
     // ── Project-Group relations ─────────────────────────────────────────
 
-    pub fn assign_project_to_group(&self, project_id: &str, group_id: &str) -> Result<(), AppError> {
+    pub fn assign_project_to_group(
+        &self,
+        project_id: &str,
+        group_id: &str,
+    ) -> Result<(), AppError> {
         self.with_conn(|conn| {
             let affected = conn
                 .execute(
                     "UPDATE projects SET group_id = ?1, updated_at = datetime('now') WHERE id = ?2",
                     params![group_id, project_id],
                 )
-                .map_err(|e| AppError::Database(format!("Failed to assign project to group: {}", e)))?;
+                .map_err(|e| {
+                    AppError::Database(format!("Failed to assign project to group: {}", e))
+                })?;
             if affected == 0 {
-                return Err(AppError::NotFound(format!("Project not found: {}", project_id)));
+                return Err(AppError::NotFound(format!(
+                    "Project not found: {}",
+                    project_id
+                )));
             }
             Ok(())
         })
@@ -447,7 +456,7 @@ impl Database {
                  FROM groups g JOIN projects p ON g.id = p.group_id
                  WHERE p.id = ?1",
                 params![project_id],
-                |row| Self::row_to_group(row),
+                Self::row_to_group,
             )
             .map_err(|e| AppError::NotFound(format!("Project group not found: {}", e)))
         })
@@ -461,7 +470,7 @@ impl Database {
                 .map_err(|e| AppError::Database(format!("Failed to prepare get_projects_in_group: {}", e)))?;
 
             let projects = stmt
-                .query_map(params![group_id], |row| Self::row_to_project(row))
+                .query_map(params![group_id], Self::row_to_project)
                 .map_err(|e| AppError::Database(format!("Failed to query get_projects_in_group: {}", e)))?
                 .filter_map(|r| {
                     r.map_err(|e| log::warn!("skipping corrupt project row: {}", e))
@@ -473,7 +482,11 @@ impl Database {
         })
     }
 
-    pub fn reassign_group_projects(&self, old_group_id: &str, new_group_id: &str) -> Result<(), AppError> {
+    pub fn reassign_group_projects(
+        &self,
+        old_group_id: &str,
+        new_group_id: &str,
+    ) -> Result<(), AppError> {
         self.with_conn(|conn| {
             conn.execute(
                 "UPDATE projects SET group_id = ?1, updated_at = datetime('now') WHERE group_id = ?2",
@@ -513,7 +526,10 @@ impl Database {
         })
     }
 
-    pub fn get_reviews_for_project(&self, project_path: &str) -> Result<Vec<ReviewResult>, AppError> {
+    pub fn get_reviews_for_project(
+        &self,
+        project_path: &str,
+    ) -> Result<Vec<ReviewResult>, AppError> {
         self.with_conn(|conn| {
             let mut stmt = conn
                 .prepare(

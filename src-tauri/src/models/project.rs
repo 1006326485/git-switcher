@@ -148,10 +148,10 @@ pub struct BranchDiff {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiffFile {
     pub path: String,
-    pub status: String,   // "added", "modified", "deleted", "renamed"
+    pub status: String, // "added", "modified", "deleted", "renamed"
     pub additions: u32,
     pub deletions: u32,
-    pub patch: String,    // unified diff hunks
+    pub patch: String, // unified diff hunks
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

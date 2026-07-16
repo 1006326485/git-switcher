@@ -1,6 +1,7 @@
 import { memo, useState } from "react";
 import { Modal, Tabs } from "./ui/primitives";
 import { LlmSettings } from "./LlmSettings";
+import { APP_VERSION } from "../lib/appVersion";
 
 interface SettingsDialogProps {
   open: boolean;
@@ -25,7 +26,7 @@ export const SettingsDialog = memo(function SettingsDialog({ open, onClose, onEr
         {tab === "llm" && <LlmSettings onError={onError} />}
         {tab === "about" && (
           <div className="space-y-3 text-sm text-gray-600 dark:text-gray-400">
-            <p className="font-semibold text-gray-900 dark:text-gray-100">Git Switcher v1.0.0</p>
+            <p className="font-semibold text-gray-900 dark:text-gray-100">Git Switcher v{APP_VERSION}</p>
             <p>Multi-repo Git management tool with AI-powered code review.</p>
             <div className="text-xs text-gray-400">
               <p>Built with Tauri v2 + React + TypeScript + Rust</p>

@@ -2,12 +2,16 @@ use chrono::Utc;
 use tauri::State;
 use uuid::Uuid;
 
-use crate::AppError;
 use crate::db::Database;
 use crate::models::{Group, ProjectDetail};
+use crate::AppError;
 
 #[tauri::command]
-pub async fn create_group(name: String, color: Option<String>, db: State<'_, Database>) -> Result<Group, AppError> {
+pub async fn create_group(
+    name: String,
+    color: Option<String>,
+    db: State<'_, Database>,
+) -> Result<Group, AppError> {
     let db = db.inner().clone();
     tokio::task::spawn_blocking(move || {
         let now = Utc::now().to_rfc3339();
@@ -53,7 +57,11 @@ pub async fn delete_group(id: String, db: State<'_, Database>) -> Result<(), App
 }
 
 #[tauri::command]
-pub async fn assign_to_group(project_id: String, group_id: String, db: State<'_, Database>) -> Result<(), AppError> {
+pub async fn assign_to_group(
+    project_id: String,
+    group_id: String,
+    db: State<'_, Database>,
+) -> Result<(), AppError> {
     let db = db.inner().clone();
     tokio::task::spawn_blocking(move || db.assign_project_to_group(&project_id, &group_id))
         .await
@@ -61,7 +69,10 @@ pub async fn assign_to_group(project_id: String, group_id: String, db: State<'_,
 }
 
 #[tauri::command]
-pub async fn list_projects_in_group(group_id: String, db: State<'_, Database>) -> Result<Vec<ProjectDetail>, AppError> {
+pub async fn list_projects_in_group(
+    group_id: String,
+    db: State<'_, Database>,
+) -> Result<Vec<ProjectDetail>, AppError> {
     let db = db.inner().clone();
     tokio::task::spawn_blocking(move || {
         let projects = db.get_projects_in_group(&group_id)?;

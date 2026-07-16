@@ -1,17 +1,17 @@
-pub mod projects;
-pub mod git;
-pub mod settings;
-pub mod groups;
 pub mod ai_review;
-pub mod op_tracker;
 pub mod events;
+pub mod git;
+pub mod groups;
+pub mod op_tracker;
+pub mod projects;
+pub mod settings;
 
-pub use projects::*;
-pub use git::*;
-pub use settings::*;
-pub use groups::*;
 pub use ai_review::*;
+pub use git::*;
+pub use groups::*;
 pub use op_tracker::*;
+pub use projects::*;
+pub use settings::*;
 
 use crate::db::Database;
 use crate::models::{GitProject, Group, ProjectDetail};

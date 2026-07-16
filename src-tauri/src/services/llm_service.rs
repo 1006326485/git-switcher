@@ -1,11 +1,11 @@
 use git2::{Delta, DiffOptions, Patch, Repository};
 use tauri::{AppHandle, Emitter};
 
-use crate::AppError;
 use crate::models::{
     BranchDiff, DiffFile, DiffStats, FindingCategory, FindingSeverity, LlmConfig, ReviewFinding,
     ReviewResult,
 };
+use crate::AppError;
 use chrono::Utc;
 use uuid::Uuid;
 
@@ -33,13 +33,12 @@ fn is_excluded_path(path: &str) -> bool {
     ];
     static EXCLUDED_PREFIXES: &[&str] = &["node_modules/", "dist/", "target/", ".git/"];
     static EXCLUDED_EXTENSIONS: &[&str] = &[
-        ".min.js", ".min.css", ".map", ".png", ".jpg", ".jpeg", ".gif",
-        ".ico", ".icns", ".svg", ".woff", ".woff2", ".ttf", ".eot",
-        ".wasm", ".lock",
+        ".min.js", ".min.css", ".map", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".icns", ".svg",
+        ".woff", ".woff2", ".ttf", ".eot", ".wasm", ".lock",
     ];
 
     let basename = path.rsplit('/').next().unwrap_or(path);
-    if EXCLUDED.iter().any(|&e| basename == e) {
+    if EXCLUDED.contains(&basename) {
         return true;
     }
     if EXCLUDED_PREFIXES.iter().any(|&p| path.starts_with(p)) {
@@ -62,14 +61,19 @@ impl LlmService {
         base_branch: &str,
         head_branch: &str,
     ) -> Result<BranchDiff, AppError> {
-        let repo = Repository::open(path).map_err(|e| AppError::Git(format!("Failed to open repo: {}", e)))?;
+        let repo = Repository::open(path)
+            .map_err(|e| AppError::Git(format!("Failed to open repo: {}", e)))?;
 
         let base_ref = repo
             .resolve_reference_from_short_name(base_branch)
-            .map_err(|e| AppError::Git(format!("Base branch '{}' not found: {}", base_branch, e)))?;
+            .map_err(|e| {
+                AppError::Git(format!("Base branch '{}' not found: {}", base_branch, e))
+            })?;
         let head_ref = repo
             .resolve_reference_from_short_name(head_branch)
-            .map_err(|e| AppError::Git(format!("Head branch '{}' not found: {}", head_branch, e)))?;
+            .map_err(|e| {
+                AppError::Git(format!("Head branch '{}' not found: {}", head_branch, e))
+            })?;
 
         let base_commit = base_ref
             .peel_to_commit()
@@ -184,7 +188,9 @@ impl LlmService {
         config: &LlmConfig,
     ) -> Result<ReviewResult, AppError> {
         if config.api_key.is_empty() {
-            return Err(AppError::Llm("API key is not configured. Go to Settings to set up LLM.".to_string()));
+            return Err(AppError::Llm(
+                "API key is not configured. Go to Settings to set up LLM.".to_string(),
+            ));
         }
 
         let diff_text = Self::format_diff_for_llm(diff);
@@ -218,7 +224,10 @@ impl LlmService {
                 continue;
             }
             // Stop at next top-level section
-            if in_findings_section && trimmed.starts_with("## ") && !trimmed.eq_ignore_ascii_case("## Findings") {
+            if in_findings_section
+                && trimmed.starts_with("## ")
+                && !trimmed.eq_ignore_ascii_case("## Findings")
+            {
                 break;
             }
 
@@ -227,8 +236,7 @@ impl LlmService {
             }
 
             // Parse finding headings like: ### 🔴 [Critical] Title
-            if trimmed.starts_with("### ") {
-                let heading = &trimmed[4..];
+            if let Some(heading) = trimmed.strip_prefix("### ") {
                 let (severity, title) = Self::parse_finding_heading(heading);
                 findings.push(ReviewFinding {
                     severity,
@@ -255,9 +263,8 @@ impl LlmService {
                             let after = &file_info[start + 1 + end + 1..];
                             if let Some(paren_start) = after.find('(') {
                                 if let Some(paren_end) = after.find(')') {
-                                    finding.line_hint = Some(
-                                        after[paren_start + 1..paren_end].to_string(),
-                                    );
+                                    finding.line_hint =
+                                        Some(after[paren_start + 1..paren_end].to_string());
                                 }
                             }
                         }
@@ -341,7 +348,9 @@ impl LlmService {
         config: &LlmConfig,
     ) -> Result<String, AppError> {
         if config.api_key.is_empty() {
-            return Err(AppError::Llm("API key is not configured. Go to Settings to set up LLM.".to_string()));
+            return Err(AppError::Llm(
+                "API key is not configured. Go to Settings to set up LLM.".to_string(),
+            ));
         }
 
         // Get staged diff via git diff --cached
@@ -352,7 +361,9 @@ impl LlmService {
 
         let diff_stat = String::from_utf8_lossy(&diff_output.stdout);
         if diff_stat.trim().is_empty() {
-            return Err(AppError::Other("No staged changes found. Stage files first.".to_string()));
+            return Err(AppError::Other(
+                "No staged changes found. Stage files first.".to_string(),
+            ));
         }
 
         // Get full staged diff (truncated)
@@ -525,7 +536,10 @@ One paragraph overall assessment of this diff.
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(AppError::Llm(format!("LLM API error ({}): {}", status, body)));
+            return Err(AppError::Llm(format!(
+                "LLM API error ({}): {}",
+                status, body
+            )));
         }
 
         let json: serde_json::Value = response
@@ -548,7 +562,9 @@ One paragraph overall assessment of this diff.
         app: &AppHandle,
     ) -> Result<ReviewResult, AppError> {
         if config.api_key.is_empty() {
-            return Err(AppError::Llm("API key is not configured. Go to Settings to set up LLM.".to_string()));
+            return Err(AppError::Llm(
+                "API key is not configured. Go to Settings to set up LLM.".to_string(),
+            ));
         }
 
         let diff_text = Self::format_diff_for_llm(diff);
@@ -572,7 +588,9 @@ One paragraph overall assessment of this diff.
     /// Build the chat/completions URL from a config endpoint.
     fn build_chat_url(endpoint: &str) -> Result<String, AppError> {
         if !endpoint.starts_with("https://") {
-            return Err(AppError::Llm("LLM endpoint must use HTTPS to protect your API key".to_string()));
+            return Err(AppError::Llm(
+                "LLM endpoint must use HTTPS to protect your API key".to_string(),
+            ));
         }
         Ok(if endpoint.ends_with("/chat/completions") {
             endpoint.to_string()
@@ -637,7 +655,10 @@ One paragraph overall assessment of this diff.
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(AppError::Llm(format!("LLM API error ({}): {}", status, body)));
+            return Err(AppError::Llm(format!(
+                "LLM API error ({}): {}",
+                status, body
+            )));
         }
 
         use futures_util::StreamExt;
@@ -646,8 +667,8 @@ One paragraph overall assessment of this diff.
         let mut buffer = String::new();
 
         while let Some(chunk_result) = stream.next().await {
-            let chunk = chunk_result
-                .map_err(|e| AppError::Llm(format!("Stream read error: {}", e)))?;
+            let chunk =
+                chunk_result.map_err(|e| AppError::Llm(format!("Stream read error: {}", e)))?;
 
             buffer.push_str(&String::from_utf8_lossy(&chunk));
 

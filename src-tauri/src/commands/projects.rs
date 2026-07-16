@@ -1,10 +1,10 @@
 use std::path::Path;
 use tauri::State;
 
-use crate::AppError;
 use crate::db::Database;
 use crate::models::{GitProject, ProjectDetail};
 use crate::services::{GitService, WorkspaceService};
+use crate::AppError;
 
 use super::try_update_activity;
 
@@ -68,10 +68,16 @@ fn import_projects_core(
 
     if results.is_empty() {
         if !errors.is_empty() {
-            return Err(AppError::Other(format!("Import failed: {}", errors.join("; "))));
+            return Err(AppError::Other(format!(
+                "Import failed: {}",
+                errors.join("; ")
+            )));
         }
         if skipped > 0 {
-            return Err(AppError::Other(format!("All {} project(s) already exist", skipped)));
+            return Err(AppError::Other(format!(
+                "All {} project(s) already exist",
+                skipped
+            )));
         }
     }
 
@@ -83,7 +89,11 @@ fn import_projects_core(
 }
 
 #[tauri::command]
-pub async fn add_project(path: String, group_id: String, db: State<'_, Database>) -> Result<ProjectDetail, AppError> {
+pub async fn add_project(
+    path: String,
+    group_id: String,
+    db: State<'_, Database>,
+) -> Result<ProjectDetail, AppError> {
     let db = db.inner().clone();
     tokio::task::spawn_blocking(move || {
         let path = canonicalize_path(&path)?;
@@ -102,7 +112,11 @@ pub async fn add_project(path: String, group_id: String, db: State<'_, Database>
         db.insert_project(&project)?;
 
         let detail = GitService::get_project_detail(&project, group)?;
-        try_update_activity(&db, &detail.project.id, detail.project.last_commit_hash.as_deref());
+        try_update_activity(
+            &db,
+            &detail.project.id,
+            detail.project.last_commit_hash.as_deref(),
+        );
         Ok(detail)
     })
     .await
@@ -129,12 +143,18 @@ pub async fn list_projects(db: State<'_, Database>) -> Result<Vec<ProjectDetail>
 }
 
 #[tauri::command]
-pub async fn import_workspace(file_path: String, group_id: String, db: State<'_, Database>) -> Result<Vec<ProjectDetail>, AppError> {
+pub async fn import_workspace(
+    file_path: String,
+    group_id: String,
+    db: State<'_, Database>,
+) -> Result<Vec<ProjectDetail>, AppError> {
     let db = db.inner().clone();
     tokio::task::spawn_blocking(move || {
         let folders = WorkspaceService::parse_workspace_file(&file_path)?;
         if folders.is_empty() {
-            return Err(AppError::Other("No folders found in workspace file".to_string()));
+            return Err(AppError::Other(
+                "No folders found in workspace file".to_string(),
+            ));
         }
         let entries = folders.into_iter().map(|f| (f.name, f.path));
         import_projects_core(entries, &group_id, &db)
@@ -144,13 +164,20 @@ pub async fn import_workspace(file_path: String, group_id: String, db: State<'_,
 }
 
 #[tauri::command]
-pub async fn init_git_project(path: String, name: String, group_id: String, db: State<'_, Database>) -> Result<ProjectDetail, AppError> {
+pub async fn init_git_project(
+    path: String,
+    name: String,
+    group_id: String,
+    db: State<'_, Database>,
+) -> Result<ProjectDetail, AppError> {
     let db = db.inner().clone();
     tokio::task::spawn_blocking(move || {
         let path = canonicalize_path(&path)?;
 
         if db.project_exists(&path)? {
-            return Err(AppError::Other("Project already exists at this path".to_string()));
+            return Err(AppError::Other(
+                "Project already exists at this path".to_string(),
+            ));
         }
 
         GitService::init_repo(&path)?;
@@ -160,7 +187,11 @@ pub async fn init_git_project(path: String, name: String, group_id: String, db: 
         db.insert_project(&project)?;
 
         let detail = GitService::get_project_detail(&project, group)?;
-        try_update_activity(&db, &detail.project.id, detail.project.last_commit_hash.as_deref());
+        try_update_activity(
+            &db,
+            &detail.project.id,
+            detail.project.last_commit_hash.as_deref(),
+        );
         Ok(detail)
     })
     .await
@@ -168,7 +199,11 @@ pub async fn init_git_project(path: String, name: String, group_id: String, db: 
 }
 
 #[tauri::command]
-pub async fn set_project_alias(id: String, alias: String, db: State<'_, Database>) -> Result<(), AppError> {
+pub async fn set_project_alias(
+    id: String,
+    alias: String,
+    db: State<'_, Database>,
+) -> Result<(), AppError> {
     let db = db.inner().clone();
     tokio::task::spawn_blocking(move || db.update_project_alias(&id, &alias))
         .await
@@ -176,7 +211,10 @@ pub async fn set_project_alias(id: String, alias: String, db: State<'_, Database
 }
 
 #[tauri::command]
-pub async fn reorder_projects(ordered_ids: Vec<String>, db: State<'_, Database>) -> Result<(), AppError> {
+pub async fn reorder_projects(
+    ordered_ids: Vec<String>,
+    db: State<'_, Database>,
+) -> Result<(), AppError> {
     let db = db.inner().clone();
     tokio::task::spawn_blocking(move || db.reorder_projects(&ordered_ids))
         .await
@@ -191,14 +229,14 @@ pub async fn open_in_terminal(path: String) -> Result<(), AppError> {
             std::process::Command::new("open")
                 .args(["-a", "Terminal", &path])
                 .spawn()
-                .map_err(|e| AppError::Io(e))?;
+                .map_err(AppError::Io)?;
         }
         #[cfg(target_os = "linux")]
         {
             std::process::Command::new("xdg-open")
                 .arg(&path)
                 .spawn()
-                .map_err(|e| AppError::Io(e))?;
+                .map_err(AppError::Io)?;
         }
         #[cfg(target_os = "windows")]
         {
@@ -206,13 +244,14 @@ pub async fn open_in_terminal(path: String) -> Result<(), AppError> {
             const FORBIDDEN: &[char] = &['"', '&', '|', '>', '<', '^', '%', ';', '(', ')'];
             if let Some(c) = path.chars().find(|c| FORBIDDEN.contains(c)) {
                 return Err(AppError::Other(format!(
-                    "Path contains forbidden character '{}' for Windows command line", c
+                    "Path contains forbidden character '{}' for Windows command line",
+                    c
                 )));
             }
             std::process::Command::new("cmd")
                 .args(["/C", "start", "cmd", "/K", &format!("cd /d \"{}\"", path)])
                 .spawn()
-                .map_err(|e| AppError::Io(e))?;
+                .map_err(AppError::Io)?;
         }
         Ok(())
     })
@@ -232,11 +271,17 @@ fn spawn_command(program: &str, args: &[&str], label: &str) -> Result<(), AppErr
 pub async fn open_in_finder(path: String) -> Result<(), AppError> {
     tokio::task::spawn_blocking(move || {
         #[cfg(target_os = "macos")]
-        { spawn_command("open", &[&path], "Finder")?; }
+        {
+            spawn_command("open", &[&path], "Finder")?;
+        }
         #[cfg(target_os = "linux")]
-        { spawn_command("xdg-open", &[&path], "file manager")?; }
+        {
+            spawn_command("xdg-open", &[&path], "file manager")?;
+        }
         #[cfg(target_os = "windows")]
-        { spawn_command("explorer", &[&path], "Explorer")?; }
+        {
+            spawn_command("explorer", &[&path], "Explorer")?;
+        }
         Ok(())
     })
     .await
@@ -247,11 +292,17 @@ pub async fn open_in_finder(path: String) -> Result<(), AppError> {
 pub async fn open_in_vscode(path: String) -> Result<(), AppError> {
     tokio::task::spawn_blocking(move || {
         #[cfg(target_os = "macos")]
-        { spawn_command("code", &[&path], "VS Code")?; }
+        {
+            spawn_command("code", &[&path], "VS Code")?;
+        }
         #[cfg(target_os = "linux")]
-        { spawn_command("code", &[&path], "VS Code")?; }
+        {
+            spawn_command("code", &[&path], "VS Code")?;
+        }
         #[cfg(target_os = "windows")]
-        { spawn_command("cmd", &["/C", "code", &path], "VS Code")?; }
+        {
+            spawn_command("cmd", &["/C", "code", &path], "VS Code")?;
+        }
         Ok(())
     })
     .await
@@ -271,7 +322,11 @@ pub async fn export_projects(db: State<'_, Database>) -> Result<String, AppError
 }
 
 #[tauri::command]
-pub async fn import_projects(json: String, group_id: String, db: State<'_, Database>) -> Result<Vec<ProjectDetail>, AppError> {
+pub async fn import_projects(
+    json: String,
+    group_id: String,
+    db: State<'_, Database>,
+) -> Result<Vec<ProjectDetail>, AppError> {
     let db = db.inner().clone();
     tokio::task::spawn_blocking(move || {
         let projects: Vec<GitProject> = serde_json::from_str(&json)

@@ -1,33 +1,23 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Theme {
     Light,
     Dark,
+    #[default]
     System,
 }
 
-impl Default for Theme {
-    fn default() -> Self {
-        Theme::System
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum ViewMode {
+    #[default]
     Card,
     List,
     Compact,
     Table,
     Dashboard,
-}
-
-impl Default for ViewMode {
-    fn default() -> Self {
-        ViewMode::Card
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

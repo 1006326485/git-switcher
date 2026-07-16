@@ -1,9 +1,12 @@
 use tauri::{AppHandle, Emitter, State};
 
-use crate::AppError;
 use crate::db::Database;
-use crate::models::{BatchResult, BranchInfo, CommitInfo, GitFileEntry, GitStatus, MergeResult, ProjectDetail, StashInfo, TagInfo};
+use crate::models::{
+    BatchResult, BranchInfo, CommitInfo, GitFileEntry, GitStatus, MergeResult, ProjectDetail,
+    StashInfo, TagInfo,
+};
 use crate::services::GitService;
+use crate::AppError;
 
 use super::events::{emit_op_done, emit_op_error, emit_op_start};
 use super::op_tracker::next_op_id;
@@ -14,7 +17,10 @@ fn validate_repo_path(path: &str) -> Result<std::path::PathBuf, AppError> {
     let canonical = std::fs::canonicalize(path)
         .map_err(|e| AppError::NotFound(format!("Invalid path '{}': {}", path, e)))?;
     if !GitService::is_git_repo(&canonical.to_string_lossy()) {
-        return Err(AppError::NotFound(format!("Not a git repository: {}", canonical.display())));
+        return Err(AppError::NotFound(format!(
+            "Not a git repository: {}",
+            canonical.display()
+        )));
     }
     Ok(canonical)
 }
@@ -57,7 +63,11 @@ pub async fn switch_branch(
         let _canonical = validate_repo_path(&path_clone)?;
         GitService::switch_branch(&path_clone, &branch_clone)?;
         let detail = get_project_detail_for_path(&db, &path_clone)?;
-        try_update_activity(&db, &detail.project.id, detail.project.last_commit_hash.as_deref());
+        try_update_activity(
+            &db,
+            &detail.project.id,
+            detail.project.last_commit_hash.as_deref(),
+        );
         Ok(detail)
     })
     .await
@@ -91,7 +101,11 @@ pub async fn refresh_project(
         let project = db.get_project_by_path(&path)?;
         let group = db.get_project_group(&project.id)?;
         let detail = GitService::get_project_detail(&project, group)?;
-        try_update_activity(&db, &detail.project.id, detail.project.last_commit_hash.as_deref());
+        try_update_activity(
+            &db,
+            &detail.project.id,
+            detail.project.last_commit_hash.as_deref(),
+        );
         Ok(detail)
     })
     .await
@@ -152,20 +166,16 @@ pub async fn git_unstage_file(path: String, file: String) -> Result<(), AppError
 
 #[tauri::command]
 pub async fn git_stage_all(path: String) -> Result<(), AppError> {
-    tokio::task::spawn_blocking(move || -> Result<(), AppError> {
-        GitService::stage_all(&path)
-    })
-    .await
-    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
+    tokio::task::spawn_blocking(move || -> Result<(), AppError> { GitService::stage_all(&path) })
+        .await
+        .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
 }
 
 #[tauri::command]
 pub async fn git_unstage_all(path: String) -> Result<(), AppError> {
-    tokio::task::spawn_blocking(move || -> Result<(), AppError> {
-        GitService::unstage_all(&path)
-    })
-    .await
-    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
+    tokio::task::spawn_blocking(move || -> Result<(), AppError> { GitService::unstage_all(&path) })
+        .await
+        .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
 }
 
 #[tauri::command]
@@ -209,7 +219,11 @@ pub async fn git_commit(
 }
 
 #[tauri::command]
-pub async fn git_stash(path: String, message: Option<String>, app: AppHandle) -> Result<String, AppError> {
+pub async fn git_stash(
+    path: String,
+    message: Option<String>,
+    app: AppHandle,
+) -> Result<String, AppError> {
     let op_id = next_op_id();
     emit_op_start(&app, op_id, "stash", &path);
 
@@ -230,7 +244,11 @@ pub async fn git_stash(path: String, message: Option<String>, app: AppHandle) ->
 }
 
 #[tauri::command]
-pub async fn git_stash_apply(path: String, index: usize, app: AppHandle) -> Result<String, AppError> {
+pub async fn git_stash_apply(
+    path: String,
+    index: usize,
+    app: AppHandle,
+) -> Result<String, AppError> {
     let op_id = next_op_id();
     emit_op_start(&app, op_id, "stash_apply", &path);
 
@@ -273,7 +291,11 @@ pub async fn delete_branch(path: String, name: String) -> Result<(), AppError> {
 }
 
 #[tauri::command]
-pub async fn merge_branch(path: String, branch: String, app: AppHandle) -> Result<MergeResult, AppError> {
+pub async fn merge_branch(
+    path: String,
+    branch: String,
+    app: AppHandle,
+) -> Result<MergeResult, AppError> {
     let op_id = next_op_id();
     emit_op_start(&app, op_id, "merge", &path);
 
@@ -296,7 +318,11 @@ pub async fn merge_branch(path: String, branch: String, app: AppHandle) -> Resul
 }
 
 #[tauri::command]
-pub async fn git_cherry_pick(path: String, commit_hash: String, app: AppHandle) -> Result<MergeResult, AppError> {
+pub async fn git_cherry_pick(
+    path: String,
+    commit_hash: String,
+    app: AppHandle,
+) -> Result<MergeResult, AppError> {
     let op_id = next_op_id();
     emit_op_start(&app, op_id, "cherry_pick", &path);
 
@@ -319,7 +345,11 @@ pub async fn git_cherry_pick(path: String, commit_hash: String, app: AppHandle) 
 }
 
 #[tauri::command]
-pub async fn git_rebase(path: String, onto_branch: String, app: AppHandle) -> Result<String, AppError> {
+pub async fn git_rebase(
+    path: String,
+    onto_branch: String,
+    app: AppHandle,
+) -> Result<String, AppError> {
     let op_id = next_op_id();
     emit_op_start(&app, op_id, "rebase", &path);
 
@@ -413,7 +443,11 @@ pub async fn git_fetch(path: String, app: AppHandle) -> Result<String, AppError>
 }
 
 #[tauri::command]
-pub async fn git_stash_pop(path: String, index: Option<usize>, app: AppHandle) -> Result<String, AppError> {
+pub async fn git_stash_pop(
+    path: String,
+    index: Option<usize>,
+    app: AppHandle,
+) -> Result<String, AppError> {
     let op_id = next_op_id();
     emit_op_start(&app, op_id, "stash_pop", &path);
 
@@ -469,10 +503,16 @@ pub async fn git_list_tags(path: String) -> Result<Vec<TagInfo>, AppError> {
 }
 
 #[tauri::command]
-pub async fn git_create_tag(path: String, name: String, message: Option<String>) -> Result<(), AppError> {
-    tokio::task::spawn_blocking(move || GitService::create_tag(&path, &name, message.as_deref(), None))
-        .await
-        .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
+pub async fn git_create_tag(
+    path: String,
+    name: String,
+    message: Option<String>,
+) -> Result<(), AppError> {
+    tokio::task::spawn_blocking(move || {
+        GitService::create_tag(&path, &name, message.as_deref(), None)
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
 }
 
 #[tauri::command]
@@ -484,12 +524,14 @@ pub async fn git_delete_tag(path: String, name: String) -> Result<(), AppError> 
 
 // ── Batch operations: non-blocking, results stream via events ──────────
 
+type BatchOperation = fn(&[String]) -> Vec<(String, Result<String, AppError>)>;
+
 fn run_batch_sync(
     app: &AppHandle,
     db: &Database,
     label: &str,
     group_id: Option<&str>,
-    op: fn(&[String]) -> Vec<(String, Result<String, AppError>)>,
+    op: BatchOperation,
 ) -> Result<(), AppError> {
     let projects = match group_id {
         Some(gid) => db.get_projects_in_group(gid)?,
@@ -524,7 +566,13 @@ pub async fn fetch_all(
     let db = db.inner().clone();
     let app_clone = app.clone();
     tokio::task::spawn_blocking(move || -> Result<(), AppError> {
-        run_batch_sync(&app_clone, &db, "fetch", group_id.as_deref(), GitService::fetch_all_projects)
+        run_batch_sync(
+            &app_clone,
+            &db,
+            "fetch",
+            group_id.as_deref(),
+            GitService::fetch_all_projects,
+        )
     })
     .await
     .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
@@ -539,7 +587,13 @@ pub async fn pull_all(
     let db = db.inner().clone();
     let app_clone = app.clone();
     tokio::task::spawn_blocking(move || -> Result<(), AppError> {
-        run_batch_sync(&app_clone, &db, "pull", group_id.as_deref(), GitService::pull_all_projects)
+        run_batch_sync(
+            &app_clone,
+            &db,
+            "pull",
+            group_id.as_deref(),
+            GitService::pull_all_projects,
+        )
     })
     .await
     .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
@@ -554,7 +608,13 @@ pub async fn push_all(
     let db = db.inner().clone();
     let app_clone = app.clone();
     tokio::task::spawn_blocking(move || -> Result<(), AppError> {
-        run_batch_sync(&app_clone, &db, "push", group_id.as_deref(), GitService::push_all_projects)
+        run_batch_sync(
+            &app_clone,
+            &db,
+            "push",
+            group_id.as_deref(),
+            GitService::push_all_projects,
+        )
     })
     .await
     .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?

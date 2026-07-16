@@ -1,5 +1,5 @@
-use crate::AppError;
 use crate::models::*;
+use crate::AppError;
 
 /// Abstraction over git operations, allowing alternative implementations
 /// (e.g., CLI-based, test mocks) in addition to the default libgit2 backend.
@@ -33,7 +33,15 @@ pub trait GitBackend {
     fn stash_drop(path: &str, index: usize) -> Result<(), AppError>;
 
     // Log
-    fn get_log(path: &str, offset: usize, limit: usize, author: Option<&str>, message_contains: Option<&str>, since: Option<i64>, until: Option<i64>) -> Result<Vec<CommitInfo>, AppError>;
+    fn get_log(
+        path: &str,
+        offset: usize,
+        limit: usize,
+        author: Option<&str>,
+        message_contains: Option<&str>,
+        since: Option<i64>,
+        until: Option<i64>,
+    ) -> Result<Vec<CommitInfo>, AppError>;
 
     // Batch
     fn fetch_all_projects(paths: &[String]) -> Vec<(String, Result<String, AppError>)>;

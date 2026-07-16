@@ -14,6 +14,7 @@
   <img src="https://img.shields.io/badge/React_19-TypeScript-61DAFB?logo=react&logoColor=white" alt="React 19" />
   <img src="https://img.shields.io/badge/Vite_8-FF6B35?logo=vite&logoColor=white" alt="Vite 8" />
   <img src="https://img.shields.io/badge/Tailwind_CSS_4-38BDF8?logo=tailwindcss&logoColor=white" alt="Tailwind CSS 4" />
+  <img src="https://img.shields.io/badge/v1.3.0-blue?style=flat-square" alt="Version" />
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License" />
 </p>
 
@@ -74,7 +75,10 @@ npm install
 # Run in development mode
 npm run tauri dev
 
-# Build for production
+# Run the complete local quality suite (type checks, behavior tests, Rust fmt/clippy/tests, and frontend build)
+npm run check
+
+# Build the Tauri application for production
 npm run tauri build
 ```
 
@@ -161,7 +165,10 @@ npm install
 # 启动开发环境
 npm run tauri dev
 
-# 构建生产版本
+# 运行完整本地质量检查（类型检查、行为测试、Rust fmt/clippy/tests 与前端构建）
+npm run check
+
+# 构建 Tauri 生产版本
 npm run tauri build
 ```
 

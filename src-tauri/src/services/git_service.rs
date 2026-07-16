@@ -1,7 +1,13 @@
-use git2::{Repository, Status, StatusOptions, BranchType, IndexAddOption, build::CheckoutBuilder, DiffOptions};
+use git2::{
+    build::CheckoutBuilder, BranchType, DiffOptions, IndexAddOption, Repository, Status,
+    StatusOptions,
+};
 
+use crate::models::{
+    BranchInfo, CommitInfo, FileStatus, GitFileEntry, GitProject, GitStatus, Group, MergeResult,
+    ProjectDetail, StashInfo, TagInfo,
+};
 use crate::AppError;
-use crate::models::{BranchInfo, CommitInfo, FileStatus, GitFileEntry, GitStatus, MergeResult, ProjectDetail, GitProject, Group, StashInfo, TagInfo};
 
 pub struct GitService;
 
@@ -19,9 +25,13 @@ impl GitService {
     /// Collect conflicting file paths from the index.
     fn collect_conflicts(index: &mut git2::Index) -> Result<Vec<String>, AppError> {
         let mut conflicts = Vec::new();
-        let entries: Vec<_> = index.conflicts()
+        let entries: Vec<_> = index
+            .conflicts()
             .map_err(|e| AppError::Git(format!("Failed to get conflicts: {}", e)))?
-            .filter_map(|c| c.map_err(|e| log::warn!("skipping corrupt conflict entry: {}", e)).ok())
+            .filter_map(|c| {
+                c.map_err(|e| log::warn!("skipping corrupt conflict entry: {}", e))
+                    .ok()
+            })
             .collect();
         for entry in &entries {
             if let Some(our) = &entry.our {
@@ -60,7 +70,10 @@ impl GitService {
         Ok(())
     }
 
-    pub fn get_project_detail(project: &GitProject, group: Group) -> Result<ProjectDetail, AppError> {
+    pub fn get_project_detail(
+        project: &GitProject,
+        group: Group,
+    ) -> Result<ProjectDetail, AppError> {
         let repo = Self::open_repo(&project.path)?;
 
         let current_branch = Self::get_current_branch(&repo)?;
@@ -87,7 +100,9 @@ impl GitService {
     }
 
     pub fn get_current_branch(repo: &Repository) -> Result<String, AppError> {
-        let head = repo.head().map_err(|e| AppError::Git(format!("Failed to get HEAD: {}", e)))?;
+        let head = repo
+            .head()
+            .map_err(|e| AppError::Git(format!("Failed to get HEAD: {}", e)))?;
         head.shorthand()
             .map(|s| s.to_string())
             .ok_or_else(|| AppError::Git("HEAD is detached (not on any branch)".to_string()))
@@ -154,7 +169,8 @@ impl GitService {
                 Some(name) => name.to_string(),
                 None => format!("refs/heads/{}", branch_name),
             };
-            let (object, _) = repo.revparse_ext(&head_ref)
+            let (object, _) = repo
+                .revparse_ext(&head_ref)
                 .map_err(|e| AppError::Git(format!("Branch '{}' not found: {}", branch_name, e)))?;
             repo.checkout_tree(&object, None)
                 .map_err(|e| AppError::Git(format!("Failed to checkout tree: {}", e)))?;
@@ -166,18 +182,28 @@ impl GitService {
                 .find('/')
                 .map(|i| &branch_name[i + 1..])
                 .unwrap_or(branch_name);
-            let (object, _) = repo.revparse_ext(branch_name)
+            let (object, _) = repo
+                .revparse_ext(branch_name)
                 .map_err(|e| AppError::Git(format!("Branch '{}' not found: {}", branch_name, e)))?;
-            let commit = repo.find_commit(object.id())
+            let commit = repo
+                .find_commit(object.id())
                 .map_err(|e| AppError::Git(format!("Failed to find commit: {}", e)))?;
 
             let local_ref = match repo.find_branch(local_name, BranchType::Local) {
                 Ok(branch) => branch,
                 Err(_) => {
-                    let mut branch = repo.branch(local_name, &commit, false)
-                        .map_err(|e| AppError::Git(format!("Failed to create local branch '{}': {}", local_name, e)))?;
-                    branch.set_upstream(Some(branch_name))
-                        .map_err(|e| AppError::Git(format!("Failed to set upstream for '{}': {}", local_name, e)))?;
+                    let mut branch = repo.branch(local_name, &commit, false).map_err(|e| {
+                        AppError::Git(format!(
+                            "Failed to create local branch '{}': {}",
+                            local_name, e
+                        ))
+                    })?;
+                    branch.set_upstream(Some(branch_name)).map_err(|e| {
+                        AppError::Git(format!(
+                            "Failed to set upstream for '{}': {}",
+                            local_name, e
+                        ))
+                    })?;
                     branch
                 }
             };
@@ -200,7 +226,8 @@ impl GitService {
             repo.checkout_head(Some(&mut CheckoutBuilder::new().force()))
                 .map_err(|e| AppError::Git(format!("Failed to checkout: {}", e)))?;
         } else {
-            let (object, reference) = repo.revparse_ext(branch_name)
+            let (object, reference) = repo
+                .revparse_ext(branch_name)
                 .map_err(|e| AppError::Git(format!("Branch '{}' not found: {}", branch_name, e)))?;
 
             repo.checkout_tree(&object, None)
@@ -227,7 +254,8 @@ impl GitService {
         opts.include_untracked(true);
         opts.recurse_untracked_dirs(true);
 
-        let statuses = repo.statuses(Some(&mut opts))
+        let statuses = repo
+            .statuses(Some(&mut opts))
             .map_err(|e| AppError::Git(format!("Failed to get status: {}", e)))?;
 
         let mut modified = 0u32;
@@ -236,10 +264,17 @@ impl GitService {
 
         for entry in statuses.iter() {
             let s = entry.status();
-            if s.contains(Status::WT_MODIFIED) || s.contains(Status::WT_DELETED) || s.contains(Status::WT_TYPECHANGE) {
+            if s.contains(Status::WT_MODIFIED)
+                || s.contains(Status::WT_DELETED)
+                || s.contains(Status::WT_TYPECHANGE)
+            {
                 modified += 1;
             }
-            if s.contains(Status::INDEX_NEW) || s.contains(Status::INDEX_MODIFIED) || s.contains(Status::INDEX_DELETED) || s.contains(Status::INDEX_TYPECHANGE) {
+            if s.contains(Status::INDEX_NEW)
+                || s.contains(Status::INDEX_MODIFIED)
+                || s.contains(Status::INDEX_DELETED)
+                || s.contains(Status::INDEX_TYPECHANGE)
+            {
                 staged += 1;
             }
             if s.contains(Status::WT_NEW) {
@@ -273,24 +308,40 @@ impl GitService {
     }
 
     fn get_ahead_behind(repo: &Repository) -> Result<(u32, u32), AppError> {
-        let head = repo.head().map_err(|e| AppError::Git(format!("Failed to get HEAD: {}", e)))?;
-        let local_oid = head.target().ok_or(AppError::Git("No HEAD target — repository may have no commits".to_string()))?;
+        let head = repo
+            .head()
+            .map_err(|e| AppError::Git(format!("Failed to get HEAD: {}", e)))?;
+        let local_oid = head.target().ok_or(AppError::Git(
+            "No HEAD target — repository may have no commits".to_string(),
+        ))?;
 
-        let upstream = repo.branch_upstream_name(head.name().ok_or(AppError::Git("Invalid refname".to_string()))?)
+        let upstream = repo
+            .branch_upstream_name(
+                head.name()
+                    .ok_or(AppError::Git("Invalid refname".to_string()))?,
+            )
             .map_err(|e| AppError::Git(format!("Failed to get upstream name: {}", e)))?;
-        let upstream_ref = repo.find_reference(
-            std::str::from_utf8(&upstream).map_err(|e| AppError::Git(format!("Invalid upstream ref encoding: {}", e)))?
-        ).map_err(|e| AppError::Git(format!("Failed to find upstream ref: {}", e)))?;
-        let upstream_oid = upstream_ref.target().ok_or(AppError::Git("No upstream target".to_string()))?;
+        let upstream_ref = repo
+            .find_reference(
+                std::str::from_utf8(&upstream)
+                    .map_err(|e| AppError::Git(format!("Invalid upstream ref encoding: {}", e)))?,
+            )
+            .map_err(|e| AppError::Git(format!("Failed to find upstream ref: {}", e)))?;
+        let upstream_oid = upstream_ref
+            .target()
+            .ok_or(AppError::Git("No upstream target".to_string()))?;
 
-        let (ahead, behind) = repo.graph_ahead_behind(local_oid, upstream_oid)
+        let (ahead, behind) = repo
+            .graph_ahead_behind(local_oid, upstream_oid)
             .map_err(|e| AppError::Git(format!("Failed to compute ahead/behind: {}", e)))?;
 
         Ok((ahead as u32, behind as u32))
     }
 
     pub fn get_head_commit_hash(repo: &Repository) -> Result<String, AppError> {
-        let head = repo.head().map_err(|e| AppError::Git(format!("Failed to get HEAD: {}", e)))?;
+        let head = repo
+            .head()
+            .map_err(|e| AppError::Git(format!("Failed to get HEAD: {}", e)))?;
         head.target()
             .map(|oid| oid.to_string())
             .ok_or_else(|| AppError::Git("No HEAD target".to_string()))
@@ -305,25 +356,32 @@ impl GitService {
         opts.include_untracked(true);
         opts.recurse_untracked_dirs(true);
 
-        let statuses = repo.statuses(Some(&mut opts))
+        let statuses = repo
+            .statuses(Some(&mut opts))
             .map_err(|e| AppError::Git(format!("Failed to get status: {}", e)))?;
 
-        let files = statuses.iter().map(|entry| {
-            GitFileEntry {
+        let files = statuses
+            .iter()
+            .map(|entry| GitFileEntry {
                 path: entry.path().unwrap_or("").to_string(),
                 status: Self::status_label(entry.status()),
-            }
-        }).collect();
+            })
+            .collect();
 
         Ok(files)
     }
 
     pub fn stage_file(path: &str, file_path: &str) -> Result<(), AppError> {
         let repo = Self::open_repo(path)?;
-        let mut index = repo.index().map_err(|e| AppError::Git(format!("Failed to get index: {}", e)))?;
-        index.add_path(std::path::Path::new(file_path))
+        let mut index = repo
+            .index()
+            .map_err(|e| AppError::Git(format!("Failed to get index: {}", e)))?;
+        index
+            .add_path(std::path::Path::new(file_path))
             .map_err(|e| AppError::Git(format!("Failed to stage file: {}", e)))?;
-        index.write().map_err(|e| AppError::Git(format!("Failed to write index: {}", e)))?;
+        index
+            .write()
+            .map_err(|e| AppError::Git(format!("Failed to write index: {}", e)))?;
         Ok(())
     }
 
@@ -335,14 +393,19 @@ impl GitService {
         // yet), remove from index instead.
         match repo.revparse_single("HEAD").ok() {
             Some(head_obj) => {
-                repo.reset_default(Some(&head_obj), &[std::path::Path::new(file_path)])
+                repo.reset_default(Some(&head_obj), [std::path::Path::new(file_path)])
                     .map_err(|e| AppError::Git(format!("Failed to unstage: {}", e)))?;
             }
             None => {
-                let mut index = repo.index().map_err(|e| AppError::Git(format!("Failed to get index: {}", e)))?;
-                index.remove_path(std::path::Path::new(file_path))
+                let mut index = repo
+                    .index()
+                    .map_err(|e| AppError::Git(format!("Failed to get index: {}", e)))?;
+                index
+                    .remove_path(std::path::Path::new(file_path))
                     .map_err(|e| AppError::Git(format!("Failed to unstage: {}", e)))?;
-                index.write().map_err(|e| AppError::Git(format!("Failed to write index: {}", e)))?;
+                index
+                    .write()
+                    .map_err(|e| AppError::Git(format!("Failed to write index: {}", e)))?;
             }
         }
 
@@ -351,10 +414,15 @@ impl GitService {
 
     pub fn stage_all(path: &str) -> Result<(), AppError> {
         let repo = Self::open_repo(path)?;
-        let mut index = repo.index().map_err(|e| AppError::Git(format!("Failed to get index: {}", e)))?;
-        index.add_all(["*"].iter(), IndexAddOption::DEFAULT, None)
+        let mut index = repo
+            .index()
+            .map_err(|e| AppError::Git(format!("Failed to get index: {}", e)))?;
+        index
+            .add_all(["*"].iter(), IndexAddOption::DEFAULT, None)
             .map_err(|e| AppError::Git(format!("Failed to stage all: {}", e)))?;
-        index.write().map_err(|e| AppError::Git(format!("Failed to write index: {}", e)))?;
+        index
+            .write()
+            .map_err(|e| AppError::Git(format!("Failed to write index: {}", e)))?;
         Ok(())
     }
 
@@ -362,13 +430,19 @@ impl GitService {
         let repo = Self::open_repo(path)?;
         match repo.revparse_single("HEAD").ok() {
             Some(head_obj) => {
-                repo.reset_default(Some(&head_obj), &["*"])
+                repo.reset_default(Some(&head_obj), ["*"])
                     .map_err(|e| AppError::Git(format!("Failed to unstage all: {}", e)))?;
             }
             None => {
-                let mut index = repo.index().map_err(|e| AppError::Git(format!("Failed to get index: {}", e)))?;
-                index.clear().map_err(|e| AppError::Git(format!("Failed to clear index: {}", e)))?;
-                index.write().map_err(|e| AppError::Git(format!("Failed to write index: {}", e)))?;
+                let mut index = repo
+                    .index()
+                    .map_err(|e| AppError::Git(format!("Failed to get index: {}", e)))?;
+                index
+                    .clear()
+                    .map_err(|e| AppError::Git(format!("Failed to clear index: {}", e)))?;
+                index
+                    .write()
+                    .map_err(|e| AppError::Git(format!("Failed to write index: {}", e)))?;
             }
         }
         Ok(())
@@ -381,13 +455,15 @@ impl GitService {
             Ok(obj) => obj,
             Err(_) => return Ok(String::new()), // no commits yet
         };
-        let head_tree = repo.find_tree(Self::obj_to_tree_id(&head))
+        let head_tree = repo
+            .find_tree(Self::obj_to_tree_id(&head))
             .map_err(|e| AppError::Git(format!("Failed to find HEAD tree: {}", e)))?;
 
         let mut opts = DiffOptions::new();
         opts.force_text(true);
 
-        let diff = repo.diff_tree_to_index(Some(&head_tree), None, Some(&mut opts))
+        let diff = repo
+            .diff_tree_to_index(Some(&head_tree), None, Some(&mut opts))
             .map_err(|e| AppError::Git(format!("Failed to compute diff: {}", e)))?;
 
         let mut output = String::new();
@@ -401,7 +477,8 @@ impl GitService {
             output.push_str(prefix);
             output.push_str(std::str::from_utf8(line.content()).unwrap_or(""));
             true
-        }).map_err(|e| AppError::Git(format!("Failed to format diff: {}", e)))?;
+        })
+        .map_err(|e| AppError::Git(format!("Failed to format diff: {}", e)))?;
 
         Ok(output)
     }
@@ -418,13 +495,21 @@ impl GitService {
 
     pub fn commit(path: &str, message: &str) -> Result<String, AppError> {
         if message.trim().is_empty() {
-            return Err(AppError::Other("Commit message cannot be empty".to_string()));
+            return Err(AppError::Other(
+                "Commit message cannot be empty".to_string(),
+            ));
         }
         let repo = Self::open_repo(path)?;
 
-        let mut index = repo.index().map_err(|e| AppError::Git(format!("Failed to get index: {}", e)))?;
-        let tree_id = index.write_tree().map_err(|e| AppError::Git(format!("Failed to write tree: {}", e)))?;
-        let tree = repo.find_tree(tree_id).map_err(|e| AppError::Git(format!("Failed to find tree: {}", e)))?;
+        let mut index = repo
+            .index()
+            .map_err(|e| AppError::Git(format!("Failed to get index: {}", e)))?;
+        let tree_id = index
+            .write_tree()
+            .map_err(|e| AppError::Git(format!("Failed to write tree: {}", e)))?;
+        let tree = repo
+            .find_tree(tree_id)
+            .map_err(|e| AppError::Git(format!("Failed to find tree: {}", e)))?;
 
         let signature = Self::get_signature(&repo)?;
 
@@ -436,14 +521,16 @@ impl GitService {
 
         let parents: Vec<&git2::Commit> = parent_commit.iter().collect();
 
-        let commit_oid = repo.commit(
-            Some("HEAD"),
-            &signature,
-            &signature,
-            message,
-            &tree,
-            &parents,
-        ).map_err(|e| AppError::Git(format!("Failed to commit: {}", e)))?;
+        let commit_oid = repo
+            .commit(
+                Some("HEAD"),
+                &signature,
+                &signature,
+                message,
+                &tree,
+                &parents,
+            )
+            .map_err(|e| AppError::Git(format!("Failed to commit: {}", e)))?;
 
         Ok(commit_oid.to_string())
     }
@@ -472,14 +559,21 @@ impl GitService {
     pub fn stash(path: &str, message: Option<&str>) -> Result<String, AppError> {
         let mut repo = Self::open_repo(path)?;
 
-        let config = repo.config().map_err(|e| AppError::Git(format!("Failed to read config: {}", e)))?;
-        let name = config.get_string("user.name").unwrap_or_else(|_| "Git Switcher".into());
-        let email = config.get_string("user.email").unwrap_or_else(|_| "git-switcher@local".into());
+        let config = repo
+            .config()
+            .map_err(|e| AppError::Git(format!("Failed to read config: {}", e)))?;
+        let name = config
+            .get_string("user.name")
+            .unwrap_or_else(|_| "Git Switcher".into());
+        let email = config
+            .get_string("user.email")
+            .unwrap_or_else(|_| "git-switcher@local".into());
         let signature = git2::Signature::now(&name, &email)
             .map_err(|e| AppError::Git(format!("Failed to create signature: {}", e)))?;
 
         let msg = message.unwrap_or("WIP: stashed by Git Switcher");
-        let stash_oid = repo.stash_save(&signature, msg, None)
+        let stash_oid = repo
+            .stash_save(&signature, msg, None)
             .map_err(|e| AppError::Git(format!("Failed to stash: {}", e)))?;
 
         Ok(stash_oid.to_string())
@@ -535,12 +629,18 @@ impl GitService {
             // Prevent SSH / HTTPS credential prompts from hanging forever
             .env("GIT_TERMINAL_PROMPT", "0")
             // Prevent SSH from waiting for host key confirmation
-            .env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new");
+            .env(
+                "GIT_SSH_COMMAND",
+                "ssh -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new",
+            );
         cmd
     }
 
     /// Run a Command with a timeout (seconds). Kills the process if it doesn't finish.
-    fn run_with_timeout(mut cmd: std::process::Command, timeout_secs: u64) -> Result<String, AppError> {
+    fn run_with_timeout(
+        mut cmd: std::process::Command,
+        timeout_secs: u64,
+    ) -> Result<String, AppError> {
         let mut child = cmd
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
@@ -594,28 +694,46 @@ impl GitService {
             .unwrap_or_default();
 
         if status.success() {
-            let out = if stdout.trim().is_empty() { stderr } else { stdout };
+            let out = if stdout.trim().is_empty() {
+                stderr
+            } else {
+                stdout
+            };
             Ok(out)
         } else {
-            let err = if stderr.trim().is_empty() { stdout } else { stderr };
+            let err = if stderr.trim().is_empty() {
+                stdout
+            } else {
+                stderr
+            };
             Err(AppError::Git(err))
         }
     }
 
     // ── Branch Management ───────────────────────────────────────────────
 
-    pub fn create_branch(path: &str, name: &str, from_branch: Option<&str>) -> Result<(), AppError> {
+    pub fn create_branch(
+        path: &str,
+        name: &str,
+        from_branch: Option<&str>,
+    ) -> Result<(), AppError> {
         let repo = Self::open_repo(path)?;
 
         let target = if let Some(from) = from_branch {
-            let (object, _) = repo.revparse_ext(from)
+            let (object, _) = repo
+                .revparse_ext(from)
                 .map_err(|e| AppError::Git(format!("Branch '{}' not found: {}", from, e)))?;
             repo.find_commit(object.id())
                 .map_err(|e| AppError::Git(format!("Failed to find commit: {}", e)))?
         } else {
-            let head = repo.head().map_err(|e| AppError::Git(format!("Failed to get HEAD: {}", e)))?;
-            repo.find_commit(head.target().ok_or(AppError::Git("No HEAD target".to_string()))?)
-                .map_err(|e| AppError::Git(format!("Failed to find HEAD commit: {}", e)))?
+            let head = repo
+                .head()
+                .map_err(|e| AppError::Git(format!("Failed to get HEAD: {}", e)))?;
+            repo.find_commit(
+                head.target()
+                    .ok_or(AppError::Git("No HEAD target".to_string()))?,
+            )
+            .map_err(|e| AppError::Git(format!("Failed to find HEAD commit: {}", e)))?
         };
 
         repo.branch(name, &target, false)
@@ -627,10 +745,12 @@ impl GitService {
     pub fn delete_branch(path: &str, name: &str) -> Result<(), AppError> {
         let repo = Self::open_repo(path)?;
 
-        let mut branch = repo.find_branch(name, BranchType::Local)
+        let mut branch = repo
+            .find_branch(name, BranchType::Local)
             .map_err(|e| AppError::Git(format!("Branch '{}' not found: {}", name, e)))?;
 
-        branch.delete()
+        branch
+            .delete()
             .map_err(|e| AppError::Git(format!("Failed to delete branch '{}': {}", name, e)))?;
 
         Ok(())
@@ -639,14 +759,17 @@ impl GitService {
     pub fn merge_branch(path: &str, branch_name: &str) -> Result<MergeResult, AppError> {
         let repo = Self::open_repo(path)?;
 
-        let (object, _) = repo.revparse_ext(branch_name)
+        let (object, _) = repo
+            .revparse_ext(branch_name)
             .map_err(|e| AppError::Git(format!("Branch '{}' not found: {}", branch_name, e)))?;
 
-        let annotated_commit = repo.find_annotated_commit(object.id())
+        let annotated_commit = repo
+            .find_annotated_commit(object.id())
             .map_err(|e| AppError::Git(format!("Failed to find annotated commit: {}", e)))?;
 
         // Perform merge analysis
-        let (merge_analysis, _) = repo.merge_analysis(&[&annotated_commit])
+        let (merge_analysis, _) = repo
+            .merge_analysis(&[&annotated_commit])
             .map_err(|e| AppError::Git(format!("Failed to analyze merge: {}", e)))?;
 
         if merge_analysis.is_up_to_date() {
@@ -659,9 +782,12 @@ impl GitService {
 
         if merge_analysis.is_fast_forward() {
             // Fast-forward merge
-            let head = repo.head().map_err(|e| AppError::Git(format!("Failed to get HEAD: {}", e)))?;
+            let head = repo
+                .head()
+                .map_err(|e| AppError::Git(format!("Failed to get HEAD: {}", e)))?;
 
-            let target_branch = head.shorthand()
+            let target_branch = head
+                .shorthand()
                 .ok_or_else(|| AppError::Git("HEAD reference has no short name".to_string()))?;
             let merge_target = object.id();
             repo.reference(
@@ -669,14 +795,18 @@ impl GitService {
                 merge_target,
                 true,
                 "merge (fast-forward)",
-            ).map_err(|e| AppError::Git(format!("Failed to update reference: {}", e)))?;
+            )
+            .map_err(|e| AppError::Git(format!("Failed to update reference: {}", e)))?;
 
             repo.checkout_head(Some(&mut CheckoutBuilder::new().force()))
                 .map_err(|e| AppError::Git(format!("Failed to checkout: {}", e)))?;
 
             return Ok(MergeResult {
                 success: true,
-                message: format!("Fast-forward merged '{}' into '{}'", branch_name, target_branch),
+                message: format!(
+                    "Fast-forward merged '{}' into '{}'",
+                    branch_name, target_branch
+                ),
                 conflicts: vec![],
             });
         }
@@ -686,7 +816,9 @@ impl GitService {
             .map_err(|e| AppError::Git(format!("Failed to merge: {}", e)))?;
 
         // Check for conflicts
-        let mut index = repo.index().map_err(|e| AppError::Git(format!("Failed to get index: {}", e)))?;
+        let mut index = repo
+            .index()
+            .map_err(|e| AppError::Git(format!("Failed to get index: {}", e)))?;
         if index.has_conflicts() {
             let conflicts = Self::collect_conflicts(&mut index)?;
             Self::abort_to_head(&repo);
@@ -699,15 +831,23 @@ impl GitService {
 
         // Commit the merge — abort on any failure
         let commit_result = (|| -> Result<(), AppError> {
-            let tree_id = index.write_tree().map_err(|e| AppError::Git(format!("Failed to write tree: {}", e)))?;
-            let tree = repo.find_tree(tree_id).map_err(|e| AppError::Git(format!("Failed to find tree: {}", e)))?;
+            let tree_id = index
+                .write_tree()
+                .map_err(|e| AppError::Git(format!("Failed to write tree: {}", e)))?;
+            let tree = repo
+                .find_tree(tree_id)
+                .map_err(|e| AppError::Git(format!("Failed to find tree: {}", e)))?;
 
             let signature = Self::get_signature(&repo)?;
 
-            let head = repo.head().map_err(|e| AppError::Git(format!("Failed to get HEAD: {}", e)))?;
-            let head_commit = repo.find_commit(head.target().ok_or(AppError::Git("No HEAD".to_string()))?)
+            let head = repo
+                .head()
+                .map_err(|e| AppError::Git(format!("Failed to get HEAD: {}", e)))?;
+            let head_commit = repo
+                .find_commit(head.target().ok_or(AppError::Git("No HEAD".to_string()))?)
                 .map_err(|e| AppError::Git(format!("Failed to find HEAD commit: {}", e)))?;
-            let merge_commit = repo.find_commit(object.id())
+            let merge_commit = repo
+                .find_commit(object.id())
                 .map_err(|e| AppError::Git(format!("Failed to find merge commit: {}", e)))?;
 
             repo.commit(
@@ -717,7 +857,8 @@ impl GitService {
                 &format!("Merge branch '{}'", branch_name),
                 &tree,
                 &[&head_commit, &merge_commit],
-            ).map_err(|e| AppError::Git(format!("Failed to commit merge: {}", e)))?;
+            )
+            .map_err(|e| AppError::Git(format!("Failed to commit merge: {}", e)))?;
 
             Ok(())
         })();
@@ -745,18 +886,27 @@ impl GitService {
 
         let oid = git2::Oid::from_str(commit_hash)
             .map_err(|e| AppError::Git(format!("Invalid commit hash '{}': {}", commit_hash, e)))?;
-        let commit = repo.find_commit(oid)
+        let commit = repo
+            .find_commit(oid)
             .map_err(|e| AppError::Git(format!("Commit '{}' not found: {}", commit_hash, e)))?;
 
-        let head = repo.head().map_err(|e| AppError::Git(format!("Failed to get HEAD: {}", e)))?;
-        let head_commit = repo.find_commit(head.target().ok_or(AppError::Git("No HEAD target".to_string()))?)
+        let head = repo
+            .head()
+            .map_err(|e| AppError::Git(format!("Failed to get HEAD: {}", e)))?;
+        let head_commit = repo
+            .find_commit(
+                head.target()
+                    .ok_or(AppError::Git("No HEAD target".to_string()))?,
+            )
             .map_err(|e| AppError::Git(format!("Failed to find HEAD commit: {}", e)))?;
 
         repo.cherrypick_commit(&commit, &head_commit, 0, None)
             .map_err(|e| AppError::Git(format!("Cherry-pick failed: {}", e)))?;
 
         // Check for conflicts
-        let mut index = repo.index().map_err(|e| AppError::Git(format!("Failed to get index: {}", e)))?;
+        let mut index = repo
+            .index()
+            .map_err(|e| AppError::Git(format!("Failed to get index: {}", e)))?;
         if index.has_conflicts() {
             let conflicts = Self::collect_conflicts(&mut index)?;
             Self::abort_to_head(&repo);
@@ -769,13 +919,20 @@ impl GitService {
 
         // Commit the cherry-pick — abort on any failure
         let commit_result = (|| -> Result<(), AppError> {
-            let tree_id = index.write_tree().map_err(|e| AppError::Git(format!("Failed to write tree: {}", e)))?;
-            let tree = repo.find_tree(tree_id).map_err(|e| AppError::Git(format!("Failed to find tree: {}", e)))?;
+            let tree_id = index
+                .write_tree()
+                .map_err(|e| AppError::Git(format!("Failed to write tree: {}", e)))?;
+            let tree = repo
+                .find_tree(tree_id)
+                .map_err(|e| AppError::Git(format!("Failed to find tree: {}", e)))?;
 
             let signature = Self::get_signature(&repo)?;
 
-            let head = repo.head().map_err(|e| AppError::Git(format!("Failed to get HEAD: {}", e)))?;
-            let head_commit = repo.find_commit(head.target().ok_or(AppError::Git("No HEAD".to_string()))?)
+            let head = repo
+                .head()
+                .map_err(|e| AppError::Git(format!("Failed to get HEAD: {}", e)))?;
+            let head_commit = repo
+                .find_commit(head.target().ok_or(AppError::Git("No HEAD".to_string()))?)
                 .map_err(|e| AppError::Git(format!("Failed to find HEAD commit: {}", e)))?;
 
             repo.commit(
@@ -785,7 +942,8 @@ impl GitService {
                 &format!("Cherry-pick {}", commit_hash),
                 &tree,
                 &[&head_commit],
-            ).map_err(|e| AppError::Git(format!("Failed to commit cherry-pick: {}", e)))?;
+            )
+            .map_err(|e| AppError::Git(format!("Failed to commit cherry-pick: {}", e)))?;
 
             Ok(())
         })();
@@ -801,7 +959,10 @@ impl GitService {
 
         Ok(MergeResult {
             success: true,
-            message: format!("Cherry-picked commit {}", &commit_hash[..std::cmp::min(8, commit_hash.len())]),
+            message: format!(
+                "Cherry-picked commit {}",
+                &commit_hash[..std::cmp::min(8, commit_hash.len())]
+            ),
             conflicts: vec![],
         })
     }
@@ -837,15 +998,19 @@ impl GitService {
             None => return Ok(Vec::new()),
         };
 
-        let has_filters = author.is_some() || message_contains.is_some() || since.is_some() || until.is_some();
+        let has_filters =
+            author.is_some() || message_contains.is_some() || since.is_some() || until.is_some();
 
-        let mut revwalk = repo.revwalk()
+        let mut revwalk = repo
+            .revwalk()
             .map_err(|e| AppError::Git(format!("Failed to create revwalk: {}", e)))?;
 
-        revwalk.set_sorting(git2::Sort::TIME)
+        revwalk
+            .set_sorting(git2::Sort::TIME)
             .map_err(|e| AppError::Git(format!("Failed to set sorting: {}", e)))?;
 
-        revwalk.push(head_oid)
+        revwalk
+            .push(head_oid)
             .map_err(|e| AppError::Git(format!("Failed to push HEAD: {}", e)))?;
 
         let author_lower = author.map(|a| a.to_lowercase());
@@ -855,11 +1020,16 @@ impl GitService {
         let mut filtered_count: usize = 0;
 
         for oid_result in revwalk {
-            if !has_filters && filtered_count >= offset + limit { break; }
-            if has_filters && commits.len() >= limit { break; }
+            if !has_filters && filtered_count >= offset + limit {
+                break;
+            }
+            if has_filters && commits.len() >= limit {
+                break;
+            }
 
             let oid = oid_result.map_err(|e| AppError::Git(format!("Failed to get oid: {}", e)))?;
-            let commit = repo.find_commit(oid)
+            let commit = repo
+                .find_commit(oid)
                 .map_err(|e| AppError::Git(format!("Failed to find commit: {}", e)))?;
 
             let commit_author = commit.author();
@@ -867,10 +1037,14 @@ impl GitService {
 
             // Apply date filters
             if let Some(s) = since {
-                if commit_ts < s { continue; }
+                if commit_ts < s {
+                    continue;
+                }
             }
             if let Some(u) = until {
-                if commit_ts > u { continue; }
+                if commit_ts > u {
+                    continue;
+                }
             }
 
             // Apply author filter
@@ -882,7 +1056,13 @@ impl GitService {
             }
 
             // Apply message filter
-            let commit_msg = commit.message().unwrap_or("").lines().next().unwrap_or("").to_string();
+            let commit_msg = commit
+                .message()
+                .unwrap_or("")
+                .lines()
+                .next()
+                .unwrap_or("")
+                .to_string();
             if let Some(ref ml) = msg_lower {
                 if !commit_msg.to_lowercase().contains(ml.as_str()) {
                     continue;
@@ -890,7 +1070,9 @@ impl GitService {
             }
 
             filtered_count += 1;
-            if filtered_count <= offset { continue; }
+            if filtered_count <= offset {
+                continue;
+            }
 
             let parents: Vec<String> = commit.parent_ids().map(|id| id.to_string()).collect();
             let oid_s = oid.to_string();
@@ -937,30 +1119,33 @@ impl GitService {
 
         // Process in chunks to bound concurrency
         for chunk in paths.chunks(MAX_CONCURRENT) {
-            let handles: Vec<_> = chunk.iter().map(|p| {
-                let path = p.clone();
-                let name = std::path::Path::new(p)
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| p.clone());
-                let op = op.clone();
-                let tx = tx.clone();
-                std::thread::spawn(move || {
-                    let result = catch_unwind(std::panic::AssertUnwindSafe(|| op(path)))
-                        .unwrap_or_else(|e| {
-                            let msg = if let Some(s) = e.downcast_ref::<String>() {
-                                s.clone()
-                            } else if let Some(s) = e.downcast_ref::<&str>() {
-                                s.to_string()
-                            } else {
-                                "unknown panic".to_string()
-                            };
-                            log::error!("Thread panicked during batch operation: {}", msg);
-                            Err(AppError::Other(format!("Thread panicked: {}", msg)))
-                        });
-                    let _ = tx.send((name, result));
+            let handles: Vec<_> = chunk
+                .iter()
+                .map(|p| {
+                    let path = p.clone();
+                    let name = std::path::Path::new(p)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| p.clone());
+                    let op = op.clone();
+                    let tx = tx.clone();
+                    std::thread::spawn(move || {
+                        let result = catch_unwind(std::panic::AssertUnwindSafe(|| op(path)))
+                            .unwrap_or_else(|e| {
+                                let msg = if let Some(s) = e.downcast_ref::<String>() {
+                                    s.clone()
+                                } else if let Some(s) = e.downcast_ref::<&str>() {
+                                    s.to_string()
+                                } else {
+                                    "unknown panic".to_string()
+                                };
+                                log::error!("Thread panicked during batch operation: {}", msg);
+                                Err(AppError::Other(format!("Thread panicked: {}", msg)))
+                            });
+                        let _ = tx.send((name, result));
+                    })
                 })
-            }).collect();
+                .collect();
 
             for h in handles {
                 let _ = h.join();
@@ -991,7 +1176,11 @@ impl GitService {
                 Ok(tag) => (
                     tag.target_id().to_string(),
                     tag.tagger().map(|sig| {
-                        format!("{} <{}>", sig.name().unwrap_or(""), sig.email().unwrap_or(""))
+                        format!(
+                            "{} <{}>",
+                            sig.name().unwrap_or(""),
+                            sig.email().unwrap_or("")
+                        )
                     }),
                     tag.message().map(|s| s.to_string()),
                 ),
@@ -1016,11 +1205,22 @@ impl GitService {
         Ok(tags)
     }
 
-    pub fn create_tag(path: &str, name: &str, message: Option<&str>, target_ref: Option<&str>) -> Result<(), AppError> {
+    pub fn create_tag(
+        path: &str,
+        name: &str,
+        message: Option<&str>,
+        target_ref: Option<&str>,
+    ) -> Result<(), AppError> {
         let repo = Self::open_repo(path)?;
         let target = repo
             .revparse_single(target_ref.unwrap_or("HEAD"))
-            .map_err(|e| AppError::Git(format!("Failed to resolve '{}': {}", target_ref.unwrap_or("HEAD"), e)))?;
+            .map_err(|e| {
+                AppError::Git(format!(
+                    "Failed to resolve '{}': {}",
+                    target_ref.unwrap_or("HEAD"),
+                    e
+                ))
+            })?;
 
         if let Some(msg) = message {
             let signature = Self::get_signature(&repo)?;
@@ -1045,26 +1245,78 @@ impl GitService {
 use super::git_backend::GitBackend;
 
 impl GitBackend for GitService {
-    fn is_git_repo(path: &str) -> bool { Self::is_git_repo(path) }
-    fn init_repo(path: &str) -> Result<(), AppError> { Self::init_repo(path) }
-    fn get_project_detail(project: &GitProject, group: Group) -> Result<ProjectDetail, AppError> { Self::get_project_detail(project, group) }
-    fn switch_branch(path: &str, branch_name: &str) -> Result<(), AppError> { Self::switch_branch(path, branch_name) }
-    fn create_branch(path: &str, name: &str, from_branch: Option<&str>) -> Result<(), AppError> { Self::create_branch(path, name, from_branch) }
-    fn delete_branch(path: &str, name: &str) -> Result<(), AppError> { Self::delete_branch(path, name) }
-    fn merge_branch(path: &str, branch_name: &str) -> Result<MergeResult, AppError> { Self::merge_branch(path, branch_name) }
-    fn get_file_list(path: &str) -> Result<Vec<GitFileEntry>, AppError> { Self::get_file_list(path) }
-    fn stage_file(path: &str, file_path: &str) -> Result<(), AppError> { Self::stage_file(path, file_path) }
-    fn unstage_file(path: &str, file_path: &str) -> Result<(), AppError> { Self::unstage_file(path, file_path) }
-    fn commit(path: &str, message: &str) -> Result<String, AppError> { Self::commit(path, message) }
-    fn push(path: &str, branch: Option<&str>) -> Result<String, AppError> { Self::push(path, branch) }
-    fn pull(path: &str) -> Result<String, AppError> { Self::pull(path) }
-    fn fetch(path: &str) -> Result<String, AppError> { Self::fetch(path) }
-    fn stash(path: &str, message: Option<&str>) -> Result<String, AppError> { Self::stash(path, message) }
-    fn stash_pop(path: &str) -> Result<String, AppError> { Self::stash_pop(path) }
-    fn stash_pop_at(path: &str, index: usize) -> Result<String, AppError> { Self::stash_pop_at(path, index) }
-    fn get_stash_list(path: &str) -> Result<Vec<StashInfo>, AppError> { Self::get_stash_list(path) }
-    fn stash_drop(path: &str, index: usize) -> Result<(), AppError> { Self::stash_drop(path, index) }
-    fn get_log(path: &str, offset: usize, limit: usize, author: Option<&str>, message_contains: Option<&str>, since: Option<i64>, until: Option<i64>) -> Result<Vec<CommitInfo>, AppError> { Self::get_log(path, offset, limit, author, message_contains, since, until) }
-    fn fetch_all_projects(paths: &[String]) -> Vec<(String, Result<String, AppError>)> { Self::fetch_all_projects(paths) }
-    fn pull_all_projects(paths: &[String]) -> Vec<(String, Result<String, AppError>)> { Self::pull_all_projects(paths) }
+    fn is_git_repo(path: &str) -> bool {
+        Self::is_git_repo(path)
+    }
+    fn init_repo(path: &str) -> Result<(), AppError> {
+        Self::init_repo(path)
+    }
+    fn get_project_detail(project: &GitProject, group: Group) -> Result<ProjectDetail, AppError> {
+        Self::get_project_detail(project, group)
+    }
+    fn switch_branch(path: &str, branch_name: &str) -> Result<(), AppError> {
+        Self::switch_branch(path, branch_name)
+    }
+    fn create_branch(path: &str, name: &str, from_branch: Option<&str>) -> Result<(), AppError> {
+        Self::create_branch(path, name, from_branch)
+    }
+    fn delete_branch(path: &str, name: &str) -> Result<(), AppError> {
+        Self::delete_branch(path, name)
+    }
+    fn merge_branch(path: &str, branch_name: &str) -> Result<MergeResult, AppError> {
+        Self::merge_branch(path, branch_name)
+    }
+    fn get_file_list(path: &str) -> Result<Vec<GitFileEntry>, AppError> {
+        Self::get_file_list(path)
+    }
+    fn stage_file(path: &str, file_path: &str) -> Result<(), AppError> {
+        Self::stage_file(path, file_path)
+    }
+    fn unstage_file(path: &str, file_path: &str) -> Result<(), AppError> {
+        Self::unstage_file(path, file_path)
+    }
+    fn commit(path: &str, message: &str) -> Result<String, AppError> {
+        Self::commit(path, message)
+    }
+    fn push(path: &str, branch: Option<&str>) -> Result<String, AppError> {
+        Self::push(path, branch)
+    }
+    fn pull(path: &str) -> Result<String, AppError> {
+        Self::pull(path)
+    }
+    fn fetch(path: &str) -> Result<String, AppError> {
+        Self::fetch(path)
+    }
+    fn stash(path: &str, message: Option<&str>) -> Result<String, AppError> {
+        Self::stash(path, message)
+    }
+    fn stash_pop(path: &str) -> Result<String, AppError> {
+        Self::stash_pop(path)
+    }
+    fn stash_pop_at(path: &str, index: usize) -> Result<String, AppError> {
+        Self::stash_pop_at(path, index)
+    }
+    fn get_stash_list(path: &str) -> Result<Vec<StashInfo>, AppError> {
+        Self::get_stash_list(path)
+    }
+    fn stash_drop(path: &str, index: usize) -> Result<(), AppError> {
+        Self::stash_drop(path, index)
+    }
+    fn get_log(
+        path: &str,
+        offset: usize,
+        limit: usize,
+        author: Option<&str>,
+        message_contains: Option<&str>,
+        since: Option<i64>,
+        until: Option<i64>,
+    ) -> Result<Vec<CommitInfo>, AppError> {
+        Self::get_log(path, offset, limit, author, message_contains, since, until)
+    }
+    fn fetch_all_projects(paths: &[String]) -> Vec<(String, Result<String, AppError>)> {
+        Self::fetch_all_projects(paths)
+    }
+    fn pull_all_projects(paths: &[String]) -> Vec<(String, Result<String, AppError>)> {
+        Self::pull_all_projects(paths)
+    }
 }

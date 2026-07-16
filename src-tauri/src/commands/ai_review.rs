@@ -1,10 +1,10 @@
 use tauri::{AppHandle, State};
 
-use crate::AppError;
 use crate::commands::settings::SettingsStore;
 use crate::db::Database;
 use crate::models::{BranchDiff, LlmConfig, ReviewResult};
 use crate::services::LlmService;
+use crate::AppError;
 
 /// Validate config is enabled and branches have diffs. Returns the diff if valid.
 fn validate_review(
@@ -16,13 +16,17 @@ fn validate_review(
     let config = store.get_llm_config_with_key()?;
 
     if !config.enabled {
-        return Err(AppError::Llm("AI review is not enabled. Go to Settings to configure LLM.".to_string()));
+        return Err(AppError::Llm(
+            "AI review is not enabled. Go to Settings to configure LLM.".to_string(),
+        ));
     }
 
     let diff = LlmService::get_branch_diff(path, base_branch, head_branch)?;
 
     if diff.files.is_empty() {
-        return Err(AppError::Other("No differences found between branches.".to_string()));
+        return Err(AppError::Other(
+            "No differences found between branches.".to_string(),
+        ));
     }
 
     Ok((config, diff))

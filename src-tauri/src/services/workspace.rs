@@ -1,8 +1,8 @@
 use std::fs;
 use std::path::Path;
 
-use crate::AppError;
 use crate::models::{WorkspaceFile, WorkspaceFolder};
+use crate::AppError;
 
 pub struct WorkspaceService;
 
@@ -89,7 +89,9 @@ impl WorkspaceService {
             // Strip trailing commas: , followed by ] or } (with optional whitespace)
             if c == ',' {
                 let mut j = i + 1;
-                while j < len && (chars[j] == ' ' || chars[j] == '\t' || chars[j] == '\n' || chars[j] == '\r') {
+                while j < len
+                    && (chars[j] == ' ' || chars[j] == '\t' || chars[j] == '\n' || chars[j] == '\r')
+                {
                     j += 1;
                 }
                 if j < len && (chars[j] == ']' || chars[j] == '}') {
