@@ -4,6 +4,8 @@ import { getSettings, updateSettings } from "../lib/tauri";
 
 export function useAppSettings(onError: (msg: string) => void) {
   const [viewMode, setViewModeState] = useState<ViewMode>("card");
+  const [settingsVersion, setSettingsVersion] = useState(0);
+  const [accentColor, setAccentColorState] = useState<string>(() => localStorage.getItem("accentColor") || "blue");
   const committedViewMode = useRef(viewMode);
 
   // Load initial view mode from settings
@@ -22,6 +24,16 @@ export function useAppSettings(onError: (msg: string) => void) {
     };
   }, [onError]);
 
+  useEffect(() => {
+    document.documentElement.setAttribute("data-accent", accentColor);
+  }, [accentColor]);
+
+  const setAccentColor = useCallback((color: string) => {
+    setAccentColorState(color);
+    localStorage.setItem("accentColor", color);
+    document.documentElement.setAttribute("data-accent", color);
+  }, []);
+
   const setViewMode = useCallback(
     async (mode: ViewMode) => {
       const prev = committedViewMode.current;
@@ -30,6 +42,7 @@ export function useAppSettings(onError: (msg: string) => void) {
         const settings = await getSettings();
         await updateSettings({ ...settings, view_mode: mode });
         committedViewMode.current = mode;
+        setSettingsVersion((v) => v + 1);
       } catch (e) {
         setViewModeState(prev);
         onError(`Failed to save view mode: ${e}`);
@@ -38,5 +51,10 @@ export function useAppSettings(onError: (msg: string) => void) {
     [onError]
   );
 
-  return { viewMode, setViewMode, setViewModeState };
+  /** Call after any settings save to notify dependent hooks */
+  const notifySettingsChanged = useCallback(() => {
+    setSettingsVersion((v) => v + 1);
+  }, []);
+
+  return { viewMode, setViewMode, setViewModeState, settingsVersion, notifySettingsChanged, accentColor, setAccentColor };
 }

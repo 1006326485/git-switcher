@@ -8,8 +8,15 @@ interface ToastApi {
   error: (msg: string) => void;
 }
 
+export interface BatchProgress {
+  completed: number;
+  failed: number;
+  failedProjects: string[];
+}
+
 export function useBatchOps(toast: ToastApi, onRefreshAll: () => void, activeGroup: string | null) {
   const [loading, setLoading] = useState<string | null>(null);
+  const [progress, setProgress] = useState<BatchProgress>({ completed: 0, failed: 0, failedProjects: [] });
   const callbacksRef = useRef({ toast, onRefreshAll });
   callbacksRef.current = { toast, onRefreshAll };
   const groupRef = useRef(activeGroup);
@@ -19,22 +26,32 @@ export function useBatchOps(toast: ToastApi, onRefreshAll: () => void, activeGro
   // even when the dropdown menu (which renders BatchOpsToolbar) is closed
   useEffect(() => {
     let failedCount = 0;
+    let completedCount = 0;
+    const failedNames: string[] = [];
+
     const unlistenResult = listen<BatchResult>("batch-result", (event) => {
-      if (!event.payload.success) failedCount++;
+      completedCount++;
+      if (!event.payload.success) {
+        failedCount++;
+        failedNames.push(event.payload.project_name);
+      }
+      setProgress({ completed: completedCount, failed: failedCount, failedProjects: [...failedNames] });
     });
 
     const unlistenDone = listen<string>("batch-done", (event) => {
       const op = event.payload;
       setLoading(null);
-      const labels: Record<string, string> = { fetch: "Fetch", pull: "Pull", push: "Push" };
+      const labels: Record<string, string> = { fetch: "Fetch", pull: "Pull", push: "Push", pull_behind: "Pull Behind", push_ahead: "Push Ahead", sync: "Sync All" };
       const label = labels[op] ?? op;
       if (failedCount > 0) {
-        callbacksRef.current.toast.error(`${label} completed with ${failedCount} failure(s)`);
+        callbacksRef.current.toast.error(`${label} completed: ${completedCount - failedCount} succeeded, ${failedCount} failed`);
       } else {
-        callbacksRef.current.toast.success(`${label} completed`);
+        callbacksRef.current.toast.success(`${label} completed: ${completedCount} project(s)`);
       }
       callbacksRef.current.onRefreshAll();
       failedCount = 0;
+      completedCount = 0;
+      failedNames.length = 0;
     });
 
     return () => {
@@ -53,38 +70,73 @@ export function useBatchOps(toast: ToastApi, onRefreshAll: () => void, activeGro
     return () => clearTimeout(timer);
   }, [loading]);
 
+  // Reset progress when a new operation starts
+  const startOp = useCallback((op: string) => {
+    if (loading) return false;
+    setLoading(op);
+    setProgress({ completed: 0, failed: 0, failedProjects: [] });
+    return true;
+  }, [loading]);
+
   const fetchAll = useCallback(async () => {
-    if (loading) return;
-    setLoading("fetch");
+    if (!startOp("fetch")) return;
     try {
       await api.fetchAll(groupRef.current ?? undefined);
     } catch (e) {
       callbacksRef.current.toast.error(String(e));
       setLoading(null);
     }
-  }, [loading]);
+  }, [startOp]);
 
   const pullAll = useCallback(async () => {
-    if (loading) return;
-    setLoading("pull");
+    if (!startOp("pull")) return;
     try {
       await api.pullAll(groupRef.current ?? undefined);
     } catch (e) {
       callbacksRef.current.toast.error(String(e));
       setLoading(null);
     }
-  }, [loading]);
+  }, [startOp]);
 
   const pushAll = useCallback(async () => {
-    if (loading) return;
-    setLoading("push");
+    if (!startOp("push")) return;
     try {
       await api.pushAll(groupRef.current ?? undefined);
     } catch (e) {
       callbacksRef.current.toast.error(String(e));
       setLoading(null);
     }
-  }, [loading]);
+  }, [startOp]);
 
-  return { batchLoading: loading, fetchAll, pullAll, pushAll };
+  const pullBehind = useCallback(async () => {
+    if (!startOp("pull_behind")) return;
+    try {
+      await api.pullBehind(groupRef.current ?? undefined);
+    } catch (e) {
+      callbacksRef.current.toast.error(String(e));
+      setLoading(null);
+    }
+  }, [startOp]);
+
+  const pushAhead = useCallback(async () => {
+    if (!startOp("push_ahead")) return;
+    try {
+      await api.pushAhead(groupRef.current ?? undefined);
+    } catch (e) {
+      callbacksRef.current.toast.error(String(e));
+      setLoading(null);
+    }
+  }, [startOp]);
+
+  const syncAll = useCallback(async () => {
+    if (!startOp("sync")) return;
+    try {
+      await api.syncAll(groupRef.current ?? undefined);
+    } catch (e) {
+      callbacksRef.current.toast.error(String(e));
+      setLoading(null);
+    }
+  }, [startOp]);
+
+  return { batchLoading: loading, batchProgress: progress, fetchAll, pullAll, pushAll, pullBehind, pushAhead, syncAll };
 }

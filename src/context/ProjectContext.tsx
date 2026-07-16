@@ -1,5 +1,6 @@
 import { createContext, useContext, type ReactNode } from "react";
 import type { ProjectDetail } from "../lib/types";
+import type { ActiveGitOp } from "../hooks/useGitOpTracker";
 
 /**
  * Shared callbacks that every project row / card needs.
@@ -15,6 +16,20 @@ export interface ProjectActions {
   onInfo: (msg: string) => void;
   onReorder?: (orderedIds: string[]) => Promise<void>;
   onAliasChange?: (id: string, alias: string) => Promise<void>;
+  /** Synchronize a successfully persisted color change into the project list. */
+  onColorChange?: (id: string, color: string | null) => void;
+  /** Check if a specific op is active for a path */
+  isOpActive?: (op: string, path: string) => boolean;
+  /** Get the active op details for a specific op+path */
+  getActiveOp?: (op: string, path: string) => ActiveGitOp | undefined;
+  /** Get any active op for a path (most efficient for per-row checks) */
+  getAnyActiveOp?: (path: string) => ActiveGitOp | undefined;
+  /** Cancel an active operation by ID */
+  cancelOp?: (id: number) => void;
+  /** Single-project git operations */
+  onFetch?: (path: string) => Promise<void>;
+  onPull?: (path: string) => Promise<void>;
+  onPush?: (path: string) => Promise<void>;
 }
 
 const ProjectContext = createContext<ProjectActions | null>(null);

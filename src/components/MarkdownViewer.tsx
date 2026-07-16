@@ -163,61 +163,39 @@ function ListBlock({ items, ordered, blockKey }: { items: string[]; ordered: boo
 // ── Inline formatting ───────────────────────────────────────────────────
 
 function renderInline(text: string, blockKey?: number): React.ReactNode {
-  // Split on inline code, bold, and file references
   const parts: React.ReactNode[] = [];
-  let remaining = text;
+  let cursor = 0;
   let key = blockKey != null ? blockKey * 1000 : 0;
 
-  while (remaining.length > 0) {
-    // Inline code `...`
-    const codeMatch = remaining.match(/`([^`]+)`/);
-    // Bold **...**
-    const boldMatch = remaining.match(/\*\*([^*]+)\*\*/);
-
-    // Find earliest match
-    let earliest = -1;
-    let matchType = "";
-    let matchLen = 0;
-
-    if (codeMatch && (earliest === -1 || remaining.indexOf(codeMatch[0]) < earliest)) {
-      earliest = remaining.indexOf(codeMatch[0]);
-      matchType = "code";
-      matchLen = codeMatch[0].length;
-    }
-    if (boldMatch && (earliest === -1 || remaining.indexOf(boldMatch[0]) < earliest)) {
-      earliest = remaining.indexOf(boldMatch[0]);
-      matchType = "bold";
-      matchLen = boldMatch[0].length;
+  // A single pass avoids repeatedly scanning the remaining text for each token.
+  for (const match of text.matchAll(/`([^`]+)`|\*\*([^*]+)\*\*/g)) {
+    const start = match.index ?? 0;
+    if (start > cursor) {
+      parts.push(text.slice(cursor, start));
     }
 
-    if (earliest === -1) {
-      parts.push(remaining);
-      break;
-    }
-
-    // Text before match
-    if (earliest > 0) {
-      parts.push(remaining.slice(0, earliest));
-    }
-
-    if (matchType === "code") {
+    if (match[1] !== undefined) {
       parts.push(
         <code
           key={key++}
           className="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 text-xs font-mono"
         >
-          {codeMatch![1]}
+          {match[1]}
         </code>
       );
-    } else if (matchType === "bold") {
+    } else {
       parts.push(
         <strong key={key++} className="font-semibold text-gray-900 dark:text-gray-100">
-          {boldMatch![1]}
+          {match[2]}
         </strong>
       );
     }
 
-    remaining = remaining.slice(earliest + matchLen);
+    cursor = start + match[0].length;
+  }
+
+  if (cursor < text.length) {
+    parts.push(text.slice(cursor));
   }
 
   return parts;

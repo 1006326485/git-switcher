@@ -8,10 +8,13 @@ pub struct GitProject {
     pub alias: Option<String>,
     pub sort_order: i64,
     pub group_id: String,
+    pub color: Option<String>,
     pub last_active_at: Option<String>,
     pub last_commit_hash: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    pub description: Option<String>,
+    pub notes: Option<String>,
 }
 
 impl GitProject {
@@ -24,10 +27,13 @@ impl GitProject {
             alias: None,
             sort_order: 0,
             group_id,
+            color: None,
             last_active_at: None,
             last_commit_hash: None,
             updated_at: now.clone(),
             created_at: now,
+            description: None,
+            notes: None,
         }
     }
 }
@@ -39,6 +45,7 @@ pub struct ProjectDetail {
     pub branches: Vec<BranchInfo>,
     pub status: GitStatus,
     pub group: Group,
+    pub stash_count: usize,
 }
 
 impl ProjectDetail {
@@ -48,6 +55,7 @@ impl ProjectDetail {
             current_branch: "unknown".to_string(),
             branches: vec![],
             status: GitStatus {
+                is_merging: false,
                 modified: 0,
                 staged: 0,
                 untracked: 0,
@@ -55,6 +63,7 @@ impl ProjectDetail {
                 behind: 0,
             },
             group,
+            stash_count: 0,
         }
     }
 }
@@ -64,6 +73,8 @@ pub struct BranchInfo {
     pub name: String,
     pub is_current: bool,
     pub is_remote: bool,
+    #[serde(default)]
+    pub is_merged: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,6 +84,8 @@ pub struct GitStatus {
     pub untracked: u32,
     pub ahead: u32,
     pub behind: u32,
+    #[serde(default)]
+    pub is_merging: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -95,6 +108,7 @@ pub struct CommitInfo {
     pub email: String,
     pub timestamp: i64,
     pub parents: Vec<String>,
+    pub refs: Vec<String>, // NEW: branch/tag names pointing to this commit
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -120,12 +134,14 @@ pub enum FileStatus {
     Deleted,
     Untracked,
     Renamed,
+    Added,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitFileEntry {
     pub path: String,
     pub status: FileStatus,
+    pub staged: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -208,6 +224,8 @@ pub struct StashInfo {
     pub index: usize,
     pub message: String,
     pub oid: String,
+    pub timestamp: i64,
+    pub branch: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -217,4 +235,150 @@ pub struct TagInfo {
     pub target_oid: String,
     pub tagger: Option<String>,
     pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemoteInfo {
+    pub name: String,
+    pub url: String,
+    pub push_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileDiffStats {
+    pub additions: u32,
+    pub deletions: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorktreeInfo {
+    pub name: String,
+    pub path: String,
+    pub branch: Option<String>,
+    pub head: String,
+    pub is_locked: bool,
+    pub is_prunable: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlameLine {
+    pub line: usize,
+    pub content: String,
+    pub commit_id: String,
+    pub author: String,
+    pub timestamp: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BranchHealthItem {
+    pub name: String,
+    pub behind: u32,
+    pub last_commit_timestamp: i64,
+    pub is_merged: bool,
+    pub days_stale: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BranchHealthReport {
+    pub merged: Vec<BranchHealthItem>,
+    pub stale: Vec<BranchHealthItem>,
+    pub behind: Vec<BranchHealthItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChangedFileInfo {
+    pub path: String,
+    pub additions: u32,
+    pub deletions: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubmoduleInfo {
+    pub name: String,
+    pub path: String,
+    pub url: String,
+    pub head: String,
+    pub active: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BisectState {
+    pub active: bool,
+    pub current_commit: String,
+    pub good_commit: String,
+    pub bad_commit: String,
+    pub steps_remaining: usize,
+    pub total_steps: usize,
+    pub message: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogEntry {
+    pub hash: String,
+    pub short_hash: String,
+    pub message: String,
+    pub author: String,
+    pub timestamp: i64,
+    pub parents: Vec<String>,
+    pub refs: Vec<String>,
+    pub lane: usize,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileCommitEntry {
+    pub hash: String,
+    pub message: String,
+    pub author: String,
+    pub timestamp: i64,
+    pub additions: u32,
+    pub deletions: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectDiffSummary {
+    pub project_name: String,
+    pub project_id: String,
+    pub path: String,
+    pub additions: usize,
+    pub deletions: usize,
+    pub files_changed: usize,
+    pub files: Vec<String>,
+    pub current_branch: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BranchCompareResult {
+    pub ahead: usize,
+    pub behind: usize,
+    pub ahead_commits: Vec<CommitInfo>,
+    pub behind_commits: Vec<CommitInfo>,
+    pub changed_files: Vec<ChangedFileInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReflogEntry {
+    pub hash: String,
+    pub short_hash: String,
+    pub message: String,
+    pub author: String,
+    pub timestamp: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectStats {
+    pub total_commits: usize,
+    pub contributors: Vec<String>,
+    pub last_commit_date: i64,
+    pub commits_last_7_days: usize,
+    pub commits_last_30_days: usize,
+    pub branch_count: usize,
+    pub tag_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiffComment {
+    pub id: String,
+    pub project_id: String,
+    pub file_path: String,
+    pub line_number: usize,
+    pub content: String,
+    pub created_at: String,
 }

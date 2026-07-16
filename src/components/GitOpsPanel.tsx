@@ -3,6 +3,7 @@ import * as api from "../lib/tauri";
 import type { GitFileEntry, StashInfo } from "../lib/types";
 import { DiffViewer } from "./DiffViewer";
 import { AiGenerateIcon } from "./ui/icons";
+import { OperationConfirmDialog } from "./OperationConfirmDialog";
 
 interface GitOpsPanelProps {
   path: string;
@@ -26,6 +27,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
   const [stagedDiff, setStagedDiff] = useState<string | null>(null);
   const [loadingDiff, setLoadingDiff] = useState(false);
   const [diffFile, setDiffFile] = useState<string | null>(null);
+  const [confirmStashDrop, setConfirmStashDrop] = useState<number | null>(null);
 
   const loadFiles = useCallback(async () => {
     try {
@@ -203,6 +205,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
   const isLoading = (name: string) => loadingOps.has(name);
 
   return (
+    <>
     <div className="border-t border-gray-200 dark:border-gray-700">
       <button
         onClick={handleToggle}
@@ -310,7 +313,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
                       Pop
                     </button>
                     <button
-                      onClick={() => handleStashDrop(s.index)}
+                      onClick={() => setConfirmStashDrop(s.index)}
                       disabled={isLoading("stash_drop")}
                       className="px-1.5 py-0.5 rounded-lg bg-red-100 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800/50 hover:bg-red-200 dark:hover:bg-red-900/40 disabled:opacity-50 transition-colors duration-150 active:scale-[0.98]"
                       aria-label={`Drop stash@{${s.index}}`}
@@ -496,5 +499,15 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
 
       {diffFile && <DiffViewer path={path} filePath={diffFile} onClose={() => setDiffFile(null)} />}
     </div>
+      {confirmStashDrop !== null && (
+        <OperationConfirmDialog
+          open
+          operation="git_stash_drop"
+          targets={[{ path, label: `stash@{${confirmStashDrop}}` }]}
+          onConfirm={() => handleStashDrop(confirmStashDrop)}
+          onCancel={() => setConfirmStashDrop(null)}
+        />
+      )}
+    </>
   );
 });

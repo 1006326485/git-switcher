@@ -2,8 +2,10 @@ import { useState, useEffect, useCallback, useMemo, memo } from "react";
 import { createPortal } from "react-dom";
 import * as api from "../lib/tauri";
 import type { Group } from "../lib/types";
+import { parseError } from "../lib/types";
 import { useDropdownPortal } from "../hooks/useDropdownPortal";
 import { FolderIcon } from "./ui/icons";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 // Module-level groups cache shared across all GroupAssignDropdown instances
 let _groupsCache: Group[] | null = null;
@@ -32,6 +34,7 @@ export const ProjectGroupsPanel = memo(function ProjectGroupsPanel({
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
   const [newColor, setNewColor] = useState("#3B82F6");
+  const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; name: string } | null>(null);
 
   const loadGroups = useCallback(async () => {
     try {
@@ -58,13 +61,13 @@ export const ProjectGroupsPanel = memo(function ProjectGroupsPanel({
       setShowCreate(false);
       onSuccess(`Created group "${g.name}"`);
     } catch (e) {
-      onError(String(e));
+      onError(parseError(e));
     } finally {
       setCreating(false);
     }
   }, [newName, newColor, creating, onSuccess, onError]);
 
-  const handleDelete = useCallback(
+  const doDelete = useCallback(
     async (id: string, name: string) => {
       try {
         await api.deleteGroup(id);
@@ -73,10 +76,17 @@ export const ProjectGroupsPanel = memo(function ProjectGroupsPanel({
         if (activeGroup === id) onGroupChange(null);
         onSuccess(`Deleted group "${name}"`);
       } catch (e) {
-        onError(String(e));
+        onError(parseError(e));
       }
     },
     [activeGroup, onGroupChange, onSuccess, onError]
+  );
+
+  const handleDelete = useCallback(
+    (id: string, name: string) => {
+      setDeleteConfirm({ id, name });
+    },
+    []
   );
 
   const toggleShowCreate = useCallback(() => setShowCreate((v) => !v), []);
@@ -170,6 +180,16 @@ export const ProjectGroupsPanel = memo(function ProjectGroupsPanel({
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!deleteConfirm}
+        title="Delete Group"
+        message={deleteConfirm ? <>Delete group "<strong>{deleteConfirm.name}</strong>"? Projects in this group will become ungrouped.</> : null}
+        confirmLabel="Delete"
+        confirmColor="red"
+        onConfirm={async () => { if (deleteConfirm) { try { await doDelete(deleteConfirm.id, deleteConfirm.name); } finally { setDeleteConfirm(null); } } }}
+        onCancel={() => setDeleteConfirm(null)}
+      />
     </div>
   );
 });
@@ -200,7 +220,7 @@ export const GroupAssignDropdown = memo(function GroupAssignDropdown({
   // Clear pending state once parent has been refreshed
   useEffect(() => {
     if (pendingGroupId !== null) setPendingGroupId(null);
-  }, [currentGroup]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [currentGroup, pendingGroupId]);
 
   // Fetch groups when dropdown opens (with shared cache)
   useEffect(() => {
@@ -240,7 +260,7 @@ export const GroupAssignDropdown = memo(function GroupAssignDropdown({
         await onRefresh();
       } catch (e) {
         setPendingGroupId(null);
-        onError(String(e));
+        onError(parseError(e));
       }
     },
     [projectId, currentGroup, onRefresh, onError]

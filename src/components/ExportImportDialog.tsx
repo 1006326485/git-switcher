@@ -1,5 +1,6 @@
 import { useState, useCallback, memo } from "react";
 import * as api from "../lib/tauri";
+import { parseError } from "../lib/types";
 import { Modal, Tabs } from "./ui/primitives";
 import { save, open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { writeTextFile, readTextFile } from "@tauri-apps/plugin-fs";
@@ -36,7 +37,7 @@ export const ExportImportDialog = memo(function ExportImportDialog({
       }
       onSuccess("Project list copied to clipboard");
     } catch (e) {
-      onError(String(e));
+      onError(parseError(e));
     } finally {
       setLoading(false);
     }
@@ -55,7 +56,7 @@ export const ExportImportDialog = memo(function ExportImportDialog({
         onSuccess(`Exported to ${filePath}`);
       }
     } catch (e) {
-      onError(String(e));
+      onError(parseError(e));
     } finally {
       setLoading(false);
     }
@@ -103,7 +104,7 @@ export const ExportImportDialog = memo(function ExportImportDialog({
         onSuccess("File loaded — click Import to proceed");
       }
     } catch (e) {
-      onError(String(e));
+      onError(parseError(e));
     } finally {
       setLoading(false);
     }
@@ -176,3 +177,4 @@ export const ExportImportDialog = memo(function ExportImportDialog({
     </Modal>
   );
 });
+export default ExportImportDialog;

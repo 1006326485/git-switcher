@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { ProjectDetail } from "../lib/types";
+import { parseError } from "../lib/types";
 import * as api from "../lib/tauri";
 
 interface ToastApi {
@@ -28,7 +29,7 @@ export function useProjects(toast?: ToastApi, activeGroup?: string | null) {
         const data = await api.listProjects();
         if (!cancelled) setProjects(data);
       } catch (e) {
-        if (!cancelled) toastRef.current?.error(`Failed to load projects: ${e}`);
+        if (!cancelled) toastRef.current?.error(`Failed to load projects: ${parseError(e)}`);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -56,7 +57,7 @@ export function useProjects(toast?: ToastApi, activeGroup?: string | null) {
         toastRef.current?.success(`Added "${detail.project.name}"`);
         return detail;
       } catch (e) {
-        toastRef.current?.error(`Failed to add project: ${e}`);
+        toastRef.current?.error(`Failed to add project: ${parseError(e)}`);
         throw e;
       }
     },
@@ -70,7 +71,7 @@ export function useProjects(toast?: ToastApi, activeGroup?: string | null) {
         setProjects((prev) => prev.filter((p) => p.project.id !== id));
         setProjectsVersion((v) => v + 1);
       } catch (e) {
-        toastRef.current?.error(`Failed to remove project: ${e}`);
+        toastRef.current?.error(`Failed to remove project: ${parseError(e)}`);
         throw e;
       }
     },
@@ -109,7 +110,7 @@ export function useProjects(toast?: ToastApi, activeGroup?: string | null) {
         toastRef.current?.success(`Initialized "${name}"`);
         return detail;
       } catch (e) {
-        toastRef.current?.error(`Failed to init project: ${e}`);
+        toastRef.current?.error(`Failed to init project: ${parseError(e)}`);
         throw e;
       }
     },
@@ -129,7 +130,7 @@ export function useProjects(toast?: ToastApi, activeGroup?: string | null) {
           toastRef.current?.success(`Switched to ${branch}`);
           return detail;
         } catch (e) {
-          toastRef.current?.error(`Failed to switch branch: ${e}`);
+          toastRef.current?.error(`Failed to switch branch: ${parseError(e)}`);
           throw e;
         }
       }
@@ -157,7 +158,7 @@ export function useProjects(toast?: ToastApi, activeGroup?: string | null) {
         setProjects((prevList) =>
           prevList.map((p) => (p.project.path === path ? prev : p))
         );
-        toastRef.current?.error(`Failed to switch branch: ${e}`);
+        toastRef.current?.error(`Failed to switch branch: ${parseError(e)}`);
         throw e;
       }
     },
@@ -176,7 +177,7 @@ export function useProjects(toast?: ToastApi, activeGroup?: string | null) {
       }
       return detail;
     } catch (e) {
-      toastRef.current?.error(`Failed to refresh project: ${e}`);
+      toastRef.current?.error(`Failed to refresh project: ${parseError(e)}`);
       throw e;
     }
   }, []);
@@ -207,7 +208,7 @@ export function useProjects(toast?: ToastApi, activeGroup?: string | null) {
         return changed ? next : prev;
       });
     } catch (e) {
-      toastRef.current?.error(`Failed to refresh projects: ${e}`);
+      toastRef.current?.error(`Failed to refresh projects: ${parseError(e)}`);
     }
   }, []);
 
@@ -223,7 +224,41 @@ export function useProjects(toast?: ToastApi, activeGroup?: string | null) {
           )
         );
       } catch (e) {
-        toastRef.current?.error(`Failed to update alias: ${e}`);
+        toastRef.current?.error(`Failed to update alias: ${parseError(e)}`);
+        throw e;
+      }
+    },
+    []
+  );
+
+  const setProjectColorLocally = useCallback((id: string, color: string | null) => {
+    setProjects((prev) =>
+      prev.map((p) =>
+        p.project.id === id
+          ? { ...p, project: { ...p.project, color: color ?? undefined } }
+          : p
+      )
+    );
+  }, []);
+
+  const reorderProjects = useCallback(
+    async (orderedIds: string[]) => {
+      // Optimistic update: reorder locally first
+      const prev = projectsRef.current;
+      const idIndex = new Map(orderedIds.map((id, i) => [id, i]));
+      const reordered = [...prev].sort((a, b) => {
+        const ai = idIndex.get(a.project.id) ?? Infinity;
+        const bi = idIndex.get(b.project.id) ?? Infinity;
+        return ai - bi;
+      });
+      setProjects(reordered);
+
+      try {
+        await api.reorderProjects(orderedIds);
+      } catch (e) {
+        // Rollback on failure
+        setProjects(prev);
+        toastRef.current?.error(`Failed to reorder projects: ${parseError(e)}`);
         throw e;
       }
     },
@@ -242,5 +277,7 @@ export function useProjects(toast?: ToastApi, activeGroup?: string | null) {
     refreshProject,
     refreshAll,
     updateAlias,
+    setProjectColorLocally,
+    reorderProjects,
   };
 }

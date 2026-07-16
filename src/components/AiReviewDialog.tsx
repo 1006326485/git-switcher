@@ -40,11 +40,13 @@ export const AiReviewDialog = memo(function AiReviewDialog({
   const [baseBranch, setBaseBranch] = useState("main");
   const [headBranch, setHeadBranch] = useState(currentBranch);
   const [loading, setLoading] = useState(false);
-  const [streamingText, setStreamingText] = useState("");
+  const [streamedChars, setStreamedChars] = useState(0);
   const [isStreaming, setIsStreaming] = useState(false);
   const [result, setResult] = useState<ReviewResult | null>(null);
   const mountedRef = useRef(true);
   const unlistenRef = useRef<(() => void) | null>(null);
+  const streamedCharsBufferRef = useRef(0);
+  const streamFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // History state
   const [history, setHistory] = useState<ReviewResult[]>([]);
@@ -66,6 +68,11 @@ export const AiReviewDialog = memo(function AiReviewDialog({
         unlistenRef.current();
         unlistenRef.current = null;
       }
+      if (streamFlushTimerRef.current) {
+        clearTimeout(streamFlushTimerRef.current);
+        streamFlushTimerRef.current = null;
+      }
+      streamedCharsBufferRef.current = 0;
     };
   }, []);
 
@@ -112,25 +119,39 @@ export const AiReviewDialog = memo(function AiReviewDialog({
     }
     setLoading(true);
     setResult(null);
-    setStreamingText("");
+    setStreamedChars(0);
     setIsStreaming(true);
+    streamedCharsBufferRef.current = 0;
 
-    // Set up SSE chunk listener
+    if (streamFlushTimerRef.current) {
+      clearTimeout(streamFlushTimerRef.current);
+      streamFlushTimerRef.current = null;
+    }
     if (unlistenRef.current) {
       unlistenRef.current();
+      unlistenRef.current = null;
     }
-    unlistenRef.current = await listen<string>("ai-review-chunk", (event) => {
-      if (mountedRef.current) {
-        setStreamingText((prev) => prev + event.payload);
-      }
-    });
 
     try {
+      unlistenRef.current = await listen<string>("ai-review-chunk", (event) => {
+        streamedCharsBufferRef.current += event.payload.length;
+        if (streamFlushTimerRef.current) return;
+
+        streamFlushTimerRef.current = setTimeout(() => {
+          streamFlushTimerRef.current = null;
+          const receivedChars = streamedCharsBufferRef.current;
+          streamedCharsBufferRef.current = 0;
+          if (mountedRef.current && receivedChars > 0) {
+            setStreamedChars((previous) => previous + receivedChars);
+          }
+        }, 100);
+      });
+
       const res = await api.aiReviewStreaming(projectPath, baseBranch, headBranch);
       if (mountedRef.current) {
         setResult(res);
         setIsStreaming(false);
-        onSuccess(`Review complete`);
+        onSuccess("Review complete");
       }
     } catch (e) {
       if (mountedRef.current) {
@@ -143,6 +164,11 @@ export const AiReviewDialog = memo(function AiReviewDialog({
         unlistenRef.current();
         unlistenRef.current = null;
       }
+      if (streamFlushTimerRef.current) {
+        clearTimeout(streamFlushTimerRef.current);
+        streamFlushTimerRef.current = null;
+      }
+      streamedCharsBufferRef.current = 0;
     }
   }, [projectPath, baseBranch, headBranch, onSuccess, onError]);
 
@@ -248,23 +274,15 @@ export const AiReviewDialog = memo(function AiReviewDialog({
             </button>
           </div>
 
-          {/* Loading / Streaming state */}
-          {loading && !isStreaming && (
+          {/* Streaming progress deliberately avoids rendering partial Markdown. */}
+          {loading && isStreaming && (
             <div className="flex flex-col items-center justify-center py-12 text-gray-500 dark:text-gray-400">
               <div className="animate-spin text-3xl mb-3">&#x21BB;</div>
               <div className="text-sm font-medium">Analyzing code with AI...</div>
-              <div className="text-xs mt-1">Connecting to LLM...</div>
-            </div>
-          )}
-
-          {isStreaming && streamingText && (
-            <div className="relative">
-              <div className="absolute top-0 right-0 flex items-center gap-1.5 px-2 py-1 text-xs text-blue-500 dark:text-blue-400">
-                <span className="animate-pulse">&#x25CF;</span>
-                Streaming...
-              </div>
-              <div className="max-h-[60vh] overflow-y-auto pr-1 pt-6">
-                <MarkdownViewer content={streamingText} />
+              <div className="text-xs mt-1">
+                {streamedChars > 0
+                  ? `Received ${streamedChars.toLocaleString()} characters...`
+                  : "Waiting for the first response from the LLM..."}
               </div>
             </div>
           )}
@@ -446,3 +464,4 @@ export const AiReviewDialog = memo(function AiReviewDialog({
     </Modal>
   );
 });
+export default AiReviewDialog;

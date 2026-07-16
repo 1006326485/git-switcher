@@ -1,4 +1,4 @@
-import { useMemo, useCallback, memo } from "react";
+import { useMemo, useCallback, useState, memo } from "react";
 import { createPortal } from "react-dom";
 import type { BranchInfo } from "../lib/types";
 import { useDropdownPortal } from "../hooks/useDropdownPortal";
@@ -21,6 +21,8 @@ export const BranchDropdown = memo(function BranchDropdown({
   allowCurrent,
   variant = "default",
 }: BranchDropdownProps) {
+  const [copiedBranch, setCopiedBranch] = useState<string | null>(null);
+
   const {
     open, search, setSearch, activeIndex, setActiveIndex,
     pos, triggerRef, inputRef, listRef, portalRef,
@@ -62,6 +64,16 @@ export const BranchDropdown = memo(function BranchDropdown({
     },
     [onSwitch, close, allowCurrent]
   );
+
+  const copyBranchName = useCallback(async (name: string) => {
+    try {
+      await navigator.clipboard.writeText(name);
+      setCopiedBranch(name);
+      setTimeout(() => setCopiedBranch(null), 1500);
+    } catch {
+      // fallback
+    }
+  }, []);
 
   // Custom keyboard handler — skips header items
   const handleKeyDown = useCallback(
@@ -196,7 +208,7 @@ export const BranchDropdown = memo(function BranchDropdown({
                     aria-disabled={isDisabled}
                     onClick={() => selectBranch(b)}
                     onMouseEnter={() => setActiveIndex(i)}
-                    className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors ${
+                    className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 group transition-colors ${
                       isDisabled
                         ? "cursor-default opacity-60"
                         : isActive
@@ -212,7 +224,7 @@ export const BranchDropdown = memo(function BranchDropdown({
                       <span className="text-blue-500">&#x2713;</span>
                     )}
                     <span
-                      className={`font-mono truncate ${
+                      className={`font-mono truncate flex-1 ${
                         b.is_remote
                           ? "text-gray-500 dark:text-gray-400"
                           : ""
@@ -220,6 +232,13 @@ export const BranchDropdown = memo(function BranchDropdown({
                     >
                       {b.name}
                     </span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); copyBranchName(b.name); }}
+                      className="opacity-0 group-hover:opacity-100 px-1 py-0.5 rounded text-[10px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition-all shrink-0"
+                      title="Copy branch name"
+                    >
+                      {copiedBranch === b.name ? "✓" : "Copy"}
+                    </button>
                   </button>
                 );
               })

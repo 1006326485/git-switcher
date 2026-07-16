@@ -6,6 +6,7 @@ export interface SelectOption {
   value: string;
   label: string;
   disabled?: boolean;
+  hint?: string;
 }
 
 interface SelectDropdownProps {
@@ -121,6 +122,15 @@ export const SelectDropdown = memo(function SelectDropdown({
                   >
                     {isSelected && <span className="text-blue-500 shrink-0">&#x2713;</span>}
                     <span className="truncate">{opt.label}</span>
+                    {opt.hint && (
+                      <span className={`ml-auto shrink-0 text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                        opt.hint === "merged"
+                          ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400"
+                          : "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400"
+                      }`}>
+                        {opt.hint}
+                      </span>
+                    )}
                   </button>
                 );
               })

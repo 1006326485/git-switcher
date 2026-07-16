@@ -87,3 +87,4 @@ export const ConfirmDialog = memo(function ConfirmDialog({
     </Modal>
   );
 });
+export default ConfirmDialog;

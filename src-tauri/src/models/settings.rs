@@ -80,6 +80,8 @@ pub struct AppSettings {
     pub view_mode: ViewMode,
     #[serde(default)]
     pub llm: LlmConfig,
+    #[serde(default = "default_true")]
+    pub auto_fetch_on_launch: bool,
 }
 
 impl Default for AppSettings {
@@ -90,6 +92,7 @@ impl Default for AppSettings {
             refresh_interval_secs: 30,
             view_mode: ViewMode::Card,
             llm: LlmConfig::default(),
+            auto_fetch_on_launch: true,
         }
     }
 }

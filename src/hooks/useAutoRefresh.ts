@@ -5,7 +5,8 @@ import type { GitOpEvent } from "../lib/types";
 
 export function useAutoRefresh(
   refreshAll: () => void,
-  onError: (msg: string) => void
+  onError: (msg: string) => void,
+  settingsVersion?: number
 ) {
   const busyOpsRef = useRef(0);
 
@@ -27,7 +28,7 @@ export function useAutoRefresh(
     };
   }, []);
 
-  // Auto-refresh timer (pauses when window hidden or git ops active)
+  // Auto-refresh timer — re-reads settings when settingsVersion changes
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null;
     let cancelled = false;
@@ -65,5 +66,5 @@ export function useAutoRefresh(
       if (onVisibility)
         document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [refreshAll, onError]);
+  }, [refreshAll, onError, settingsVersion]);
 }

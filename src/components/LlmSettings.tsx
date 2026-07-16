@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, memo } from "react";
 import type { LlmConfig } from "../lib/types";
+import { parseError } from "../lib/types";
 import { getSettings, updateSettings } from "../lib/tauri";
 
 interface LlmSettingsProps {
@@ -14,6 +15,7 @@ export const LlmSettings = memo(function LlmSettings({ onError }: LlmSettingsPro
     model: "gpt-4o-mini",
     temperature: 0.3,
     max_tokens: 4096,
+    key_in_keychain: false,
   });
   const [showKey, setShowKey] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -34,7 +36,7 @@ export const LlmSettings = memo(function LlmSettings({ onError }: LlmSettingsPro
       const settings = await getSettings();
       await updateSettings({ ...settings, llm: config });
     } catch (e) {
-      onError(String(e));
+      onError(parseError(e));
     } finally {
       setSaving(false);
     }

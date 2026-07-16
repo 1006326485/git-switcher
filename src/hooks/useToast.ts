@@ -1,9 +1,14 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from "react";
+import { getSuggestions, type ErrorSuggestion } from "../lib/types";
 
 export interface Toast {
   id: string;
   type: "success" | "error" | "info";
   message: string;
+  retry?: () => void | Promise<void>;
+  suggestions?: ErrorSuggestion[];
+  rawError?: unknown;
+  path?: string;
 }
 
 const TOAST_DURATION = 3000;
@@ -29,16 +34,17 @@ export function useToast() {
   }, []);
 
   const addToast = useCallback(
-    (type: Toast["type"], message: string) => {
+    (type: Toast["type"], message: string, retry?: () => void | Promise<void>, rawError?: unknown, path?: string) => {
       const id = `toast-${++counterRef.current}`;
-      setToasts((prev) => [...prev, { id, type, message }]);
+      const suggestions = type === "error" && rawError ? getSuggestions(rawError) : undefined;
+      setToasts((prev) => [...prev, { id, type, message, retry, suggestions, rawError, path }]);
       startTimer(id, TOAST_DURATION);
     },
     [startTimer]
   );
 
   const success = useCallback((msg: string) => addToast("success", msg), [addToast]);
-  const error = useCallback((msg: string) => addToast("error", msg), [addToast]);
+  const error = useCallback((msg: string, retry?: () => void | Promise<void>, rawError?: unknown, path?: string) => addToast("error", msg, retry, rawError, path), [addToast]);
   const info = useCallback((msg: string) => addToast("info", msg), [addToast]);
 
   const removeToast = useCallback((id: string) => {

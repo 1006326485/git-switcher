@@ -1,3 +1,6 @@
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
+
 use crate::models::*;
 use crate::AppError;
 
@@ -21,14 +24,23 @@ pub trait GitBackend {
     fn commit(path: &str, message: &str) -> Result<String, AppError>;
 
     // Network
-    fn push(path: &str, branch: Option<&str>) -> Result<String, AppError>;
-    fn pull(path: &str) -> Result<String, AppError>;
-    fn fetch(path: &str) -> Result<String, AppError>;
+    fn push(
+        path: &str,
+        branch: Option<&str>,
+        cancel_flag: Option<Arc<AtomicBool>>,
+    ) -> Result<String, AppError>;
+    fn pull(path: &str, cancel_flag: Option<Arc<AtomicBool>>) -> Result<String, AppError>;
+    fn fetch(path: &str, cancel_flag: Option<Arc<AtomicBool>>) -> Result<String, AppError>;
 
     // Stash
-    fn stash(path: &str, message: Option<&str>) -> Result<String, AppError>;
+    fn stash(
+        path: &str,
+        message: Option<&str>,
+        include_untracked: bool,
+    ) -> Result<String, AppError>;
     fn stash_pop(path: &str) -> Result<String, AppError>;
     fn stash_pop_at(path: &str, index: usize) -> Result<String, AppError>;
+    fn stash_apply(path: &str, index: usize) -> Result<String, AppError>;
     fn get_stash_list(path: &str) -> Result<Vec<StashInfo>, AppError>;
     fn stash_drop(path: &str, index: usize) -> Result<(), AppError>;
 
@@ -46,4 +58,11 @@ pub trait GitBackend {
     // Batch
     fn fetch_all_projects(paths: &[String]) -> Vec<(String, Result<String, AppError>)>;
     fn pull_all_projects(paths: &[String]) -> Vec<(String, Result<String, AppError>)>;
+    fn push_all_projects(paths: &[String]) -> Vec<(String, Result<String, AppError>)>;
+    fn sync_all_projects(paths: &[String]) -> Vec<(String, Result<String, AppError>)>;
+
+    // Submodules
+    fn list_submodules(path: &str) -> Result<Vec<SubmoduleInfo>, AppError>;
+    fn update_submodule(path: &str, name: &str) -> Result<String, AppError>;
+    fn init_submodules(path: &str) -> Result<String, AppError>;
 }

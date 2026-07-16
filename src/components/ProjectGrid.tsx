@@ -1,5 +1,20 @@
-import { memo } from "react";
-import type { ProjectDetail, ViewMode } from "../lib/types";
+import { memo, useCallback, useMemo } from "react";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  rectSortingStrategy,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import type { ProjectDetail, ViewMode, SortOption } from "../lib/types";
 import { ProjectCard } from "./ProjectCard";
 import { ProjectList } from "./ProjectList";
 import { ProjectCompact } from "./ProjectCompact";
@@ -7,11 +22,25 @@ import { ProjectTable } from "./ProjectTable";
 import { DashboardView } from "./DashboardView";
 import { SkeletonRow, SkeletonCard, SkeletonTable } from "./ui/Skeleton";
 
+const SORT_LABELS: Record<SortOption, string> = {
+  custom: "Custom Order",
+  "name-asc": "Name A→Z",
+  "name-desc": "Name Z→A",
+  modified: "Last Modified",
+  changes: "Most Changes",
+  branch: "Branch Name",
+};
+
 interface ProjectGridProps {
   projects: ProjectDetail[];
   loading: boolean;
   viewMode: ViewMode;
   isFiltered: boolean;
+  sortBy?: SortOption;
+  onSortChange?: (sort: SortOption) => void;
+  onAddProject?: () => void;
+  onReorder?: (orderedIds: string[]) => void;
+  focusedIndex?: number;
 }
 
 export const ProjectGrid = memo(function ProjectGrid({
@@ -19,7 +48,40 @@ export const ProjectGrid = memo(function ProjectGrid({
   loading,
   viewMode,
   isFiltered,
+  sortBy,
+  onSortChange,
+  onAddProject,
+  onReorder,
+  focusedIndex,
 }: ProjectGridProps) {
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 8 },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (!over || active.id === over.id || !onReorder) return;
+
+      const oldIndex = projects.findIndex((p) => p.project.id === active.id);
+      const newIndex = projects.findIndex((p) => p.project.id === over.id);
+      if (oldIndex === -1 || newIndex === -1) return;
+
+      const orderedIds = projects.map((p) => p.project.id);
+      const [moved] = orderedIds.splice(oldIndex, 1);
+      orderedIds.splice(newIndex, 0, moved);
+      onReorder(orderedIds);
+    },
+    [projects, onReorder]
+  );
+
+  const sortableIds = useMemo(() => projects.map((p) => p.project.id), [projects]);
+
   if (loading) {
     if (viewMode === "list" || viewMode === "compact") {
       return (
@@ -63,7 +125,7 @@ export const ProjectGrid = memo(function ProjectGrid({
 
     // card (default)
     return (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
         {Array.from({ length: 8 }).map((_, i) => (
           <SkeletonCard key={i} />
         ))}
@@ -92,7 +154,10 @@ export const ProjectGrid = memo(function ProjectGrid({
             : "Add a git project by clicking the button above, or import a VSCode workspace file."}
         </p>
         {!isFiltered && (
-          <button className="h-8 px-4 rounded-lg bg-(--accent) hover:bg-(--accent-hover) text-white text-sm font-medium transition-colors shadow-sm active:scale-[0.98]">
+          <button
+            onClick={onAddProject}
+            className="h-8 px-4 rounded-lg bg-(--accent) hover:bg-(--accent-hover) text-white text-sm font-medium transition-colors shadow-sm active:scale-[0.98]"
+          >
             Add your first project
           </button>
         )}
@@ -100,23 +165,57 @@ export const ProjectGrid = memo(function ProjectGrid({
     );
   }
 
-  switch (viewMode) {
-    case "dashboard":
-      return <DashboardView projects={projects} />;
-    case "list":
-      return <ProjectList projects={projects} />;
-    case "compact":
-      return <ProjectCompact projects={projects} />;
-    case "table":
-      return <ProjectTable projects={projects} />;
-    case "card":
-    default:
-      return (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {projects.map((detail) => (
-            <ProjectCard key={detail.project.id} detail={detail} />
-          ))}
-        </div>
-      );
-  }
+  const sortable = viewMode !== "dashboard" && viewMode !== "table" && !!onReorder && sortBy === "custom";
+  const strategy = viewMode === "card" ? rectSortingStrategy : verticalListSortingStrategy;
+
+  const sortBanner = sortBy && sortBy !== "custom" && onSortChange ? (
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[var(--surface-2)] px-3 py-2 text-xs text-gray-600 dark:text-gray-400">
+      <span>Sorted by: {SORT_LABELS[sortBy]} · Drag &amp; drop disabled</span>
+      <button
+        onClick={() => onSortChange("custom")}
+        className="px-2 py-0.5 rounded text-[11px] font-medium hover:bg-gray-300/40 dark:hover:bg-gray-600/40 transition-colors"
+      >
+        Reset
+      </button>
+    </div>
+  ) : null;
+
+  const content = (() => {
+    switch (viewMode) {
+      case "dashboard":
+        return <DashboardView projects={projects} />;
+      case "list":
+        return <ProjectList projects={projects} sortable={sortable} focusedIndex={focusedIndex} />;
+      case "compact":
+        return <ProjectCompact projects={projects} sortable={sortable} focusedIndex={focusedIndex} />;
+      case "table":
+        return <ProjectTable projects={projects} focusedIndex={focusedIndex} />;
+      case "card":
+      default:
+        return (
+          <div className="grid grid-cols-1 gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+            {projects.map((detail, index) => (
+              <ProjectCard key={detail.project.id} detail={detail} sortable={sortable} projectIndex={index} isFocused={focusedIndex === index} />
+            ))}
+          </div>
+        );
+    }
+  })();
+
+  if (!sortable) return <>{sortBanner}{content}</>;
+
+  return (
+    <>
+      {sortBanner}
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleDragEnd}
+      >
+        <SortableContext items={sortableIds} strategy={strategy}>
+          {content}
+        </SortableContext>
+      </DndContext>
+    </>
+  );
 });

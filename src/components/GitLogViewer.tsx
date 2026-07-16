@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, memo } from "react";
 import * as api from "../lib/tauri";
 import type { CommitInfo } from "../lib/types";
 import { Modal } from "./ui/primitives";
+import { OperationConfirmDialog } from "./OperationConfirmDialog";
 
 const LIMIT = 50;
 
@@ -10,9 +11,11 @@ interface GitLogViewerProps {
   projectName: string;
   open: boolean;
   onClose: () => void;
+  unpushedCount?: number;
+  onRefresh?: () => void;
 }
 
-export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open, onClose }: GitLogViewerProps) {
+export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open, onClose, unpushedCount = 0, onRefresh }: GitLogViewerProps) {
   const [commits, setCommits] = useState<CommitInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -25,6 +28,13 @@ export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open
   const [sinceFilter, setSinceFilter] = useState("");
   const [untilFilter, setUntilFilter] = useState("");
   const [showFilters, setShowFilters] = useState(false);
+
+  // Interactive rebase state
+  const [editingHash, setEditingHash] = useState<string | null>(null);
+  const [confirmRewordHash, setConfirmRewordHash] = useState<string | null>(null);
+  const [editMessage, setEditMessage] = useState("");
+  const [confirmDropHash, setConfirmDropHash] = useState<string | null>(null);
+  const [rebaseLoading, setRebaseLoading] = useState(false);
 
   const buildFilters = useCallback((): api.GitLogFilters => {
     const filters: api.GitLogFilters = {};
@@ -47,6 +57,15 @@ export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open
     },
     [path],
   );
+
+  const reload = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    setHasMore(true);
+    fetchLogs(0, false, buildFilters())
+      .catch((e) => setError(String(e)))
+      .finally(() => setLoading(false));
+  }, [fetchLogs, buildFilters]);
 
   // Initial load when modal opens
   useEffect(() => {
@@ -102,7 +121,52 @@ export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open
     return d.toLocaleDateString();
   }, []);
 
+  const handleStartReword = useCallback((c: CommitInfo) => {
+    setEditingHash(c.hash);
+    setEditMessage(c.message);
+  }, []);
+
+  const handleCancelReword = useCallback(() => {
+    setEditingHash(null);
+    setEditMessage("");
+  }, []);
+
+  const handleSaveReword = useCallback(async (hash: string) => {
+    if (!editMessage.trim()) return;
+    setRebaseLoading(true);
+    try {
+      await api.gitRewordCommit(path, hash, editMessage.trim());
+      reload();
+      onRefresh?.();
+      setEditingHash(null);
+      setEditMessage("");
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setRebaseLoading(false);
+    }
+  }, [path, editMessage, reload, onRefresh]);
+
+  const handleDrop = useCallback(async (hash: string) => {
+    setRebaseLoading(true);
+    try {
+      await api.gitDropCommit(path, hash);
+      reload();
+      onRefresh?.();
+      setConfirmDropHash(null);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setRebaseLoading(false);
+    }
+  }, [path, reload, onRefresh]);
+
+  const isRewritable = useCallback((index: number) => {
+    return unpushedCount > 0 && index < unpushedCount;
+  }, [unpushedCount]);
+
   return (
+    <>
     <Modal
       open={open}
       onClose={onClose}
@@ -122,6 +186,11 @@ export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open
         >
           {hasActiveFilters ? "Filters (active)" : "Filters"}
         </button>
+        {unpushedCount > 0 && (
+          <span className="text-xs text-amber-600 dark:text-amber-400">
+            {unpushedCount} unpushed commit{unpushedCount > 1 ? "s" : ""} can be edited
+          </span>
+        )}
       </div>
 
       {/* Filter inputs */}
@@ -202,24 +271,77 @@ export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open
         ) : (
           <>
             <ul className="divide-y divide-gray-100 dark:divide-gray-700/50 list-none m-0 p-0">
-              {commits.map((c) => (
+              {commits.map((c, index) => (
                 <li
                   key={c.hash}
                   className="px-6 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
                 >
                   <div className="flex items-start gap-3">
                     <div className="shrink-0 mt-1">
-                      <div className="w-2 h-2 rounded-full bg-blue-500 dark:bg-blue-400" />
+                      <div className={`w-2 h-2 rounded-full ${isRewritable(index) ? "bg-amber-500 dark:bg-amber-400" : "bg-blue-500 dark:bg-blue-400"}`} />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-                        {c.message}
-                      </p>
-                      <div className="flex items-center gap-3 mt-1 text-xs text-gray-500 dark:text-gray-400">
-                        <span className="font-mono">{c.short_hash}</span>
-                        <span>{c.author}</span>
-                        <span>{formatDate(c.timestamp)}</span>
-                      </div>
+                      {editingHash === c.hash ? (
+                        <div className="space-y-2">
+                          <input
+                            type="text"
+                            value={editMessage}
+                            onChange={(e) => setEditMessage(e.target.value)}
+                            className="w-full px-2.5 py-1.5 rounded-md border border-blue-400 dark:border-blue-500 bg-white dark:bg-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            autoFocus
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && !e.shiftKey) setConfirmRewordHash(c.hash);
+                              if (e.key === "Escape") handleCancelReword();
+                            }}
+                            disabled={rebaseLoading}
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => setConfirmRewordHash(c.hash)}
+                              disabled={rebaseLoading || !editMessage.trim()}
+                              className="px-3 py-1 rounded-md text-xs font-medium bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white transition-colors"
+                            >
+                              {rebaseLoading ? "Saving..." : "Save"}
+                            </button>
+                            <button
+                              onClick={handleCancelReword}
+                              disabled={rebaseLoading}
+                              className="px-3 py-1 rounded-md text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                            {c.message}
+                          </p>
+                          <div className="flex items-center gap-3 mt-1 text-xs text-gray-500 dark:text-gray-400">
+                            <span className="font-mono">{c.short_hash}</span>
+                            <span>{c.author}</span>
+                            <span>{formatDate(c.timestamp)}</span>
+                            {isRewritable(index) && (
+                              <div className="ml-auto flex gap-1">
+                                <button
+                                  onClick={() => handleStartReword(c)}
+                                  className="px-2 py-0.5 rounded text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+                                  title="Reword commit message"
+                                >
+                                  Reword
+                                </button>
+                                <button
+                                  onClick={() => setConfirmDropHash(c.hash)}
+                                  className="px-2 py-0.5 rounded text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                                  title="Drop this commit"
+                                >
+                                  Drop
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
                 </li>
@@ -240,5 +362,28 @@ export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open
         )}
       </div>
     </Modal>
+      {confirmDropHash && (
+        <OperationConfirmDialog
+          open
+          operation="git_drop_commit"
+          targets={[{ path, label: confirmDropHash.slice(0, 7) }]}
+          onConfirm={() => handleDrop(confirmDropHash)}
+          onCancel={() => setConfirmDropHash(null)}
+        />
+      )}
+      {confirmRewordHash && (
+        <OperationConfirmDialog
+          open
+          operation="git_reword_commit"
+          targets={[{ path, label: confirmRewordHash.slice(0, 7) }]}
+          onConfirm={() => {
+            setConfirmRewordHash(null);
+            return handleSaveReword(confirmRewordHash);
+          }}
+          onCancel={() => setConfirmRewordHash(null)}
+        />
+      )}
+    </>
   );
 });
+export default GitLogViewer;

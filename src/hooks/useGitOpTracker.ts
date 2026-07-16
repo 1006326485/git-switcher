@@ -58,5 +58,10 @@ export function useGitOpTracker() {
     []
   );
 
-  return { activeOps, cancelOp, isOpActive, getActiveOp };
+  const getAnyActiveOp = useCallback(
+    (path: string) => opsRef.current.find((o) => o.path === path),
+    []
+  );
+
+  return { activeOps, cancelOp, isOpActive, getActiveOp, getAnyActiveOp };
 }

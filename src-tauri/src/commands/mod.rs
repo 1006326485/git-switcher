@@ -1,17 +1,27 @@
 pub mod ai_review;
+pub mod background;
 pub mod events;
 pub mod git;
 pub mod groups;
+pub mod notifications;
 pub mod op_tracker;
+pub mod operation_policy;
 pub mod projects;
+pub mod search;
 pub mod settings;
+pub mod task_workspaces;
 
 pub use ai_review::*;
+pub use background::*;
 pub use git::*;
 pub use groups::*;
+pub use notifications::*;
 pub use op_tracker::*;
+pub use operation_policy::*;
 pub use projects::*;
+pub use search::*;
 pub use settings::*;
+pub use task_workspaces::*;
 
 use crate::db::Database;
 use crate::models::{GitProject, Group, ProjectDetail};

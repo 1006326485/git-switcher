@@ -570,7 +570,9 @@ One paragraph overall assessment of this diff.
         let diff_text = Self::format_diff_for_llm(diff);
         let prompt = Self::build_review_prompt(&diff_text);
 
-        let response = Self::call_llm_api_streaming(config, &prompt, app).await?;
+        let response =
+            Self::call_llm_api_streaming(config, &prompt, app, config.max_tokens.clamp(256, 4096))
+                .await?;
         let findings = Self::parse_findings(&response);
 
         Ok(ReviewResult {
@@ -586,10 +588,11 @@ One paragraph overall assessment of this diff.
     }
 
     /// Build the chat/completions URL from a config endpoint.
+    /// Accepts both HTTPS (cloud APIs) and HTTP (local models like Ollama).
     fn build_chat_url(endpoint: &str) -> Result<String, AppError> {
-        if !endpoint.starts_with("https://") {
+        if !endpoint.starts_with("https://") && !endpoint.starts_with("http://") {
             return Err(AppError::Llm(
-                "LLM endpoint must use HTTPS to protect your API key".to_string(),
+                "LLM endpoint must start with http:// or https://".to_string(),
             ));
         }
         Ok(if endpoint.ends_with("/chat/completions") {
@@ -626,6 +629,7 @@ One paragraph overall assessment of this diff.
         config: &LlmConfig,
         prompt: &str,
         app: &AppHandle,
+        max_tokens: u32,
     ) -> Result<String, AppError> {
         let url = Self::build_chat_url(&config.endpoint)?;
         let client = Self::get_client()?;
@@ -633,7 +637,7 @@ One paragraph overall assessment of this diff.
         let request_body = serde_json::json!({
             "model": config.model,
             "temperature": config.temperature,
-            "max_tokens": config.max_tokens,
+            "max_tokens": max_tokens,
             "stream": true,
             "messages": [
                 {

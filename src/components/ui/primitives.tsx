@@ -243,18 +243,18 @@ export const Modal = memo(function Modal({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4" role="dialog" aria-modal="true" aria-labelledby={titleId}>
       <div className="absolute inset-0 bg-black/50 dark:bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div
         ref={contentRef}
-        className={`relative bg-[var(--surface-1)] rounded-2xl shadow-xl w-full ${maxWidth} mx-4`}
+        className={`relative flex max-h-[calc(100dvh-1.5rem)] w-full max-w-[calc(100vw-1.5rem)] flex-col overflow-y-auto rounded-2xl bg-[var(--surface-1)] shadow-xl sm:max-h-[calc(100dvh-2rem)] sm:max-w-[calc(100vw-2rem)] ${maxWidth}`}
       >
         {/* Header */}
-        <div className="px-6 pt-5 pb-3 flex items-center justify-between border-b border-gray-200 dark:border-gray-700">
-          <div>
+        <div className="flex items-start justify-between gap-3 border-b border-gray-200 px-4 pb-3 pt-4 sm:px-6 sm:pt-5 dark:border-gray-700">
+          <div className="min-w-0">
             <h2 id={titleId} className="text-lg font-semibold text-gray-900 dark:text-gray-100">{title}</h2>
             {subtitle && (
-              <p className="text-sm text-gray-500 dark:text-gray-400">{subtitle}</p>
+              <p className="truncate text-sm text-gray-500 dark:text-gray-400">{subtitle}</p>
             )}
           </div>
           <button
@@ -303,7 +303,7 @@ export function Tabs<T extends string>({
   );
 
   return (
-    <div role="tablist" className="px-6 flex gap-1 border-b border-gray-200 dark:border-gray-700" onKeyDown={handleKeyDown}>
+    <div role="tablist" className="flex gap-1 overflow-x-auto border-b border-gray-200 px-3 [-webkit-overflow-scrolling:touch] sm:px-6 dark:border-gray-700" onKeyDown={handleKeyDown}>
       {tabs.map((tab) => (
         <button
           key={tab.value}
@@ -311,7 +311,7 @@ export function Tabs<T extends string>({
           aria-selected={active === tab.value}
           tabIndex={active === tab.value ? 0 : -1}
           onClick={() => onChange(tab.value)}
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+          className={`shrink-0 whitespace-nowrap px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
             active === tab.value
               ? "border-blue-500 text-blue-600 dark:text-blue-400"
               : "border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
@@ -357,6 +357,12 @@ const STATUS_CONFIG = {
     dot: "bg-purple-500",
     symbol: "",
   },
+  stash: {
+    pill: "bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300",
+    text: "text-amber-600 dark:text-amber-400",
+    dot: "bg-amber-500",
+    symbol: "S",
+  },
 };
 
 export const StatusBadge = memo(function StatusBadge({
@@ -364,7 +370,7 @@ export const StatusBadge = memo(function StatusBadge({
   count,
   variant = "pill",
 }: {
-  type: "modified" | "staged" | "untracked" | "ahead" | "behind";
+  type: "modified" | "staged" | "untracked" | "ahead" | "behind" | "stash";
   count: number;
   variant?: "pill" | "text" | "dot" | "compact";
 }) {
@@ -378,6 +384,7 @@ export const StatusBadge = memo(function StatusBadge({
       <span
         className={`w-2 h-2 rounded-full ${c.dot}`}
         title={`${count} ${type}`}
+        aria-label={`${count} ${type}`}
       />
     );
   }
@@ -387,6 +394,7 @@ export const StatusBadge = memo(function StatusBadge({
       <span
         className={`text-xs font-semibold px-1.5 py-0.5 rounded ${c.pill}`}
         title={`${count} ${type}`}
+        aria-label={`${count} ${type}`}
       >
         {type === "ahead" ? `↑${count}` : type === "behind" ? `↓${count}` : `${count}${c.symbol}`}
       </span>
@@ -395,7 +403,7 @@ export const StatusBadge = memo(function StatusBadge({
 
   if (variant === "text") {
     return (
-      <span className={`text-sm font-medium ${c.text}`}>
+      <span className={`text-sm font-medium ${c.text}`} aria-label={`${count} ${type}`}>
         {type === "ahead" || type === "behind" ? symbol : count}
       </span>
     );
@@ -405,10 +413,13 @@ export const StatusBadge = memo(function StatusBadge({
   return (
     <span
       className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${c.pill}`}
+      aria-label={`${count} ${type}`}
     >
       {type === "ahead" || type === "behind"
         ? symbol
-        : `${count} ${type === "modified" ? "modified" : type === "staged" ? "staged" : "untracked"}`}
+        : type === "stash"
+          ? `${count} stash${count !== 1 ? "es" : ""}`
+          : `${count} ${type === "modified" ? "modified" : type === "staged" ? "staged" : "untracked"}`}
     </span>
   );
 });

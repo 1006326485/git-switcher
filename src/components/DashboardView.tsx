@@ -1,11 +1,52 @@
-import { memo, useMemo } from "react";
-import type { ProjectDetail } from "../lib/types";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import type { ProjectDetail, BranchHealthReport } from "../lib/types";
+import { analyzeBranchHealth } from "../lib/tauri";
+import { BranchHealthPanel } from "./BranchHealthPanel";
 
 interface DashboardViewProps {
   projects: ProjectDetail[];
 }
 
 export const DashboardView = memo(function DashboardView({ projects }: DashboardViewProps) {
+  const [healthReports, setHealthReports] = useState<
+    Array<{ projectName: string; path: string; report: BranchHealthReport }>
+  >([]);
+  const [healthLoading, setHealthLoading] = useState(false);
+  const [healthError, setHealthError] = useState<string | null>(null);
+
+  const loadHealth = useCallback(async () => {
+    setHealthLoading(true);
+    setHealthError(null);
+    try {
+      const results: Array<{ projectName: string; path: string; report: BranchHealthReport }> = [];
+      await Promise.allSettled(
+        projects.map(async (p) => {
+          try {
+            const report = await analyzeBranchHealth(p.project.path);
+            results.push({
+              projectName: p.project.alias || p.project.name,
+              path: p.project.path,
+              report,
+            });
+          } catch {
+            // skip failed repos
+          }
+        })
+      );
+      setHealthReports(results);
+    } catch (e) {
+      setHealthError(e instanceof Error ? e.message : "Failed to load branch health");
+    } finally {
+      setHealthLoading(false);
+    }
+  }, [projects]);
+
+  useEffect(() => {
+    if (projects.length > 0) {
+      loadHealth();
+    }
+  }, [projects, loadHealth]);
+
   const stats = useMemo(() => {
     const withChanges = projects.filter(
       (p) => p.status.modified > 0 || p.status.staged > 0 || p.status.untracked > 0
@@ -65,9 +106,9 @@ export const DashboardView = memo(function DashboardView({ projects }: Dashboard
   }, [projects]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* Summary cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
         <StatCard
           label="Total Projects"
           value={stats.total}
@@ -111,7 +152,7 @@ export const DashboardView = memo(function DashboardView({ projects }: Dashboard
       </div>
 
       {/* Visualization row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 lg:gap-4">
         <BranchDistribution branches={stats.topBranches} />
         <SyncRing
           ahead={projects.filter((p) => p.status.ahead > 0).length}
@@ -119,6 +160,14 @@ export const DashboardView = memo(function DashboardView({ projects }: Dashboard
           synced={stats.upToDate}
         />
       </div>
+
+      {/* Branch health */}
+      <BranchHealthPanel
+        reports={healthReports}
+        loading={healthLoading}
+        error={healthError}
+        onRefresh={loadHealth}
+      />
 
       {/* Change heat bar */}
       <ChangeHeatBar projects={projects} />
@@ -163,9 +212,9 @@ export const DashboardView = memo(function DashboardView({ projects }: Dashboard
           <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Active Branches</h3>
           <div className="space-y-2">
             {stats.topBranches.map(([branch, count]) => (
-              <div key={branch} className="flex items-center justify-between text-sm">
-                <span className="font-mono text-gray-700 dark:text-gray-300">{branch}</span>
-                <span className="text-gray-500">{count} project{count !== 1 ? "s" : ""}</span>
+              <div key={branch} className="flex min-w-0 items-center justify-between gap-3 text-sm">
+                <span className="min-w-0 truncate font-mono text-gray-700 dark:text-gray-300" title={branch}>{branch}</span>
+                <span className="shrink-0 text-gray-500">{count} project{count !== 1 ? "s" : ""}</span>
               </div>
             ))}
           </div>
@@ -178,8 +227,8 @@ export const DashboardView = memo(function DashboardView({ projects }: Dashboard
           <h3 className="text-sm font-semibold text-red-600 dark:text-red-400 mb-3">Conflict Risk</h3>
           <div className="space-y-1">
             {stats.conflictRisk.map((p) => (
-              <div key={p.project.id} className="flex items-center justify-between text-sm py-1">
-                <span className="text-gray-700 dark:text-gray-300">{p.project.alias || p.project.name}</span>
+              <div key={p.project.id} className="flex min-w-0 items-center justify-between gap-3 text-sm py-1">
+                <span className="min-w-0 truncate text-gray-700 dark:text-gray-300" title={p.project.alias || p.project.name}>{p.project.alias || p.project.name}</span>
                 <div className="flex gap-2 text-xs">
                   <span className="text-red-600">behind {p.status.behind}</span>
                   {p.status.modified > 0 && <span className="text-yellow-600">{p.status.modified}M</span>}
@@ -198,8 +247,8 @@ export const DashboardView = memo(function DashboardView({ projects }: Dashboard
           </h3>
           <div className="space-y-1">
             {stats.stale.slice(0, 10).map((p) => (
-              <div key={p.project.id} className="flex items-center justify-between text-sm py-1">
-                <span className="text-gray-700 dark:text-gray-300">{p.project.alias || p.project.name}</span>
+              <div key={p.project.id} className="flex min-w-0 items-center justify-between gap-3 text-sm py-1">
+                <span className="min-w-0 truncate text-gray-700 dark:text-gray-300" title={p.project.alias || p.project.name}>{p.project.alias || p.project.name}</span>
                 <span className="text-xs text-gray-500">
                   {p.project.last_active_at
                     ? `${Math.floor((Date.now() - new Date(p.project.last_active_at).getTime()) / (1000 * 60 * 60 * 24))}d ago`
@@ -217,8 +266,8 @@ export const DashboardView = memo(function DashboardView({ projects }: Dashboard
           <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Needs Attention</h3>
           <div className="space-y-1">
             {stats.withChangesList.slice(0, 10).map((p) => (
-              <div key={p.project.id} className="flex items-center justify-between text-sm py-1">
-                <span className="text-gray-700 dark:text-gray-300">{p.project.alias || p.project.name}</span>
+              <div key={p.project.id} className="flex min-w-0 items-center justify-between gap-3 text-sm py-1">
+                <span className="min-w-0 truncate text-gray-700 dark:text-gray-300" title={p.project.alias || p.project.name}>{p.project.alias || p.project.name}</span>
                 <div className="flex gap-2 text-xs">
                   {p.status.modified > 0 && <span className="text-yellow-600">{p.status.modified}M</span>}
                   {p.status.staged > 0 && <span className="text-green-600">{p.status.staged}S</span>}

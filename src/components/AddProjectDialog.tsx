@@ -180,3 +180,4 @@ export const AddProjectDialog = memo(function AddProjectDialog({
     </Modal>
   );
 });
+export default AddProjectDialog;

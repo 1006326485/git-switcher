@@ -3,7 +3,10 @@ use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{params, Connection};
 use std::path::PathBuf;
 
-use crate::models::{GitProject, Group, ReviewResult};
+use crate::models::{
+    GitProject, Group, ReviewResult, TaskExecutionState, TaskStrategy, TaskWorkspace,
+    TaskWorkspaceEntry, TaskWorkspaceEntryDetail, TaskWorkspaceOutcome, TaskWorkspaceStatus,
+};
 use crate::AppError;
 
 #[derive(Clone)]
@@ -91,12 +94,62 @@ impl Database {
         )
         .map_err(|e| AppError::Database(format!("Failed to create tables: {}", e)))?;
 
+        // Task Workspaces are local, durable task contexts. Their entries only reference
+        // registered projects; deleting a project cascades to the task entry.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS task_workspaces (
+                id              TEXT PRIMARY KEY,
+                name            TEXT NOT NULL,
+                description     TEXT,
+                status          TEXT NOT NULL DEFAULT 'active',
+                created_at      TEXT NOT NULL,
+                updated_at      TEXT NOT NULL,
+                last_opened_at  TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS task_workspace_entries (
+                id              TEXT PRIMARY KEY,
+                workspace_id    TEXT NOT NULL REFERENCES task_workspaces(id) ON DELETE CASCADE,
+                project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                sort_order      INTEGER NOT NULL DEFAULT 0,
+                strategy        TEXT NOT NULL DEFAULT 'retain_current',
+                target_branch   TEXT,
+                base_branch     TEXT,
+                worktree_path   TEXT,
+                created_at      TEXT NOT NULL,
+                updated_at      TEXT NOT NULL,
+                UNIQUE(workspace_id, project_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_task_workspace_entries_workspace
+                ON task_workspace_entries(workspace_id, sort_order);
+
+            CREATE TABLE IF NOT EXISTS task_workspace_outcomes (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL REFERENCES task_workspaces(id) ON DELETE CASCADE,
+                entry_id TEXT NOT NULL REFERENCES task_workspace_entries(id) ON DELETE CASCADE,
+                state TEXT NOT NULL,
+                message TEXT NOT NULL,
+                start_branch TEXT,
+                start_head TEXT,
+                result_branch TEXT,
+                worktree_path TEXT,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_task_workspace_outcomes_workspace
+                ON task_workspace_outcomes(workspace_id, created_at DESC);",
+        )
+        .map_err(|e| AppError::Database(format!("Failed to migrate task workspaces: {}", e)))?;
+
         // Step 2: Add new columns to projects (ALTER TABLE silently fails if column exists)
         let migrate_columns = [
             ("alias", "TEXT"),
             ("sort_order", "INTEGER NOT NULL DEFAULT 0"),
             ("last_active_at", "TEXT"),
             ("last_commit_hash", "TEXT"),
+            ("color", "TEXT"),
+            ("description", "TEXT"),
+            ("notes", "TEXT"),
         ];
         for (col, col_type) in &migrate_columns {
             let result = conn.execute(
@@ -199,6 +252,9 @@ impl Database {
             last_commit_hash: row.get(7)?,
             created_at: row.get(8)?,
             updated_at: row.get(9)?,
+            color: row.get(10)?,
+            description: row.get(11)?,
+            notes: row.get(12)?,
         })
     }
 
@@ -217,8 +273,8 @@ impl Database {
     pub fn insert_project(&self, project: &GitProject) -> Result<(), AppError> {
         self.with_conn(|conn| {
             conn.execute(
-                "INSERT INTO projects (id, name, path, alias, sort_order, group_id, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                "INSERT INTO projects (id, name, path, alias, sort_order, group_id, color, description, notes, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                 params![
                     project.id,
                     project.name,
@@ -226,6 +282,9 @@ impl Database {
                     project.alias,
                     project.sort_order,
                     project.group_id,
+                    project.color,
+                    project.description,
+                    project.notes,
                     project.created_at,
                     project.updated_at,
                 ],
@@ -238,7 +297,7 @@ impl Database {
     pub fn get_all_projects(&self) -> Result<Vec<GitProject>, AppError> {
         self.with_conn(|conn| {
             let mut stmt = conn
-                .prepare("SELECT id, name, path, alias, sort_order, group_id, last_active_at, last_commit_hash, created_at, updated_at FROM projects ORDER BY sort_order, name")
+                .prepare("SELECT id, name, path, alias, sort_order, group_id, last_active_at, last_commit_hash, created_at, updated_at, color, description, notes FROM projects ORDER BY sort_order, name")
                 .map_err(|e| AppError::Database(format!("Failed to prepare statement: {}", e)))?;
 
             let projects = stmt
@@ -254,10 +313,21 @@ impl Database {
         })
     }
 
+    pub fn get_project_by_id(&self, id: &str) -> Result<GitProject, AppError> {
+        self.with_conn(|conn| {
+            conn.query_row(
+                "SELECT id, name, path, alias, sort_order, group_id, last_active_at, last_commit_hash, created_at, updated_at, color, description, notes FROM projects WHERE id = ?1",
+                params![id],
+                Self::row_to_project,
+            )
+            .map_err(|e| AppError::NotFound(format!("Project not found: {}", e)))
+        })
+    }
+
     pub fn get_project_by_path(&self, path: &str) -> Result<GitProject, AppError> {
         self.with_conn(|conn| {
             conn.query_row(
-                "SELECT id, name, path, alias, sort_order, group_id, last_active_at, last_commit_hash, created_at, updated_at FROM projects WHERE path = ?1",
+                "SELECT id, name, path, alias, sort_order, group_id, last_active_at, last_commit_hash, created_at, updated_at, color, description, notes FROM projects WHERE path = ?1",
                 params![path],
                 Self::row_to_project,
             )
@@ -297,6 +367,43 @@ impl Database {
                 params![alias, id],
             )
             .map_err(|e| AppError::Database(format!("Failed to update alias: {}", e)))?;
+            Ok(())
+        })
+    }
+
+    pub fn update_project_color(&self, id: &str, color: Option<&str>) -> Result<(), AppError> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "UPDATE projects SET color = ?1, updated_at = datetime('now') WHERE id = ?2",
+                params![color, id],
+            )
+            .map_err(|e| AppError::Database(format!("Failed to update color: {}", e)))?;
+            Ok(())
+        })
+    }
+
+    pub fn update_project_description(
+        &self,
+        id: &str,
+        description: Option<&str>,
+    ) -> Result<(), AppError> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "UPDATE projects SET description = ?1, updated_at = datetime('now') WHERE id = ?2",
+                params![description, id],
+            )
+            .map_err(|e| AppError::Database(format!("Failed to update description: {}", e)))?;
+            Ok(())
+        })
+    }
+
+    pub fn update_project_notes(&self, id: &str, notes: Option<&str>) -> Result<(), AppError> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "UPDATE projects SET notes = ?1, updated_at = datetime('now') WHERE id = ?2",
+                params![notes, id],
+            )
+            .map_err(|e| AppError::Database(format!("Failed to update notes: {}", e)))?;
             Ok(())
         })
     }
@@ -465,7 +572,7 @@ impl Database {
     pub fn get_projects_in_group(&self, group_id: &str) -> Result<Vec<GitProject>, AppError> {
         self.with_conn(|conn| {
             let mut stmt = conn
-                .prepare("SELECT id, name, path, alias, sort_order, group_id, last_active_at, last_commit_hash, created_at, updated_at
+                .prepare("SELECT id, name, path, alias, sort_order, group_id, last_active_at, last_commit_hash, created_at, updated_at, color, description, notes
                            FROM projects WHERE group_id = ?1 ORDER BY sort_order, name")
                 .map_err(|e| AppError::Database(format!("Failed to prepare get_projects_in_group: {}", e)))?;
 
@@ -494,6 +601,293 @@ impl Database {
             )
             .map_err(|e| AppError::Database(format!("Failed to reassign group projects: {}", e)))?;
             Ok(())
+        })
+    }
+
+    // ── Task Workspaces ──────────────────────────────────────────────────
+
+    fn row_to_task_workspace(row: &rusqlite::Row) -> rusqlite::Result<TaskWorkspace> {
+        Ok(TaskWorkspace {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            description: row.get(2)?,
+            status: TaskWorkspaceStatus::parse(&row.get::<_, String>(3)?),
+            created_at: row.get(4)?,
+            updated_at: row.get(5)?,
+            last_opened_at: row.get(6)?,
+        })
+    }
+
+    fn row_to_task_workspace_entry(row: &rusqlite::Row) -> rusqlite::Result<TaskWorkspaceEntry> {
+        Ok(TaskWorkspaceEntry {
+            id: row.get(0)?,
+            workspace_id: row.get(1)?,
+            project_id: row.get(2)?,
+            sort_order: row.get(3)?,
+            strategy: TaskStrategy::parse(&row.get::<_, String>(4)?),
+            target_branch: row.get(5)?,
+            base_branch: row.get(6)?,
+            worktree_path: row.get(7)?,
+            created_at: row.get(8)?,
+            updated_at: row.get(9)?,
+        })
+    }
+
+    pub fn insert_task_workspace(&self, workspace: &TaskWorkspace) -> Result<(), AppError> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO task_workspaces (id, name, description, status, created_at, updated_at, last_opened_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    workspace.id,
+                    workspace.name,
+                    workspace.description,
+                    workspace.status.as_str(),
+                    workspace.created_at,
+                    workspace.updated_at,
+                    workspace.last_opened_at,
+                ],
+            )
+            .map_err(|e| AppError::Database(format!("Failed to create task workspace: {}", e)))?;
+            Ok(())
+        })
+    }
+
+    pub fn get_task_workspace(&self, id: &str) -> Result<TaskWorkspace, AppError> {
+        self.with_conn(|conn| {
+            conn.query_row(
+                "SELECT id, name, description, status, created_at, updated_at, last_opened_at
+                 FROM task_workspaces WHERE id = ?1",
+                params![id],
+                Self::row_to_task_workspace,
+            )
+            .map_err(|e| AppError::NotFound(format!("Task workspace not found: {}", e)))
+        })
+    }
+
+    pub fn list_task_workspaces(
+        &self,
+        include_archived: bool,
+    ) -> Result<Vec<TaskWorkspace>, AppError> {
+        self.with_conn(|conn| {
+            let query = if include_archived {
+                "SELECT id, name, description, status, created_at, updated_at, last_opened_at
+                 FROM task_workspaces ORDER BY status, COALESCE(last_opened_at, updated_at) DESC"
+            } else {
+                "SELECT id, name, description, status, created_at, updated_at, last_opened_at
+                 FROM task_workspaces WHERE status = 'active'
+                 ORDER BY COALESCE(last_opened_at, updated_at) DESC"
+            };
+            let mut statement = conn.prepare(query).map_err(|e| {
+                AppError::Database(format!("Failed to prepare task workspace list: {}", e))
+            })?;
+            let items = statement
+                .query_map([], Self::row_to_task_workspace)
+                .map_err(|e| AppError::Database(format!("Failed to query task workspaces: {}", e)))?
+                .filter_map(Result::ok)
+                .collect();
+            Ok(items)
+        })
+    }
+
+    pub fn update_task_workspace(
+        &self,
+        id: &str,
+        name: &str,
+        description: Option<&str>,
+    ) -> Result<TaskWorkspace, AppError> {
+        self.with_conn(|conn| {
+            let affected = conn
+                .execute(
+                    "UPDATE task_workspaces
+                     SET name = ?1, description = ?2, updated_at = datetime('now') WHERE id = ?3",
+                    params![name, description, id],
+                )
+                .map_err(|e| {
+                    AppError::Database(format!("Failed to update task workspace: {}", e))
+                })?;
+            if affected == 0 {
+                return Err(AppError::NotFound("Task workspace not found".to_string()));
+            }
+            Ok(())
+        })?;
+        self.get_task_workspace(id)
+    }
+
+    pub fn archive_task_workspace(&self, id: &str) -> Result<(), AppError> {
+        self.with_conn(|conn| {
+            let affected = conn
+                .execute(
+                    "UPDATE task_workspaces SET status = 'archived', updated_at = datetime('now') WHERE id = ?1",
+                    params![id],
+                )
+                .map_err(|e| AppError::Database(format!("Failed to archive task workspace: {}", e)))?;
+            if affected == 0 {
+                return Err(AppError::NotFound("Task workspace not found".to_string()));
+            }
+            Ok(())
+        })
+    }
+
+    pub fn touch_task_workspace(&self, id: &str) -> Result<(), AppError> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "UPDATE task_workspaces
+                 SET last_opened_at = datetime('now'), updated_at = datetime('now') WHERE id = ?1",
+                params![id],
+            )
+            .map_err(|e| AppError::Database(format!("Failed to touch task workspace: {}", e)))?;
+            Ok(())
+        })
+    }
+
+    pub fn insert_task_workspace_entry(&self, entry: &TaskWorkspaceEntry) -> Result<(), AppError> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO task_workspace_entries
+                 (id, workspace_id, project_id, sort_order, strategy, target_branch, base_branch, worktree_path, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                params![
+                    entry.id,
+                    entry.workspace_id,
+                    entry.project_id,
+                    entry.sort_order,
+                    entry.strategy.as_str(),
+                    entry.target_branch,
+                    entry.base_branch,
+                    entry.worktree_path,
+                    entry.created_at,
+                    entry.updated_at,
+                ],
+            )
+            .map_err(|e| AppError::Database(format!("Failed to add task workspace project: {}", e)))?;
+            Ok(())
+        })
+    }
+
+    pub fn delete_task_workspace_entry(&self, id: &str) -> Result<(), AppError> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "DELETE FROM task_workspace_entries WHERE id = ?1",
+                params![id],
+            )
+            .map_err(|e| {
+                AppError::Database(format!("Failed to remove task workspace project: {}", e))
+            })?;
+            Ok(())
+        })
+    }
+
+    pub fn reorder_task_workspace_entries(
+        &self,
+        workspace_id: &str,
+        entry_ids: &[String],
+    ) -> Result<(), AppError> {
+        self.with_conn(|conn| {
+            let transaction = conn.unchecked_transaction().map_err(|e| AppError::Database(format!("Failed to start task reorder: {}", e)))?;
+            for (index, id) in entry_ids.iter().enumerate() {
+                transaction.execute("UPDATE task_workspace_entries SET sort_order = ?1, updated_at = datetime('now') WHERE id = ?2 AND workspace_id = ?3", params![index as i64, id, workspace_id])
+                    .map_err(|e| AppError::Database(format!("Failed to reorder task project: {}", e)))?;
+            }
+            transaction.commit().map_err(|e| AppError::Database(format!("Failed to commit task reorder: {}", e)))?;
+            Ok(())
+        })
+    }
+
+    pub fn update_task_workspace_entry(&self, entry: &TaskWorkspaceEntry) -> Result<(), AppError> {
+        self.with_conn(|conn| {
+            let affected = conn
+                .execute(
+                    "UPDATE task_workspace_entries
+                     SET sort_order = ?1, strategy = ?2, target_branch = ?3, base_branch = ?4,
+                         worktree_path = ?5, updated_at = datetime('now') WHERE id = ?6",
+                    params![
+                        entry.sort_order,
+                        entry.strategy.as_str(),
+                        entry.target_branch,
+                        entry.base_branch,
+                        entry.worktree_path,
+                        entry.id,
+                    ],
+                )
+                .map_err(|e| {
+                    AppError::Database(format!("Failed to update task workspace project: {}", e))
+                })?;
+            if affected == 0 {
+                return Err(AppError::NotFound(
+                    "Task workspace project not found".to_string(),
+                ));
+            }
+            Ok(())
+        })
+    }
+
+    pub fn get_task_workspace_entries(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Vec<TaskWorkspaceEntryDetail>, AppError> {
+        self.with_conn(|conn| {
+            let mut statement = conn
+                .prepare(
+                    "SELECT e.id, e.workspace_id, e.project_id, e.sort_order, e.strategy,
+                            e.target_branch, e.base_branch, e.worktree_path, e.created_at, e.updated_at,
+                            p.id, p.name, p.path, p.alias, p.sort_order, p.group_id,
+                            p.last_active_at, p.last_commit_hash, p.created_at, p.updated_at,
+                            p.color, p.description, p.notes
+                     FROM task_workspace_entries e
+                     JOIN projects p ON p.id = e.project_id
+                     WHERE e.workspace_id = ?1 ORDER BY e.sort_order",
+                )
+                .map_err(|e| AppError::Database(format!("Failed to prepare task workspace entries: {}", e)))?;
+            let entries = statement
+                .query_map(params![workspace_id], |row| {
+                    let entry = Self::row_to_task_workspace_entry(row)?;
+                    let project = GitProject {
+                        id: row.get(10)?, name: row.get(11)?, path: row.get(12)?, alias: row.get(13)?,
+                        sort_order: row.get(14)?, group_id: row.get(15)?, last_active_at: row.get(16)?,
+                        last_commit_hash: row.get(17)?, created_at: row.get(18)?, updated_at: row.get(19)?,
+                        color: row.get(20)?, description: row.get(21)?, notes: row.get(22)?,
+                    };
+                    Ok(TaskWorkspaceEntryDetail { entry, project })
+                })
+                .map_err(|e| AppError::Database(format!("Failed to query task workspace entries: {}", e)))?
+                .filter_map(Result::ok)
+                .collect();
+            Ok(entries)
+        })
+    }
+
+    pub fn get_task_workspace_detail(
+        &self,
+        id: &str,
+    ) -> Result<crate::models::TaskWorkspaceDetail, AppError> {
+        Ok(crate::models::TaskWorkspaceDetail {
+            workspace: self.get_task_workspace(id)?,
+            entries: self.get_task_workspace_entries(id)?,
+        })
+    }
+
+    pub fn insert_task_workspace_outcome(
+        &self,
+        outcome: &TaskWorkspaceOutcome,
+    ) -> Result<(), AppError> {
+        self.with_conn(|conn| {
+            conn.execute("INSERT INTO task_workspace_outcomes (id, workspace_id, entry_id, state, message, start_branch, start_head, result_branch, worktree_path, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)", params![outcome.id, outcome.workspace_id, outcome.entry_id, outcome.state.as_str(), outcome.message, outcome.start_branch, outcome.start_head, outcome.result_branch, outcome.worktree_path, outcome.created_at])
+                .map_err(|e| AppError::Database(format!("Failed to record task outcome: {}", e)))?;
+            Ok(())
+        })
+    }
+
+    pub fn list_task_workspace_outcomes(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Vec<TaskWorkspaceOutcome>, AppError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn.prepare("SELECT id, workspace_id, entry_id, state, message, start_branch, start_head, result_branch, worktree_path, created_at FROM task_workspace_outcomes WHERE workspace_id = ?1 ORDER BY created_at DESC")
+                .map_err(|e| AppError::Database(format!("Failed to prepare task outcomes: {}", e)))?;
+            let items = stmt.query_map(params![workspace_id], |row| Ok(TaskWorkspaceOutcome { id: row.get(0)?, workspace_id: row.get(1)?, entry_id: row.get(2)?, state: TaskExecutionState::parse(&row.get::<_, String>(3)?), message: row.get(4)?, start_branch: row.get(5)?, start_head: row.get(6)?, result_branch: row.get(7)?, worktree_path: row.get(8)?, created_at: row.get(9)? }))
+                .map_err(|e| AppError::Database(format!("Failed to query task outcomes: {}", e)))?.filter_map(Result::ok).collect();
+            Ok(items)
         })
     }
 

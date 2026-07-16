@@ -96,8 +96,16 @@ pub async fn ai_review_streaming(
     base_branch: String,
     head_branch: String,
     store: State<'_, SettingsStore>,
+    db: State<'_, Database>,
     app: AppHandle,
 ) -> Result<ReviewResult, AppError> {
     let (config, diff) = validate_review(&store, &path, &base_branch, &head_branch)?;
-    LlmService::review_diff_streaming(&diff, &config, &app).await
+    let result = LlmService::review_diff_streaming(&diff, &config, &app).await?;
+
+    // Save to DB (best effort, don't fail the review if save fails)
+    if let Err(e) = db.insert_review(&result, &path) {
+        log::warn!("Failed to save streaming review to DB: {}", e);
+    }
+
+    Ok(result)
 }

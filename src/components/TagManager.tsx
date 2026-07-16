@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, memo } from "react";
 import * as api from "../lib/tauri";
 import type { TagInfo } from "../lib/types";
+import { parseError } from "../lib/types";
 import { Modal, Tabs, PrimaryButton } from "./ui/primitives";
-import { ConfirmDialog } from "./ConfirmDialog";
+import { OperationConfirmDialog } from "./OperationConfirmDialog";
 
 interface TagManagerProps {
   path: string;
@@ -35,7 +36,7 @@ export const TagManager = memo(function TagManager({
       const list = await api.gitListTags(path);
       setTags(list);
     } catch (e) {
-      onError(String(e));
+      onError(parseError(e));
     } finally {
       setLoadingTags(false);
     }
@@ -57,7 +58,7 @@ export const TagManager = memo(function TagManager({
       setTagMessage("");
       await loadTags();
     } catch (e) {
-      onError(String(e));
+      onError(parseError(e));
     } finally {
       setLoading(false);
     }
@@ -72,7 +73,7 @@ export const TagManager = memo(function TagManager({
       setSelectedTag("");
       await loadTags();
     } catch (e) {
-      onError(String(e));
+      onError(parseError(e));
     } finally {
       setLoading(false);
     }
@@ -178,14 +179,14 @@ export const TagManager = memo(function TagManager({
         )}
       </div>
 
-      <ConfirmDialog
+      <OperationConfirmDialog
         open={confirmDelete}
-        title="Delete Tag"
-        message={`Are you sure you want to delete tag "${selectedTag}"? This action cannot be undone.`}
-        confirmLabel="Delete"
+        operation="git_delete_tag"
+        targets={selectedTag ? [{ path, label: selectedTag }] : []}
         onConfirm={handleConfirmDelete}
         onCancel={handleCancelDelete}
       />
     </Modal>
   );
 });
+export default TagManager;
