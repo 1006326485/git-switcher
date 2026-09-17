@@ -437,7 +437,7 @@ impl LlmService {
                     file.patch.len()
                 ));
             } else {
-                parts.push(format!("```diff\n{}\n```\n", &file.patch));
+                parts.push(format!("```diff\n{}\n```\n", file.patch));
             }
         }
 
