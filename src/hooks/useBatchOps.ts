@@ -80,9 +80,11 @@ export function useBatchOps(toast: ToastApi, onRefreshAll: () => void, activeGro
 
   const fetchAll = useCallback(async () => {
     if (!startOp("fetch")) return;
+    api.logOperation("fetch_all", groupRef.current ?? "/", "All projects", undefined, "success").catch(() => {});
     try {
       await api.fetchAll(groupRef.current ?? undefined);
     } catch (e) {
+      api.logOperation("fetch_all", groupRef.current ?? "/", "All projects", undefined, "error", String(e)).catch(() => {});
       callbacksRef.current.toast.error(String(e));
       setLoading(null);
     }
@@ -90,9 +92,11 @@ export function useBatchOps(toast: ToastApi, onRefreshAll: () => void, activeGro
 
   const pullAll = useCallback(async () => {
     if (!startOp("pull")) return;
+    api.logOperation("pull_all", groupRef.current ?? "/", "All projects", undefined, "success").catch(() => {});
     try {
       await api.pullAll(groupRef.current ?? undefined);
     } catch (e) {
+      api.logOperation("pull_all", groupRef.current ?? "/", "All projects", undefined, "error", String(e)).catch(() => {});
       callbacksRef.current.toast.error(String(e));
       setLoading(null);
     }
@@ -100,9 +104,11 @@ export function useBatchOps(toast: ToastApi, onRefreshAll: () => void, activeGro
 
   const pushAll = useCallback(async () => {
     if (!startOp("push")) return;
+    api.logOperation("push_all", groupRef.current ?? "/", "All projects", undefined, "success").catch(() => {});
     try {
       await api.pushAll(groupRef.current ?? undefined);
     } catch (e) {
+      api.logOperation("push_all", groupRef.current ?? "/", "All projects", undefined, "error", String(e)).catch(() => {});
       callbacksRef.current.toast.error(String(e));
       setLoading(null);
     }
@@ -130,9 +136,11 @@ export function useBatchOps(toast: ToastApi, onRefreshAll: () => void, activeGro
 
   const syncAll = useCallback(async () => {
     if (!startOp("sync")) return;
+    api.logOperation("sync_all", groupRef.current ?? "/", "All projects", undefined, "success").catch(() => {});
     try {
       await api.syncAll(groupRef.current ?? undefined);
     } catch (e) {
+      api.logOperation("sync_all", groupRef.current ?? "/", "All projects", undefined, "error", String(e)).catch(() => {});
       callbacksRef.current.toast.error(String(e));
       setLoading(null);
     }

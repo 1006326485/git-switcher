@@ -3,18 +3,8 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import * as api from "../lib/tauri";
 import type { LogEntry } from "../lib/types";
 import { parseError } from "../lib/types";
+import { CommitGraph } from "./CommitGraph";
 import { OperationConfirmDialog } from "./OperationConfirmDialog";
-
-const LANE_COLORS = [
-  "text-blue-500",
-  "text-green-500",
-  "text-red-500",
-  "text-purple-500",
-  "text-orange-500",
-  "text-cyan-500",
-  "text-pink-500",
-  "text-yellow-500",
-];
 
 const ROW_HEIGHT = 28;
 
@@ -114,10 +104,6 @@ export const CommitLog = memo(function CommitLog({ path, onSuccess, onError, onR
       if (result.conflicts.length > 0) {
         setCherryPickConflicts(result.conflicts);
       }
-
-
-
-
       await Promise.all([load(), onRefresh?.()]);
     } catch (e) {
       onError?.(parseError(e), e, path);
@@ -173,6 +159,7 @@ export const CommitLog = memo(function CommitLog({ path, onSuccess, onError, onR
   const maxLane = Math.max(...entries.map((e) => e.lane), 0);
   const hasSelection = selectedHashes.size > 0;
   const isRangeSelection = selectedHashes.size >= 2;
+  const graphWidth = (maxLane + 1) * 16;
 
   return (
     <div className="space-y-0 font-mono text-xs">
@@ -236,105 +223,99 @@ export const CommitLog = memo(function CommitLog({ path, onSuccess, onError, onR
         </div>
       )}
 
-      {/* Virtualized commit list */}
-      <div
-        ref={parentRef}
-        className="max-h-[60vh] overflow-auto"
-      >
-        <div
-          style={{ height: `${virtualizer.getTotalSize()}px`, position: "relative", width: "100%" }}
-        >
-          {virtualizer.getVirtualItems().map((virtualRow) => {
-            const entry = entries[virtualRow.index];
-            const laneColor = LANE_COLORS[entry.lane % LANE_COLORS.length];
-            const hasRefs = entry.refs.length > 0;
-            const isCherryPicking = cherryPicking === entry.hash;
-            const isSelected = selectedHashes.has(entry.hash);
+      {/* Commit graph + log */}
+      <div ref={parentRef} className="max-h-[60vh] overflow-auto">
+        <div className="flex" style={{ height: `${virtualizer.getTotalSize()}px`, position: "relative", width: "100%" }}>
+          {/* SVG Graph column (sticky left) */}
+          <div
+            className="sticky left-0 z-10 shrink-0"
+            style={{ width: graphWidth }}
+          >
+            <CommitGraph entries={entries} maxLane={maxLane} />
+          </div>
 
-            return (
-              <div
-                key={entry.hash}
-                data-index={virtualRow.index}
-                ref={virtualizer.measureElement}
-                className={`flex items-center gap-1 hover:bg-gray-50 dark:hover:bg-gray-700/50 group ${isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""}`}
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  width: "100%",
-                  transform: `translateY(${virtualRow.start}px)`,
-                }}
-              >
-                {/* Checkbox */}
-                <label className="flex items-center shrink-0 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={isSelected}
-                    onChange={() => toggleSelect(entry.hash)}
-                    className="w-3 h-3 rounded border-gray-300 dark:border-gray-600 text-blue-500 focus:ring-blue-400 cursor-pointer"
-                  />
-                </label>
+          {/* Commit rows */}
+          <div className="flex-1 min-w-0" style={{ height: `${virtualizer.getTotalSize()}px`, position: "relative" }}>
+            {virtualizer.getVirtualItems().map((virtualRow) => {
+              const entry = entries[virtualRow.index];
+              const hasRefs = entry.refs.length > 0;
+              const isCherryPicking = cherryPicking === entry.hash;
+              const isSelected = selectedHashes.has(entry.hash);
 
-                {/* Lane indicators */}
-                <div className="flex items-center shrink-0" style={{ width: `${(maxLane + 1) * 16}px` }}>
-                  {Array.from({ length: maxLane + 1 }, (_, i) => (
-                    <span
-                      key={i}
-                      className={`w-4 text-center ${i === entry.lane ? laneColor : "text-gray-300 dark:text-gray-600"}`}
-                    >
-                      {i === entry.lane ? "●" : "│"}
-                    </span>
-                  ))}
+              return (
+                <div
+                  key={entry.hash}
+                  data-index={virtualRow.index}
+                  ref={virtualizer.measureElement}
+                  className={`flex items-center gap-1 hover:bg-gray-50 dark:hover:bg-gray-700/50 group ${isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""}`}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    height: ROW_HEIGHT,
+                    transform: `translateY(${virtualRow.start}px)`,
+                  }}
+                >
+                  {/* Checkbox */}
+                  <label className="flex items-center shrink-0 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => toggleSelect(entry.hash)}
+                      className="w-3 h-3 rounded border-gray-300 dark:border-gray-600 text-blue-500 focus:ring-blue-400 cursor-pointer"
+                    />
+                  </label>
+
+                  {/* Refs */}
+                  {hasRefs && (
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      {entry.refs.map((ref) => (
+                        <span
+                          key={ref}
+                          className="px-1 py-0 rounded text-[10px] font-semibold bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 border border-yellow-200 dark:border-yellow-800/50"
+                        >
+                          {ref}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Hash */}
+                  <button
+                    onClick={() => navigator.clipboard.writeText(entry.hash).then(() => onSuccess?.("Copied commit hash"))}
+                    className="text-gray-500 shrink-0 w-14 hover:text-blue-500 dark:hover:text-blue-400 transition-colors cursor-pointer text-left"
+                    title={`Copy ${entry.hash}`}
+                  >
+                    {entry.short_hash}
+                  </button>
+
+                  {/* Message */}
+                  <span className="flex-1 truncate text-gray-800 dark:text-gray-200">
+                    {entry.message}
+                  </span>
+
+                  {/* Cherry-pick button */}
+                  <button
+                    onClick={() => setConfirmCherryPick(entry)}
+                    disabled={isCherryPicking}
+                    className="px-1.5 py-0.5 rounded text-[10px] opacity-0 group-hover:opacity-100 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/50 hover:bg-amber-200 dark:hover:bg-amber-900/50 disabled:opacity-50 transition-all shrink-0"
+                    title={`Cherry-pick ${entry.short_hash}`}
+                  >
+                    {isCherryPicking ? "..." : "Cherry-pick"}
+                  </button>
+
+                  {/* Author + time */}
+                  <span className="text-gray-400 shrink-0 hidden group-hover:inline">
+                    {entry.author}
+                  </span>
+                  <span className="text-gray-400 shrink-0 w-14 text-right">
+                    {formatRelativeTime(entry.timestamp)}
+                  </span>
                 </div>
-
-                {/* Refs */}
-                {hasRefs && (
-                  <div className="flex items-center gap-0.5 shrink-0">
-                    {entry.refs.map((ref) => (
-                      <span
-                        key={ref}
-                        className="px-1 py-0 rounded text-[10px] font-semibold bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 border border-yellow-200 dark:border-yellow-800/50"
-                      >
-                        {ref}
-                      </span>
-                    ))}
-                  </div>
-                )}
-
-                {/* Hash */}
-                <button
-                  onClick={() => navigator.clipboard.writeText(entry.hash).then(() => onSuccess?.("Copied commit hash"))}
-                  className="text-gray-500 shrink-0 w-14 hover:text-blue-500 dark:hover:text-blue-400 transition-colors cursor-pointer text-left"
-                  title={`Copy ${entry.hash}`}
-                >
-                  {entry.short_hash}
-                </button>
-
-                {/* Message */}
-                <span className="flex-1 truncate text-gray-800 dark:text-gray-200">
-                  {entry.message}
-                </span>
-
-                {/* Cherry-pick button */}
-                <button
-                  onClick={() => setConfirmCherryPick(entry)}
-                  disabled={isCherryPicking}
-                  className="px-1.5 py-0.5 rounded text-[10px] opacity-0 group-hover:opacity-100 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/50 hover:bg-amber-200 dark:hover:bg-amber-900/50 disabled:opacity-50 transition-all shrink-0"
-                  title={`Cherry-pick ${entry.short_hash}`}
-                >
-                  {isCherryPicking ? "..." : "Cherry-pick"}
-                </button>
-
-                {/* Author + time */}
-                <span className="text-gray-400 shrink-0 hidden group-hover:inline">
-                  {entry.author}
-                </span>
-                <span className="text-gray-400 shrink-0 w-14 text-right">
-                  {formatRelativeTime(entry.timestamp)}
-                </span>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       </div>
 
@@ -360,4 +341,5 @@ export const CommitLog = memo(function CommitLog({ path, onSuccess, onError, onR
     </div>
   );
 });
+
 export default CommitLog;

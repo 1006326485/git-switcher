@@ -15,37 +15,40 @@ const SHORTCUTS: ShortcutCategory[] = [
   {
     name: "General",
     shortcuts: [
-      { keys: ["⌘", "K"], description: "Command Palette" },
-      { keys: ["⌘", "/"], description: "Keyboard Shortcuts" },
+      { keys: ["\u2318", "N"], description: "Add project" },
+      { keys: ["\u2318", "K"], description: "Command Palette" },
+      { keys: ["\u2318", "/"], description: "Keyboard Shortcuts" },
       { keys: ["Escape"], description: "Close dialog / Cancel" },
     ],
   },
   {
     name: "Navigation",
     shortcuts: [
-      { keys: ["↑", "↓"], description: "Navigate project list" },
+      { keys: ["j"], description: "Navigate down in project list" },
+      { keys: ["k"], description: "Navigate up in project list" },
+      { keys: ["\u2191", "\u2193"], description: "Navigate project list (arrow keys)" },
       { keys: ["Enter"], description: "Toggle project details" },
       { keys: ["Space"], description: "Refresh focused project" },
-      { keys: ["⌘", "B"], description: "Toggle sidebar" },
+      { keys: ["\u2318", "B"], description: "Toggle sidebar" },
     ],
   },
   {
     name: "Git Operations",
     shortcuts: [
-      { keys: ["⌘", "⇧", "F"], description: "Search in Command Palette" },
-      { keys: ["⌘", "⇧", "A"], description: "Add project" },
-      { keys: ["⌘", "R"], description: "Refresh all projects" },
-      { keys: ["⌘", "⇧", "G"], description: "Fetch all projects" },
+      { keys: ["\u2318", "R"], description: "Refresh all projects" },
+      { keys: ["\u2318", "E"], description: "Import / Export" },
+      { keys: ["\u2318", "D"], description: "Quick Diff overview" },
     ],
   },
   {
     name: "View",
     shortcuts: [
-      { keys: ["⌘", "1"], description: "Card view" },
-      { keys: ["⌘", "2"], description: "List view" },
-      { keys: ["⌘", "3"], description: "Compact view" },
-      { keys: ["⌘", "4"], description: "Table view" },
-      { keys: ["⌘", "5"], description: "Dashboard view" },
+      { keys: ["\u2318", "F"], description: "Focus search" },
+      { keys: ["\u2318", "1"], description: "Card view" },
+      { keys: ["\u2318", "2"], description: "List view" },
+      { keys: ["\u2318", "3"], description: "Compact view" },
+      { keys: ["\u2318", "4"], description: "Table view" },
+      { keys: ["\u2318", "5"], description: "Dashboard view" },
     ],
   },
 ];
@@ -132,7 +135,7 @@ export const ShortcutsHelp = memo(function ShortcutsHelp({ open, onClose }: Shor
 
         {/* Footer hint */}
         <p className="mt-4 text-xs text-gray-400 dark:text-gray-500 text-center">
-          On macOS, use ⌘. On Windows/Linux, use Ctrl.
+          On macOS, use \u2318. On Windows/Linux, use Ctrl.
         </p>
       </div>
     </Modal>

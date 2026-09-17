@@ -211,6 +211,26 @@ export interface GitNotification {
   read: boolean;
 }
 
+export interface CustomCommand {
+  id: string;
+  name: string;
+  command: string;
+  shortcut: string | null;
+  sort_order: number;
+  created_at: string;
+}
+
+export interface OperationLogEntry {
+  id: string;
+  operation_type: string;
+  project_path: string;
+  project_name: string | null;
+  details: string | null;
+  status: string;
+  error_message: string | null;
+  created_at: string;
+}
+
 
 export interface BisectState {
   active: boolean;

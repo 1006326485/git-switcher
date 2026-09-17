@@ -636,6 +636,52 @@ export async function getUnreadCount(): Promise<number> {
   return invoke("get_unread_count");
 }
 
+// ── Custom Commands ────────────────────────────────────────────────
+
+import type { CustomCommand } from "./types";
+
+export async function createCustomCommand(
+  name: string,
+  command: string,
+  shortcut?: string,
+): Promise<CustomCommand> {
+  return invoke("create_custom_command", { name, command, shortcut });
+}
+
+export async function listCustomCommands(): Promise<CustomCommand[]> {
+  return invoke("list_custom_commands");
+}
+
+export async function deleteCustomCommand(id: string): Promise<void> {
+  return invoke("delete_custom_command", { id });
+}
+
+// ── Operation Log ──────────────────────────────────────────────────
+
+import type { OperationLogEntry } from "./types";
+
+export async function logOperation(
+  operationType: string,
+  projectPath: string,
+  projectName?: string,
+  details?: string,
+  status?: string,
+  errorMessage?: string,
+): Promise<void> {
+  return invoke("log_operation", {
+    operationType,
+    projectPath,
+    projectName,
+    details,
+    status: status ?? "success",
+    errorMessage,
+  });
+}
+
+export async function getOperationLog(limit?: number): Promise<OperationLogEntry[]> {
+  return invoke("get_operation_log", { limit });
+}
+
 // ── Quick Diff ───────────────────────────────────────────────────────
 
 export async function gitQuickDiffAll(): Promise<ProjectDiffSummary[]> {

@@ -4,6 +4,7 @@ import type { Theme, ViewMode, SortOption } from "../lib/types";
 import { SegmentedControl, DropdownMenu, MenuItem, IconButton } from "./ui/primitives";
 import { SearchIcon, PlusIcon, KebabIcon } from "./ui/icons";
 import { NotificationPanel } from "./NotificationPanel";
+import { OperationLogPanel } from "./OperationLogPanel";
 import { BatchOpsToolbar } from "./BatchOpsToolbar";
 import type { BatchProgress } from "../hooks/useBatchOps";
 
@@ -371,6 +372,7 @@ export const Header = memo(function Header({
 
 function NotificationBell() {
   const [open, setOpen] = useState(false);
+  const [logOpen, setLogOpen] = useState(false);
   const [unread, setUnread] = useState(0);
 
   const refresh = useCallback(async () => {
@@ -387,18 +389,31 @@ function NotificationBell() {
   }, [refresh]);
 
   return (
-    <div className="relative">
-      <IconButton onClick={() => setOpen(!open)} title="Notifications">
-        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-          <path d="M8 16a2 2 0 002-2H6a2 2 0 002 2zM8 1.918l-.797.161A4 4 0 004 6c0 .628-.134 2.197-.459 3.742-.16.767-.376 1.566-.663 2.258h10.244c-.287-.692-.502-1.49-.663-2.258C12.134 8.197 12 6.628 12 6a4 4 0 00-3.203-3.92L8 1.917zM14.22 12c.223.447.481.801.78 1H1c.299-.199.557-.553.78-1C2.68 10.2 3 6.88 3 6c0-2.42 1.72-4.44 4.005-4.901a1 1 0 111.99 0A5 5 0 0113 6c0 .88.32 4.2 1.22 6z" />
+    <div className="flex items-center gap-0.5">
+      {/* Operation History button */}
+      <IconButton onClick={() => setLogOpen(!logOpen)} title="Operation History">
+        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10" />
+          <polyline points="12 6 12 12 16 14" />
         </svg>
-        {unread > 0 && (
-          <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
-            {unread > 99 ? "99+" : unread}
-          </span>
-        )}
       </IconButton>
-      <NotificationPanel open={open} onClose={() => setOpen(false)} />
+
+      {/* Notification bell */}
+      <div className="relative">
+        <IconButton onClick={() => setOpen(!open)} title="Notifications">
+          <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 16a2 2 0 002-2H6a2 2 0 002 2zM8 1.918l-.797.161A4 4 0 004 6c0 .628-.134 2.197-.459 3.742-.16.767-.376 1.566-.663 2.258h10.244c-.287-.692-.502-1.49-.663-2.258C12.134 8.197 12 6.628 12 6a4 4 0 00-3.203-3.92L8 1.917zM14.22 12c.223.447.481.801.78 1H1c.299-.199.557-.553.78-1C2.68 10.2 3 6.88 3 6c0-2.42 1.72-4.44 4.005-4.901a1 1 0 111.99 0A5 5 0 0113 6c0 .88.32 4.2 1.22 6z" />
+          </svg>
+          {unread > 0 && (
+            <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+              {unread > 99 ? "99+" : unread}
+            </span>
+          )}
+        </IconButton>
+        <NotificationPanel open={open} onClose={() => setOpen(false)} />
+      </div>
+
+      <OperationLogPanel open={logOpen} onClose={() => setLogOpen(false)} />
     </div>
   );
 }

@@ -1,9 +1,11 @@
 pub mod ai_review;
 pub mod background;
+pub mod custom_commands;
 pub mod events;
 pub mod git;
 pub mod groups;
 pub mod notifications;
+pub mod op_log;
 pub mod op_tracker;
 pub mod operation_policy;
 pub mod projects;
@@ -13,9 +15,11 @@ pub mod task_workspaces;
 
 pub use ai_review::*;
 pub use background::*;
+pub use custom_commands::*;
 pub use git::*;
 pub use groups::*;
 pub use notifications::*;
+pub use op_log::*;
 pub use op_tracker::*;
 pub use operation_policy::*;
 pub use projects::*;

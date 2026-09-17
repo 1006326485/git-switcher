@@ -4,8 +4,9 @@ use rusqlite::{params, Connection};
 use std::path::PathBuf;
 
 use crate::models::{
-    GitProject, Group, ReviewResult, TaskExecutionState, TaskStrategy, TaskWorkspace,
-    TaskWorkspaceEntry, TaskWorkspaceEntryDetail, TaskWorkspaceOutcome, TaskWorkspaceStatus,
+    CustomCommand, GitProject, Group, OperationLogEntry, ReviewResult, TaskExecutionState,
+    TaskStrategy, TaskWorkspace, TaskWorkspaceEntry, TaskWorkspaceEntryDetail,
+    TaskWorkspaceOutcome, TaskWorkspaceStatus,
 };
 use crate::AppError;
 
@@ -234,6 +235,42 @@ impl Database {
              CREATE INDEX IF NOT EXISTS idx_reviews_project ON reviews(project_path);",
         )
         .map_err(|e| AppError::Database(format!("Failed to create indexes: {}", e)))?;
+
+        // Step 4b: Custom commands (user-defined Git operations)
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS custom_commands (
+                id              TEXT PRIMARY KEY,
+                name            TEXT NOT NULL,
+                command         TEXT NOT NULL,
+                shortcut        TEXT,
+                sort_order      INTEGER NOT NULL DEFAULT 0,
+                created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+            );",
+        )
+        .map_err(|e| {
+            AppError::Database(format!("Failed to create custom_commands table: {}", e))
+        })?;
+
+        // Step 4: Operation log (audit trail for all Git operations)
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS operation_log (
+                id              TEXT PRIMARY KEY,
+                operation_type  TEXT NOT NULL,
+                project_path    TEXT NOT NULL,
+                project_name    TEXT,
+                details         TEXT,
+                status          TEXT NOT NULL DEFAULT 'success',
+                error_message   TEXT,
+                created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_operation_log_created
+                ON operation_log(created_at DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_operation_log_project
+                ON operation_log(project_path);",
+        )
+        .map_err(|e| AppError::Database(format!("Failed to create operation_log table: {}", e)))?;
 
         Ok(())
     }
@@ -975,6 +1012,126 @@ impl Database {
                 return Err(AppError::NotFound(format!("Review not found: {}", id)));
             }
             Ok(())
+        })
+    }
+
+    // ── Custom Commands ────────────────────────────────────────────────────
+
+    pub fn insert_custom_command(
+        &self,
+        id: &str,
+        name: &str,
+        command: &str,
+        shortcut: Option<&str>,
+        sort_order: i32,
+    ) -> Result<(), AppError> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO custom_commands (id, name, command, shortcut, sort_order)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![id, name, command, shortcut, sort_order],
+            )
+            .map_err(|e| AppError::Database(format!("Failed to insert custom command: {}", e)))?;
+            Ok(())
+        })
+    }
+
+    pub fn get_all_custom_commands(&self) -> Result<Vec<CustomCommand>, AppError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, name, command, shortcut, sort_order, created_at
+                     FROM custom_commands ORDER BY sort_order, name",
+                )
+                .map_err(|e| AppError::Database(format!("Failed to prepare query: {}", e)))?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok(CustomCommand {
+                        id: row.get(0)?,
+                        name: row.get(1)?,
+                        command: row.get(2)?,
+                        shortcut: row.get(3)?,
+                        sort_order: row.get(4)?,
+                        created_at: row.get(5)?,
+                    })
+                })
+                .map_err(|e| {
+                    AppError::Database(format!("Failed to query custom commands: {}", e))
+                })?;
+            let mut commands = Vec::new();
+            for row in rows {
+                commands.push(row.map_err(|e| AppError::Database(e.to_string()))?);
+            }
+            Ok(commands)
+        })
+    }
+
+    pub fn delete_custom_command(&self, id: &str) -> Result<(), AppError> {
+        self.with_conn(|conn| {
+            let affected = conn
+                .execute("DELETE FROM custom_commands WHERE id = ?1", params![id])
+                .map_err(|e| {
+                    AppError::Database(format!("Failed to delete custom command: {}", e))
+                })?;
+            if affected == 0 {
+                return Err(AppError::NotFound(format!(
+                    "Custom command not found: {}",
+                    id
+                )));
+            }
+            Ok(())
+        })
+    }
+
+    // ── Operation Log ────────────────────────────────────────────────────
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn insert_operation_log(
+        &self,
+        id: &str,
+        operation_type: &str,
+        project_path: &str,
+        project_name: Option<&str>,
+        details: Option<&str>,
+        status: &str,
+        error_message: Option<&str>,
+    ) -> Result<(), AppError> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO operation_log (id, operation_type, project_path, project_name, details, status, error_message)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![id, operation_type, project_path, project_name, details, status, error_message],
+            )
+            .map_err(|e| AppError::Database(format!("Failed to insert operation log: {}", e)))?;
+            Ok(())
+        })
+    }
+
+    pub fn get_operation_log(&self, limit: usize) -> Result<Vec<OperationLogEntry>, AppError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, operation_type, project_path, project_name, details, status, error_message, created_at
+                 FROM operation_log ORDER BY created_at DESC LIMIT ?1",
+            )
+            .map_err(|e| AppError::Database(format!("Failed to prepare operation log query: {}", e)))?;
+            let rows = stmt.query_map(params![limit as i64], |row| {
+                Ok(OperationLogEntry {
+                    id: row.get(0)?,
+                    operation_type: row.get(1)?,
+                    project_path: row.get(2)?,
+                    project_name: row.get(3)?,
+                    details: row.get(4)?,
+                    status: row.get(5)?,
+                    error_message: row.get(6)?,
+                    created_at: row.get(7)?,
+                })
+            })
+            .map_err(|e| AppError::Database(format!("Failed to query operation log: {}", e)))?;
+            let mut entries = Vec::new();
+            for row in rows {
+                entries.push(row.map_err(|e| AppError::Database(e.to_string()))?);
+            }
+            Ok(entries)
         })
     }
 }

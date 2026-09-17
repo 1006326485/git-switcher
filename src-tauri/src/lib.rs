@@ -409,6 +409,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::preflight_task_workspace,
             commands::execute_task_workspace_plan,
             commands::list_task_workspace_outcomes,
+            // Operation Log
+            commands::log_operation,
+            commands::get_operation_log,
+            // Custom Commands
+            commands::create_custom_command,
+            commands::list_custom_commands,
+            commands::delete_custom_command,
         ])
         .run(tauri::generate_context!())?;
     Ok(())

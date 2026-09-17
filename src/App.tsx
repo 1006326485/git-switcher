@@ -29,7 +29,8 @@ import { useCommandPalette } from "./hooks/useCommandPalette";
 import { useRecentProjects } from "./hooks/useRecentProjects";
 import { useGitOpTracker } from "./hooks/useGitOpTracker";
 import type { ProjectDetail, ViewMode, SortOption } from "./lib/types";
-import { listProjectsInGroup, gitFetch, gitPull, gitPush, gitStash, gitAutoFetchAll, getSettings, onDragDropEnter, onDragDropLeave, onDragDropResult } from "./lib/tauri";
+import type { DashboardFilter } from "./components/DashboardView";
+import { listProjectsInGroup, gitFetch, gitPull, gitPush, gitStash, gitAutoFetchAll, getSettings, onDragDropEnter, onDragDropLeave, onDragDropResult, logOperation } from "./lib/tauri";
 
 export default function App() {
   const { theme, setTheme } = useTheme();
@@ -339,6 +340,10 @@ export default function App() {
     setExportArchivePath("");
   }, []);
   const handleFilterChange = useCallback((filter: string) => setActiveFilter(filter), []);
+  const handleDashboardDrillDown = useCallback((filter: DashboardFilter) => {
+    setActiveFilter(filter);
+    setViewMode("list");
+  }, [setViewMode]);
   const handleCancelDelete = useCallback(() => setConfirmDelete(null), []);
 
   const scrollToProject = useCallback((id: string) => {
@@ -394,8 +399,10 @@ export default function App() {
     try {
       await gitFetch(path);
       await refreshProject(path);
+      logOperation("fetch", path, undefined, undefined, "success").catch(() => {});
       toastRef.current.success("Fetch completed");
     } catch (e) {
+      logOperation("fetch", path, undefined, undefined, "error", String(e)).catch(() => {});
       toastRef.current.error(`Fetch failed: ${e}`, undefined, e, path);
     }
   }, [refreshProject]);
@@ -404,8 +411,10 @@ export default function App() {
     try {
       await gitPull(path);
       await refreshProject(path);
+      logOperation("pull", path, undefined, undefined, "success").catch(() => {});
       toastRef.current.success("Pull completed");
     } catch (e) {
+      logOperation("pull", path, undefined, undefined, "error", String(e)).catch(() => {});
       toastRef.current.error(`Pull failed: ${e}`, undefined, e, path);
     }
   }, [refreshProject]);
@@ -414,8 +423,10 @@ export default function App() {
     try {
       await gitPush(path);
       await refreshProject(path);
+      logOperation("push", path, undefined, undefined, "success").catch(() => {});
       toastRef.current.success("Push completed");
     } catch (e) {
+      logOperation("push", path, undefined, undefined, "error", String(e)).catch(() => {});
       toastRef.current.error(`Push failed: ${e}`, undefined, e, path);
     }
   }, [refreshProject]);
@@ -521,10 +532,10 @@ export default function App() {
       const count = sortedProjects.length;
       if (count === 0) return;
 
-      if (e.key === "ArrowDown") {
+      if (e.key === "ArrowDown" || e.key === "j") {
         e.preventDefault();
         setFocusIndex((i) => Math.min(i + 1, count - 1));
-      } else if (e.key === "ArrowUp") {
+      } else if (e.key === "ArrowUp" || e.key === "k") {
         e.preventDefault();
         setFocusIndex((i) => Math.max(i - 1, 0));
       } else if (e.key === "Enter" && focusIndex >= 0 && focusIndex < count) {
@@ -556,6 +567,9 @@ export default function App() {
     onRefreshAll: refreshAll,
     onToggleSidebar: handleToggleSidebar,
     onExportImport: handleOpenExportImport,
+    onToggleCommandPalette: togglePalette,
+    onOpenShortcutsHelp: handleOpenShortcutsHelp,
+    onToggleQuickDiff: handleOpenQuickDiff,
   });
 
   const projectActions = useMemo(
@@ -670,10 +684,12 @@ export default function App() {
                   projects={sortedProjects}
                   loading={loading}
                   viewMode={viewMode}
-                  isFiltered={searchQuery.trim().length > 0}
+                  isFiltered={searchQuery.trim().length > 0 || activeFilter !== "all" || activeGroup !== null}
                   sortBy={sortBy}
                   onSortChange={setSortBy}
                   onAddProject={handleAddProject}
+                  onBulkImport={handleOpenBulkImport}
+                  onDashboardDrillDown={handleDashboardDrillDown}
                   onReorder={!searchQuery.trim() && !activeGroup && sortBy === "custom" ? handleReorder : undefined}
                   focusedIndex={focusIndex}
                 />
@@ -717,7 +733,7 @@ export default function App() {
           open={exportImportOpen}
           onClose={handleCloseExportImport}
           onSuccess={toast.success}
-          onError={toast.error}
+          onError={(msg: string, rawError?: unknown) => toast.error(msg, undefined, rawError)}
           onImportDone={refreshAll}
           activeGroup={activeGroup}
         />
@@ -729,7 +745,7 @@ export default function App() {
           onClose={handleCloseExportArchive}
           repoPath={exportArchivePath}
           onSuccess={toast.success}
-          onError={toast.error}
+          onError={(msg: string, rawError?: unknown) => toast.error(msg, undefined, rawError)}
         />
       </Suspense>
 
@@ -738,7 +754,7 @@ export default function App() {
           open={bulkImportOpen}
           onClose={handleCloseBulkImport}
           onSuccess={toast.success}
-          onError={toast.error}
+          onError={(msg: string, rawError?: unknown) => toast.error(msg, undefined, rawError)}
           onImportDone={refreshAll}
           activeGroup={activeGroup}
         />
@@ -750,7 +766,7 @@ export default function App() {
           projects={projects}
           onClose={() => setTaskWorkspacesOpen(false)}
           onSuccess={toast.success}
-          onError={toast.error}
+          onError={(msg: string, rawError?: unknown) => toast.error(msg, undefined, rawError)}
         />
       </Suspense>
 
@@ -759,7 +775,7 @@ export default function App() {
           open={settingsOpen}
           onClose={handleCloseSettings}
           onSuccess={toast.success}
-          onError={toast.error}
+          onError={(msg: string, rawError?: unknown) => toast.error(msg, undefined, rawError)}
           accentColor={accentColor}
           onAccentChange={setAccentColor}
         />

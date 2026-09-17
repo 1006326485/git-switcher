@@ -3,6 +3,7 @@ import { Modal, Tabs } from "./ui/primitives";
 import { GeneralSettings } from "./GeneralSettings";
 import { LlmSettings } from "./LlmSettings";
 import { BackgroundSettings } from "./BackgroundSettings";
+import { CustomCommandsManager } from "./CustomCommandsManager";
 import * as api from "../lib/tauri";
 import { parseError } from "../lib/types";
 import { APP_VERSION } from "../lib/appVersion";
@@ -18,7 +19,7 @@ interface SettingsDialogProps {
 }
 
 export const SettingsDialog = memo(function SettingsDialog({ open, onClose, onSuccess, onError, accentColor, onAccentChange }: SettingsDialogProps) {
-  const [tab, setTab] = useState<"general" | "llm" | "background" | "data" | "about">("general");
+  const [tab, setTab] = useState<"general" | "llm" | "background" | "commands" | "data" | "about">("general");
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
 
@@ -78,6 +79,7 @@ export const SettingsDialog = memo(function SettingsDialog({ open, onClose, onSu
         {tab === "general" && <GeneralSettings onError={onError} accentColor={accentColor} onAccentChange={onAccentChange} />}
         {tab === "llm" && <LlmSettings onError={onError} />}
         {tab === "background" && <BackgroundSettings onError={onError} />}
+        {tab === "commands" && <CustomCommandsManager onError={onError} />}
         {tab === "data" && (
           <div className="space-y-4">
             <p className="text-sm text-gray-600 dark:text-gray-400">

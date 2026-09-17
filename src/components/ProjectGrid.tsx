@@ -19,7 +19,7 @@ import { ProjectCard } from "./ProjectCard";
 import { ProjectList } from "./ProjectList";
 import { ProjectCompact } from "./ProjectCompact";
 import { ProjectTable } from "./ProjectTable";
-import { DashboardView } from "./DashboardView";
+import { DashboardView, type DashboardFilter } from "./DashboardView";
 import { SkeletonRow, SkeletonCard, SkeletonTable } from "./ui/Skeleton";
 
 const SORT_LABELS: Record<SortOption, string> = {
@@ -39,7 +39,9 @@ interface ProjectGridProps {
   sortBy?: SortOption;
   onSortChange?: (sort: SortOption) => void;
   onAddProject?: () => void;
+  onBulkImport?: () => void;
   onReorder?: (orderedIds: string[]) => void;
+  onDashboardDrillDown?: (filter: DashboardFilter) => void;
   focusedIndex?: number;
 }
 
@@ -51,7 +53,9 @@ export const ProjectGrid = memo(function ProjectGrid({
   sortBy,
   onSortChange,
   onAddProject,
+  onBulkImport,
   onReorder,
+  onDashboardDrillDown,
   focusedIndex,
 }: ProjectGridProps) {
   const sensors = useSensors(
@@ -135,31 +139,94 @@ export const ProjectGrid = memo(function ProjectGrid({
 
   if (projects.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-64 text-center">
+      <div className="flex flex-col items-center justify-center h-96 text-center px-4">
         {isFiltered ? (
-          <svg className="w-16 h-16 text-gray-300 dark:text-gray-600 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-          </svg>
+          <>
+            <svg className="w-16 h-16 text-gray-300 dark:text-gray-600 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+            </svg>
+            <h3 className="text-lg font-medium text-gray-600 dark:text-gray-400 mb-2">
+              No matching projects
+            </h3>
+            <p className="text-sm text-gray-500 dark:text-gray-500 max-w-md">
+              No projects match the current filters. Try changing your search, group, or status filter.
+            </p>
+          </>
         ) : (
-          <svg className="w-16 h-16 text-gray-300 dark:text-gray-600 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
-          </svg>
-        )}
-        <h3 className="text-lg font-medium text-gray-600 dark:text-gray-400 mb-2">
-          {isFiltered ? "No matching projects" : "No projects yet"}
-        </h3>
-        <p className="text-sm text-gray-500 dark:text-gray-500 max-w-md mb-4">
-          {isFiltered
-            ? "No projects match your search. Try a different term."
-            : "Add a git project by clicking the button above, or import a VSCode workspace file."}
-        </p>
-        {!isFiltered && (
-          <button
-            onClick={onAddProject}
-            className="h-8 px-4 rounded-lg bg-(--accent) hover:bg-(--accent-hover) text-white text-sm font-medium transition-colors shadow-sm active:scale-[0.98]"
-          >
-            Add your first project
-          </button>
+          <div className="max-w-lg w-full space-y-6">
+            {/* Welcome illustration */}
+            <div className="flex justify-center">
+              <div className="relative">
+                <div className="w-20 h-20 rounded-2xl bg-[var(--surface-2)] border border-[var(--border-color)] flex items-center justify-center">
+                  <svg className="w-10 h-10 text-gray-400 dark:text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
+                  </svg>
+                </div>
+                <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-green-500 border-2 border-[var(--surface-1)] flex items-center justify-center">
+                  <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                  </svg>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                Welcome to Git Switcher
+              </h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Manage all your Git repositories from one place.<br />
+                Get started by adding your first project.
+              </p>
+            </div>
+
+            {/* Quick start actions */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <button
+                onClick={onAddProject}
+                className="flex flex-col items-center gap-2 p-4 rounded-xl bg-[var(--surface-1)] border border-[var(--border-color)] hover:border-[var(--accent)] hover:shadow-md transition-all duration-150 group"
+              >
+                <div className="w-10 h-10 rounded-lg bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center group-hover:bg-blue-100 dark:group-hover:bg-blue-900/50 transition-colors">
+                  <svg className="w-5 h-5 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                  </svg>
+                </div>
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Add Project</span>
+                <span className="text-xs text-gray-400 dark:text-gray-500">Browse to a Git repo</span>
+              </button>
+
+              <button
+                onClick={onBulkImport}
+                className="flex flex-col items-center gap-2 p-4 rounded-xl bg-[var(--surface-1)] border border-[var(--border-color)] hover:border-[var(--accent)] hover:shadow-md transition-all duration-150 group"
+              >
+                <div className="w-10 h-10 rounded-lg bg-purple-50 dark:bg-purple-900/30 flex items-center justify-center group-hover:bg-purple-100 dark:group-hover:bg-purple-900/50 transition-colors">
+                  <svg className="w-5 h-5 text-purple-600 dark:text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5m6 4.125l2.25 2.25m0 0l2.25 2.25M12 13.875l2.25-2.25M12 13.875l-2.25 2.25M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
+                  </svg>
+                </div>
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Bulk Import</span>
+                <span className="text-xs text-gray-400 dark:text-gray-500">Scan a directory</span>
+              </button>
+
+              <button
+                onClick={onAddProject}
+                className="flex flex-col items-center gap-2 p-4 rounded-xl bg-[var(--surface-1)] border border-[var(--border-color)] hover:border-[var(--accent)] hover:shadow-md transition-all duration-150 group"
+              >
+                <div className="w-10 h-10 rounded-lg bg-green-50 dark:bg-green-900/30 flex items-center justify-center group-hover:bg-green-100 dark:group-hover:bg-green-900/50 transition-colors">
+                  <svg className="w-5 h-5 text-green-600 dark:text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m3.75 9v6m3-3H9m1.5-12H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                  </svg>
+                </div>
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Drag & Drop</span>
+                <span className="text-xs text-gray-400 dark:text-gray-500">Drop a folder here</span>
+              </button>
+            </div>
+
+            {/* Keyboard hint */}
+            <p className="text-xs text-gray-400 dark:text-gray-500">
+              Tip: Press <kbd className="px-1.5 py-0.5 rounded bg-[var(--surface-2)] border border-[var(--border-color)] font-mono text-[11px]">⌘ N</kbd> to add, <kbd className="px-1.5 py-0.5 rounded bg-[var(--surface-2)] border border-[var(--border-color)] font-mono text-[11px]">⌘ K</kbd> for command palette, <kbd className="px-1.5 py-0.5 rounded bg-[var(--surface-2)] border border-[var(--border-color)] font-mono text-[11px]">⌘ /</kbd> for shortcuts
+            </p>
+          </div>
         )}
       </div>
     );
@@ -183,7 +250,7 @@ export const ProjectGrid = memo(function ProjectGrid({
   const content = (() => {
     switch (viewMode) {
       case "dashboard":
-        return <DashboardView projects={projects} />;
+        return <DashboardView projects={projects} onDrillDown={onDashboardDrillDown} />;
       case "list":
         return <ProjectList projects={projects} sortable={sortable} focusedIndex={focusedIndex} />;
       case "compact":
