@@ -28,3 +28,5 @@ Thumbs.db
 npm-debug.log*
 
 .claude
+# Agent session artifacts
+.pi/

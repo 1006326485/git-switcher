@@ -6,6 +6,16 @@ import { CloseIcon } from "./icons";
 // Design System Primitives — single source of truth
 // ═══════════════════════════════════════════════════════════════════════════
 
+// ── Overlay Motion ────────────────────────────────────────────────────────
+// Keyframes live in styles/globals.css; every floating layer must import
+// its entrance from here (with the matching transform-origin) instead of
+// declaring inline animate-[...] values.
+export const popoverAnimation = "animate-[popoverIn_180ms_var(--ease-spring)]";
+export const dialogAnimation = "animate-[sheetIn_220ms_var(--ease-spring)]";
+export const scrimAnimation = "animate-[scrimIn_180ms_ease-out]";
+export const toastAnimation = "animate-[toastIn_200ms_var(--ease-out-soft)]";
+export const toastExitAnimation = "animate-[toastOut_160ms_ease-out_forwards]";
+
 // ── Segmented Control ─────────────────────────────────────────────────────
 
 export function SegmentedControl<T extends string>({
@@ -54,7 +64,7 @@ export function SegmentedControl<T extends string>({
           aria-label={opt.label}
           title={opt.label}
           tabIndex={value === opt.value ? 0 : -1}
-          className={`px-2 py-1 rounded-md text-sm transition-all ${
+          className={`press px-2 py-1 rounded-md text-sm transition-all active:scale-[0.95] ${
             value === opt.value
               ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm"
               : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
@@ -79,17 +89,37 @@ export const DropdownMenu = memo(function DropdownMenu({
   align?: "left" | "right";
 }) {
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number; maxHeight: number }>({
+    top: 0,
+    left: 0,
+    maxHeight: 0,
+  });
   const triggerRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const updatePos = useCallback(() => {
     if (!triggerRef.current) return;
+    const GAP = 6;
+    const EDGE = 8;
     const rect = triggerRef.current.getBoundingClientRect();
-    setPos({
-      top: rect.bottom + 6,
-      left: align === "right" ? rect.right - 200 : rect.left,
-    });
+    const left = align === "right" ? rect.right - 200 : rect.left;
+    const spaceBelow = window.innerHeight - rect.bottom - GAP - EDGE;
+    const spaceAbove = rect.top - GAP - EDGE;
+    // Prefer opening downward; flip up only when the space below is cramped
+    // and there is more room above the trigger. Clamp maxHeight to the
+    // available viewport space so tall menus stay scrollable.
+    const next: { top?: number; bottom?: number; left: number; maxHeight: number } =
+      spaceBelow < 160 && spaceAbove > spaceBelow
+        ? { bottom: window.innerHeight - rect.top + GAP, left, maxHeight: Math.max(spaceAbove, 0) }
+        : { top: rect.bottom + GAP, left, maxHeight: Math.max(spaceBelow, 0) };
+    setPos((prev) =>
+      prev.top === next.top &&
+      prev.bottom === next.bottom &&
+      prev.left === next.left &&
+      prev.maxHeight === next.maxHeight
+        ? prev
+        : next
+    );
   }, [align]);
 
   useEffect(() => {
@@ -126,8 +156,15 @@ export const DropdownMenu = memo(function DropdownMenu({
           <div
             ref={dropdownRef}
             role="menu"
-            style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 9999 }}
-            className="bg-(--surface-1) border border-(--border-color) rounded-xl shadow-lg py-1.5 min-w-50 animate-[fadeIn_0.15s_ease-out]"
+            style={{
+              position: "fixed",
+              top: pos.top,
+              bottom: pos.bottom,
+              left: pos.left,
+              maxHeight: pos.maxHeight,
+              zIndex: 9999,
+            }}
+            className={`origin-top-left bg-(--surface-1) border border-(--border-color) rounded-xl shadow-lg py-1.5 min-w-50 overflow-y-auto overscroll-contain ${popoverAnimation}`}
           >
             <div onClick={() => setTimeout(() => setOpen(false), 0)}>
               {children}
@@ -159,7 +196,7 @@ export const MenuItem = memo(function MenuItem({
       type="button"
       role="menuitem"
       onClick={onClick}
-      className={`w-full text-left px-3 py-2 text-sm flex items-center gap-3 transition-colors ${
+      className={`press w-full text-left px-3 py-2 text-sm flex items-center gap-3 transition-all active:scale-[0.99] ${
         danger
           ? "hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600 dark:text-red-400"
           : "hover:bg-gray-50 dark:hover:bg-gray-700/50 text-gray-700 dark:text-gray-300"
@@ -244,15 +281,15 @@ export const Modal = memo(function Modal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4" role="dialog" aria-modal="true" aria-labelledby={titleId}>
-      <div className="absolute inset-0 bg-black/50 dark:bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className={`absolute inset-0 bg-black/50 dark:bg-black/60 backdrop-blur-sm ${scrimAnimation}`} onClick={onClose} />
       <div
         ref={contentRef}
-        className={`relative flex max-h-[calc(100dvh-1.5rem)] w-full max-w-[calc(100vw-1.5rem)] flex-col overflow-y-auto rounded-2xl bg-[var(--surface-1)] shadow-xl sm:max-h-[calc(100dvh-2rem)] sm:max-w-[calc(100vw-2rem)] ${maxWidth}`}
+        className={`relative flex max-h-[calc(100dvh-1.5rem)] w-full max-w-[calc(100vw-1.5rem)] flex-col overflow-y-auto rounded-2xl bg-[var(--surface-1)] shadow-xl sm:max-h-[calc(100dvh-2rem)] sm:max-w-[calc(100vw-2rem)] ${dialogAnimation} ${maxWidth}`}
       >
         {/* Header */}
-        <div className="flex items-start justify-between gap-3 border-b border-gray-200 px-4 pb-3 pt-4 sm:px-6 sm:pt-5 dark:border-gray-700">
+        <div className="flex items-start justify-between gap-3 border-b border-black/5 px-4 pb-3 pt-4 sm:px-6 sm:pt-5 dark:border-white/5">
           <div className="min-w-0">
-            <h2 id={titleId} className="text-lg font-semibold text-gray-900 dark:text-gray-100">{title}</h2>
+            <h2 id={titleId} className="text-lg font-semibold tracking-tight text-gray-900 dark:text-gray-100">{title}</h2>
             {subtitle && (
               <p className="truncate text-sm text-gray-500 dark:text-gray-400">{subtitle}</p>
             )}
@@ -392,7 +429,7 @@ export const StatusBadge = memo(function StatusBadge({
   if (variant === "compact") {
     return (
       <span
-        className={`text-xs font-semibold px-1.5 py-0.5 rounded ${c.pill}`}
+        className={`text-xs font-semibold tracking-wide tabular-nums px-1.5 py-0.5 rounded ${c.pill}`}
         title={`${count} ${type}`}
         aria-label={`${count} ${type}`}
       >
@@ -412,7 +449,7 @@ export const StatusBadge = memo(function StatusBadge({
   // pill (default)
   return (
     <span
-      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${c.pill}`}
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium tracking-wide tabular-nums ${c.pill}`}
       aria-label={`${count} ${type}`}
     >
       {type === "ahead" || type === "behind"
@@ -476,7 +513,7 @@ export const PrimaryButton = memo(function PrimaryButton({
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`h-8 px-3 rounded-lg text-sm font-medium transition-all duration-150 flex items-center gap-1.5 disabled:bg-gray-400 disabled:shadow-none disabled:active:scale-100 ${variants[variant]}`}
+      className={`press h-8 px-3 rounded-lg text-sm font-medium transition-all flex items-center gap-1.5 disabled:bg-gray-400 disabled:shadow-none disabled:active:scale-100 ${variants[variant]}`}
     >
       {children}
     </button>
@@ -511,7 +548,7 @@ export const IconButton = memo(function IconButton({
       disabled={disabled}
       title={title}
       aria-label={title}
-      className={`p-1.5 rounded-lg text-gray-400 transition-colors duration-150 disabled:opacity-50 active:scale-[0.95] ${hover[hoverColor]}`}
+      className={`press p-1.5 rounded-lg text-gray-400 transition-all disabled:opacity-50 active:scale-[0.95] ${hover[hoverColor]}`}
     >
       {children}
     </button>

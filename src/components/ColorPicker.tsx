@@ -1,6 +1,7 @@
 import { memo, useState, useCallback, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { PROJECT_COLORS } from "../lib/types";
+import { popoverAnimation } from "./ui/primitives";
 
 interface ColorPickerProps {
   currentColor?: string;
@@ -86,7 +87,7 @@ export const ColorPicker = memo(function ColorPicker({
             ref={panelRef}
             role="menu"
             style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 9999 }}
-            className="bg-(--surface-1) border border-(--border-color) rounded-xl shadow-lg p-2 max-w-[200px] animate-[fadeIn_0.15s_ease-out]"
+            className={`origin-top-left bg-(--surface-1) border border-(--border-color) rounded-xl shadow-lg p-2 max-w-[200px] ${popoverAnimation}`}
           >
             <div className="grid grid-cols-4 gap-1.5 mb-2">
               {PROJECT_COLORS.map((c) => (

@@ -1,4 +1,5 @@
 import { memo, useRef, useState, useEffect, useCallback } from "react";
+import { motion } from "motion/react";
 import type { ProjectDetail } from "../lib/types";
 import { PROJECT_COLORS } from "../lib/types";
 import { StatusBadge, GroupDot } from "./ui/primitives";
@@ -64,7 +65,8 @@ export const ProjectCard = memo(function ProjectCard({ detail, sortable, project
         const hasUpstream = status.ahead > 0 || status.behind > 0;
 
         return (
-          <div
+          <motion.div
+            layout
             ref={(node) => {
               setNodeRef(node);
               (cardRef as React.MutableRefObject<HTMLDivElement | null>).current = node;
@@ -77,7 +79,7 @@ export const ProjectCard = memo(function ProjectCard({ detail, sortable, project
             onMouseLeave={() => setHovering(false)}
             role="article"
             aria-label={`${project.alias || project.name}, branch ${current_branch}${totalChanges > 0 ? `, ${totalChanges} changes` : ""}${status.behind > 0 ? `, ${status.behind} behind` : ""}${status.ahead > 0 ? `, ${status.ahead} ahead` : ""}`}
-            className={`bg-[var(--surface-1)] rounded-xl border border-[var(--border-color)] shadow-sm dark:shadow-none dark:ring-1 dark:ring-white/5 hover:shadow-md dark:hover:ring-white/10 hover:-translate-y-px transition-all duration-150 relative overflow-hidden ${isDragging ? "z-50 shadow-lg dark:ring-2 dark:ring-[var(--accent)]/30 ring-2 ring-[var(--accent)]/20" : ""} ${isFocused ? "ring-2 ring-blue-500 dark:ring-blue-400" : ""}`}
+            className={`press bg-[var(--surface-1)] rounded-xl border border-[var(--border-color)] shadow-sm dark:shadow-none dark:ring-1 dark:ring-white/5 hover:shadow-md dark:hover:ring-white/10 hover:-translate-y-px transition-all active:scale-[0.995] relative overflow-hidden ${isDragging ? "z-50 shadow-lg dark:ring-2 dark:ring-[var(--accent)]/30 ring-2 ring-[var(--accent)]/20" : ""} ${isFocused ? "ring-2 ring-blue-500 dark:ring-blue-400" : ""}`}
           >
             {/* Color stripe */}
             {project.color && (() => {
@@ -215,7 +217,7 @@ export const ProjectCard = memo(function ProjectCard({ detail, sortable, project
                 </span>
               </div>
             </HoverTooltip>
-          </div>
+          </motion.div>
         );
       }}
     </ProjectRowShell>

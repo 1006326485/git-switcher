@@ -31,6 +31,8 @@ import { useGitOpTracker } from "./hooks/useGitOpTracker";
 import type { ProjectDetail, ViewMode, SortOption } from "./lib/types";
 import type { DashboardFilter } from "./components/DashboardView";
 import { listProjectsInGroup, gitFetch, gitPull, gitPush, gitStash, gitAutoFetchAll, getSettings, onDragDropEnter, onDragDropLeave, onDragDropResult, logOperation } from "./lib/tauri";
+import { scrimAnimation } from "./components/ui/primitives";
+import { useScrollEdge } from "./hooks/useScrollEdge";
 
 export default function App() {
   const { theme, setTheme } = useTheme();
@@ -58,6 +60,22 @@ export default function App() {
   const [exportArchiveOpen, setExportArchiveOpen] = useState(false);
   const [exportArchivePath, setExportArchivePath] = useState("");
   const scrollParentRef = useRef<HTMLElement>(null);
+  const mainScrolled = useScrollEdge(scrollParentRef);
+  const headerRef = useRef<HTMLDivElement>(null);
+  const [headerHeight, setHeaderHeight] = useState(52);
+
+  // Content scrolls *underneath* the material header (chrome-overlay
+  // layout): the header floats above the scroll area, and main's top
+  // padding tracks the header's live height so nothing starts hidden.
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    const update = () => setHeaderHeight(el.getBoundingClientRect().height);
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    update();
+    return () => ro.disconnect();
+  }, []);
   const [focusIndex, setFocusIndex] = useState(-1);
   const [dragOver, setDragOver] = useState(false);
 
@@ -595,12 +613,12 @@ export default function App() {
   );
 
   return (
-    <div className="h-screen min-w-0 bg-[var(--surface-0)] flex flex-col">
+    <div className="app-root h-screen min-w-0 bg-[var(--surface-0)] flex flex-col">
       {/* Title bar — draggable, spans full width above sidebar */}
       <div
         data-tauri-drag-region
         role="presentation"
-        className="h-8 bg-[var(--surface-1)] pl-20 select-none shrink-0"
+        className="app-titlebar h-8 pl-20 select-none shrink-0"
       />
 
       {/* Drag & drop overlay */}
@@ -623,11 +641,16 @@ export default function App() {
             <>
               <button
                 type="button"
-                className="fixed inset-0 top-8 z-30 bg-black/30 lg:hidden"
+                className={`fixed inset-0 top-8 z-30 bg-black/30 lg:hidden ${scrimAnimation}`}
                 aria-label="Close sidebar"
                 onClick={handleToggleSidebar}
               />
-              <aside className="fixed inset-y-0 left-0 top-8 z-40 w-72 max-w-[85vw] overflow-y-auto border-r border-[var(--border-color)] bg-[var(--surface-1)] p-4 shadow-2xl lg:relative lg:top-auto lg:z-auto lg:w-56 lg:max-w-none lg:shrink-0 lg:shadow-none">
+              <aside className="material-heavy fixed inset-y-0 left-0 top-8 z-40 w-72 max-w-[85vw] overflow-y-auto p-4 shadow-2xl animate-[drawerIn_280ms_var(--ease-spring)] lg:relative lg:top-auto lg:z-auto lg:w-56 lg:max-w-none lg:shrink-0 lg:shadow-none lg:animate-none">
+                {/* Material depth edge — replaces a hard border-r */}
+                <div
+                  aria-hidden
+                  className="pointer-events-none absolute inset-y-0 right-0 hidden w-8 bg-gradient-to-r from-transparent to-black/5 dark:to-white/5 lg:block"
+                />
                 <ProjectGroupsPanel
                   activeGroup={activeGroup}
                   onGroupChange={handleGroupChange}
@@ -639,8 +662,13 @@ export default function App() {
           )}
 
         {/* Main area: toolbar + content */}
-        <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-          <Header
+        <div
+          className="relative flex-1 min-w-0 flex flex-col overflow-hidden"
+          style={{ "--header-h": `${headerHeight}px` } as React.CSSProperties}
+        >
+          {/* Floating material header — content scrolls beneath it */}
+          <div ref={headerRef} className="absolute inset-x-0 top-0 z-20">
+            <Header
             projectCount={sortedProjects.length}
             totalCount={projects.length}
             theme={theme}
@@ -674,10 +702,16 @@ export default function App() {
             needsAttention={needsAttention}
             onAttentionClick={handleAttentionClick}
             onOpenShortcutsHelp={handleOpenShortcutsHelp}
+            elevated={mainScrolled}
           />
+          </div>
 
           {/* Main content */}
-          <main ref={scrollParentRef} className="flex-1 min-w-0 overflow-y-auto p-3 sm:p-4 lg:p-6">
+          <main
+            ref={scrollParentRef}
+            style={{ paddingTop: "calc(var(--header-h, 3.25rem) + 0.75rem)" }}
+            className="flex-1 min-w-0 overflow-y-auto bg-[var(--surface-0)] px-3 pb-3 sm:px-4 sm:pb-4 lg:px-6 lg:pb-6"
+          >
             <ErrorBoundary>
               <ScrollParentProvider value={scrollParentRef}>
                 <ProjectGrid

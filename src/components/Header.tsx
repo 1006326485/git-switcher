@@ -25,6 +25,8 @@ const FILTERS = [
 ];
 
 interface HeaderProps {
+  /** Soft scroll-edge gradient shows beneath the header when true. */
+  elevated?: boolean;
   projectCount: number;
   totalCount: number;
   theme: Theme;
@@ -117,9 +119,17 @@ export const Header = memo(function Header({
   needsAttention,
   onAttentionClick,
   onOpenShortcutsHelp,
+  elevated = false,
 }: HeaderProps) {
   return (
-    <div className="shrink-0 select-none border-b border-[var(--border-color)] bg-[var(--surface-1)] px-3 sm:px-4">
+    <div className="relative z-10 shrink-0 select-none material px-3 sm:px-4">
+      {/* Scroll edge: appears only while content moves beneath the chrome */}
+      {elevated && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-full h-3 bg-gradient-to-b from-black/10 to-transparent dark:from-white/10"
+        />
+      )}
       <div className="flex min-h-11 min-w-0 flex-wrap items-center gap-y-2 py-2 xl:h-11 xl:flex-nowrap xl:py-0">
         {/* ── Left: Brand ────────────────────────────────────────────── */}
         <div className="flex min-w-0 shrink-0 items-center gap-2">
@@ -163,7 +173,7 @@ export const Header = memo(function Header({
                 <button
                   key={f.id}
                   onClick={() => onFilterChange(f.id)}
-                  className={`px-3 py-1 text-xs rounded-full transition-colors whitespace-nowrap flex items-center ${
+                  className={`press px-3 py-1 text-xs rounded-full transition-all active:scale-[0.97] whitespace-nowrap flex items-center ${
                     active
                       ? "bg-[var(--accent)] text-white"
                       : "border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"

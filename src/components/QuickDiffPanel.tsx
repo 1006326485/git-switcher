@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import * as api from "../lib/tauri";
 import type { ProjectDiffSummary } from "../lib/types";
 import { parseError } from "../lib/types";
+import { dialogAnimation, scrimAnimation } from "./ui/primitives";
 
 interface QuickDiffPanelProps {
   open: boolean;
@@ -57,11 +58,11 @@ export const QuickDiffPanel = memo(function QuickDiffPanel({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+      className={`fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm ${scrimAnimation}`}
       onClick={onClose}
     >
       <div
-        className="w-full max-w-2xl max-h-[80vh] bg-[var(--surface-1)] rounded-xl shadow-2xl border border-[var(--border-color)] overflow-hidden flex flex-col"
+        className={`w-full max-w-2xl max-h-[80vh] bg-[var(--surface-1)] rounded-xl shadow-2xl border border-[var(--border-color)] overflow-hidden flex flex-col ${dialogAnimation}`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

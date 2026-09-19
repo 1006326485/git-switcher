@@ -260,7 +260,7 @@ export const ProjectGrid = memo(function ProjectGrid({
       case "card":
       default:
         return (
-          <div className="grid grid-cols-1 gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+          <div className="grid grid-cols-1 gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 items-start">
             {projects.map((detail, index) => (
               <ProjectCard key={detail.project.id} detail={detail} sortable={sortable} projectIndex={index} isFocused={focusedIndex === index} />
             ))}

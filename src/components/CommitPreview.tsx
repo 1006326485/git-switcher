@@ -2,6 +2,7 @@ import { useState, useEffect, memo } from "react";
 import { createPortal } from "react-dom";
 import { gitGetLog } from "../lib/tauri";
 import type { CommitInfo } from "../lib/types";
+import { popoverAnimation } from "./ui/primitives";
 
 interface CommitPreviewProps {
   path: string;
@@ -60,7 +61,7 @@ export const CommitPreview = memo(function CommitPreview({ path, anchorRef, onCl
   return createPortal(
     <div
       style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 9999 }}
-      className="bg-[var(--surface-1)] border border-[var(--border-color)] rounded-xl shadow-lg p-3 min-w-[280px] max-w-[360px] animate-[fadeIn_0.15s_ease-out]"
+      className={`origin-top-left bg-[var(--surface-1)] border border-[var(--border-color)] rounded-xl shadow-lg p-3 min-w-[280px] max-w-[360px] ${popoverAnimation}`}
     >
       <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2 uppercase tracking-wider">
         Recent Commits

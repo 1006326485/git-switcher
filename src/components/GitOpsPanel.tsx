@@ -1,4 +1,4 @@
-import { useState, useCallback, memo } from "react";
+import { useState, useCallback, useEffect, memo } from "react";
 import * as api from "../lib/tauri";
 import type { GitFileEntry, StashInfo } from "../lib/types";
 import { DiffViewer } from "./DiffViewer";
@@ -11,10 +11,29 @@ interface GitOpsPanelProps {
   onSuccess: (msg: string) => void;
   onError: (msg: string) => void;
   onInfo?: (msg: string) => void;
+  /**
+   * Controlled open state. Card view hosts the panel in its own grid cell
+   * (see ProjectGrid) so expanding it never deforms sibling cards; other
+   * list-style views leave it undefined and the panel self-manages.
+   */
+  open?: boolean;
+  /** Controlled toggle handler (used together with `open`). */
+  onToggle?: () => void;
+  /** Set false when the trigger button is rendered elsewhere. */
+  showTrigger?: boolean;
+  /**
+   * Set true when the panel content is hosted elsewhere (card view renders
+   * it in a dedicated grid cell). The in-place instance then acts as the
+   * trigger button only, keeping the host card's height unchanged.
+   */
+  triggerOnly?: boolean;
 }
 
-export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSuccess, onError, onInfo }: GitOpsPanelProps) {
-  const [expanded, setExpanded] = useState(false);
+export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSuccess, onError, onInfo, open: openProp, onToggle, showTrigger = true, triggerOnly = false }: GitOpsPanelProps) {
+  // Controlled or self-managed open state.
+  const [internalOpen, setInternalOpen] = useState(false);
+  const isControlled = openProp !== undefined;
+  const open = isControlled ? openProp : internalOpen;
   const [commitMsg, setCommitMsg] = useState("");
   const [files, setFiles] = useState<GitFileEntry[]>([]);
   const [loadingOps, setLoadingOps] = useState<Set<string>>(new Set());
@@ -59,13 +78,19 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
     }
   }, [path, onError]);
 
-  const handleToggle = useCallback(async () => {
-    const next = !expanded;
-    setExpanded(next);
-    if (next) {
-      await Promise.all([loadFiles(), loadStashList()]);
+  const handleToggle = useCallback(() => {
+    if (onToggle) {
+      onToggle();
+      return;
     }
-  }, [expanded, loadFiles, loadStashList]);
+    setInternalOpen((v) => !v);
+  }, [onToggle]);
+
+  // Load panel data whenever it opens (controlled or self-managed).
+  useEffect(() => {
+    if (!open) return;
+    void Promise.all([loadFiles(), loadStashList()]);
+  }, [open, loadFiles, loadStashList]);
 
   const handleAction = useCallback(
     async (name: string, fn: () => Promise<void>, successMsg?: string) => {
@@ -206,19 +231,22 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
 
   return (
     <>
+    {showTrigger && (
     <div className="border-t border-gray-200 dark:border-gray-700">
       <button
         onClick={handleToggle}
-        aria-expanded={expanded}
+        aria-expanded={open}
         aria-label="Toggle git operations"
         className="w-full px-4 py-2 text-xs text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800/50 flex items-center gap-2 transition-colors"
       >
-        <span className={`transition-transform ${expanded ? "rotate-90" : ""}`}>&#x25B6;</span>
+        <span className={`transition-transform ${open ? "rotate-90" : ""}`}>&#x25B6;</span>
         Git Operations
       </button>
+    </div>
+    )}
 
-      {expanded && (
-        <div className="px-4 pb-3 space-y-3">
+    {open && !triggerOnly && (
+      <div className="px-4 pb-3 space-y-3">
           {/* Action buttons */}
           <div className="flex flex-wrap gap-1.5 min-w-0">
             <button
@@ -494,11 +522,11 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
               </pre>
             </div>
           )}
-        </div>
-      )}
+      </div>
+    )}
 
       {diffFile && <DiffViewer path={path} filePath={diffFile} onClose={() => setDiffFile(null)} />}
-    </div>
+
       {confirmStashDrop !== null && (
         <OperationConfirmDialog
           open

@@ -12,13 +12,16 @@ export function useSortableRow({ id, sortable = true }: UseSortableRowOptions) {
     listeners,
     setNodeRef,
     transform,
-    transition,
     isDragging,
   } = useSortable({ id, disabled: !sortable });
 
   const style = {
     transform: CSS.Transform.toString(transform),
-    transition,
+    // The dragged card follows the pointer 1:1 — never let a transition
+    // gate it (fluid interfaces: no latency on the input path).
+    // Settling siblings use a damped spring curve instead of dnd-kit's
+    // default linear transform.
+    transition: isDragging ? "none" : "transform 260ms var(--ease-spring)",
     opacity: isDragging ? 0.5 : 1,
   };
 

@@ -5,6 +5,7 @@ import type { Group } from "../lib/types";
 import { parseError } from "../lib/types";
 import { useDropdownPortal } from "../hooks/useDropdownPortal";
 import { FolderIcon } from "./ui/icons";
+import { popoverAnimation } from "./ui/primitives";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 // Module-level groups cache shared across all GroupAssignDropdown instances
@@ -290,7 +291,7 @@ export const GroupAssignDropdown = memo(function GroupAssignDropdown({
         <div
           ref={portalRef}
           style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width, zIndex: 9999 }}
-          className="max-h-80 bg-(--surface-1) border border-(--border-color) rounded-xl shadow-lg overflow-hidden animate-[fadeIn_0.15s_ease-out]"
+          className={`origin-top-left max-h-80 bg-(--surface-1) border border-(--border-color) rounded-xl shadow-lg overflow-hidden ${popoverAnimation}`}
         >
           <div className="p-2 border-b border-gray-200 dark:border-gray-700">
             <input

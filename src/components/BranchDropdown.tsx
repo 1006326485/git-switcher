@@ -2,6 +2,7 @@ import { useMemo, useCallback, useState, memo } from "react";
 import { createPortal } from "react-dom";
 import type { BranchInfo } from "../lib/types";
 import { useDropdownPortal } from "../hooks/useDropdownPortal";
+import { popoverAnimation } from "./ui/primitives";
 
 interface BranchDropdownProps {
   currentBranch: string;
@@ -159,7 +160,7 @@ export const BranchDropdown = memo(function BranchDropdown({
         <div
           ref={portalRef}
           style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width, zIndex: 9999 }}
-          className="max-h-80 bg-(--surface-1) border border-(--border-color) rounded-xl shadow-lg overflow-hidden animate-[fadeIn_0.15s_ease-out]"
+          className={`origin-top-left max-h-80 bg-(--surface-1) border border-(--border-color) rounded-xl shadow-lg overflow-hidden ${popoverAnimation}`}
         >
           <div className="p-2 border-b border-gray-200 dark:border-gray-700">
             <input

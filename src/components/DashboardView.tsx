@@ -280,15 +280,15 @@ export const DashboardView = memo(function DashboardView({ projects, onDrillDown
         <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">File Changes</h3>
         <div className="grid grid-cols-3 gap-4 text-center">
           <div>
-            <div className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">{stats.totalModified}</div>
+            <div className="text-2xl font-bold tracking-tight tabular-nums text-yellow-600 dark:text-yellow-400">{stats.totalModified}</div>
             <div className="text-xs text-gray-500">Modified</div>
           </div>
           <div>
-            <div className="text-2xl font-bold text-green-600 dark:text-green-400">{stats.totalStaged}</div>
+            <div className="text-2xl font-bold tracking-tight tabular-nums text-green-600 dark:text-green-400">{stats.totalStaged}</div>
             <div className="text-xs text-gray-500">Staged</div>
           </div>
           <div>
-            <div className="text-2xl font-bold text-gray-600 dark:text-gray-400">{stats.totalUntracked}</div>
+            <div className="text-2xl font-bold tracking-tight tabular-nums text-gray-600 dark:text-gray-400">{stats.totalUntracked}</div>
             <div className="text-xs text-gray-500">Untracked</div>
           </div>
         </div>
@@ -299,11 +299,11 @@ export const DashboardView = memo(function DashboardView({ projects, onDrillDown
         <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Sync Status</h3>
         <div className="grid grid-cols-2 gap-4 text-center">
           <div>
-            <div className="text-2xl font-bold text-green-600 dark:text-green-400">{stats.totalAhead}</div>
+            <div className="text-2xl font-bold tracking-tight tabular-nums text-green-600 dark:text-green-400">{stats.totalAhead}</div>
             <div className="text-xs text-gray-500">Commits Ahead</div>
           </div>
           <div>
-            <div className="text-2xl font-bold text-red-600 dark:text-red-400">{stats.totalBehind}</div>
+            <div className="text-2xl font-bold tracking-tight tabular-nums text-red-600 dark:text-red-400">{stats.totalBehind}</div>
             <div className="text-xs text-gray-500">Commits Behind</div>
           </div>
         </div>
@@ -471,7 +471,7 @@ function StatCard({
         <span className={`text-xs font-medium opacity-75 ${textColors[color]}`}>{label}</span>
         <span className={`${textColors[color]} opacity-60`}>{icon}</span>
       </div>
-      <div className={`text-4xl font-bold ${textColors[color]}`}>{value}</div>
+      <div className={`text-4xl font-bold tracking-tight tabular-nums ${textColors[color]}`}>{value}</div>
       {onClick && <span className={`mt-2 block text-xs font-medium ${textColors[color]}`}>View projects →</span>}
     </>
   );
@@ -549,7 +549,7 @@ function SyncRing({ ahead, behind, synced }: { ahead: number; behind: number; sy
           }}
         >
           <div className="w-14 h-14 rounded-full bg-(--surface-1) m-auto mt-3 flex items-center justify-center">
-            <span className="text-lg font-bold text-gray-700 dark:text-gray-300">{total}</span>
+            <span className="text-lg font-bold tracking-tight tabular-nums text-gray-700 dark:text-gray-300">{total}</span>
           </div>
         </div>
         <div className="space-y-1.5 text-sm">

@@ -1,6 +1,7 @@
 import { memo, useState, useEffect, useRef } from "react";
 import type { Toast as ToastType } from "../hooks/useToast";
 import { ErrorRecoveryBanner } from "./ErrorRecoveryBanner";
+import { toastAnimation, toastExitAnimation } from "./ui/primitives";
 
 interface ToastContainerProps {
   toasts: ToastType[];
@@ -86,9 +87,9 @@ function ToastItem({
       role={toast.type === "error" ? "alert" : undefined}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
-      className={`pointer-events-auto relative flex flex-col px-4 py-3 rounded-xl border shadow-lg dark:ring-1 dark:ring-white/10 text-sm font-medium animate-[slideIn_0.2s_ease-out] overflow-hidden ${
-        typeStyles[toast.type]
-      }`}
+      className={`pointer-events-auto relative flex flex-col px-4 py-3 rounded-xl border shadow-lg dark:ring-1 dark:ring-white/10 text-sm font-medium overflow-hidden ${
+        toast.exiting ? toastExitAnimation : toastAnimation
+      } ${typeStyles[toast.type]}`}
     >
       <div className="flex items-center gap-2">
         <span className="text-base">{typeIcons[toast.type]}</span>
@@ -145,7 +146,7 @@ function ToastItem({
       {/* Progress bar */}
       <div className="absolute bottom-0 left-0 right-0 h-0.5">
         <div
-          className={`h-full transition-none ${progressColors[toast.type]}`}
+          className={`h-full rounded-full transition-none ${progressColors[toast.type]}`}
           style={{ width: `${progress}%` }}
         />
       </div>

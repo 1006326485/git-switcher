@@ -2,6 +2,7 @@ import { memo, useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
 import type { ProjectMatch } from "../hooks/useCommandPalette";
 import type { SearchResult } from "../lib/types";
+import { popoverAnimation } from "./ui/primitives";
 import { searchContent } from "../lib/tauri";
 
 export interface Command {
@@ -294,7 +295,7 @@ export const CommandPalette = memo(function CommandPalette({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-2xl bg-(--surface-1) rounded-xl shadow-2xl border border-(--border-color) overflow-hidden"
+        className={`w-full max-w-2xl bg-(--surface-1) rounded-xl shadow-2xl border border-(--border-color) overflow-hidden origin-top ${popoverAnimation}`}
         onClick={(e) => e.stopPropagation()}
       >
         <input

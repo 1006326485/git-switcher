@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+@theme {
+  /* Explicit platform font (§15): SF Pro via system-ui on macOS/iOS,
+   * Segoe UI fallback elsewhere. Ships optical sizing + tracking tables. */
+  --font-sans: system-ui, -apple-system, "SF Pro Text", "Segoe UI", sans-serif;
+}
+
 /* ═══ Design Tokens ═══ */
 :root {
   /* Surface layers */
@@ -16,6 +22,18 @@
 
   /* Tooltip */
   --tooltip-bg: #1f2937;
+
+  /* Motion curves
+   * --ease-spring:    damped settle (Apple sheet feel) — position/layout moves
+   * --ease-out-soft:  restrained micro-interactions */
+  --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-out-soft: cubic-bezier(0.25, 0.1, 0.25, 1);
+
+  /* Material chrome gradient endpoints — shared by the title bar (flat
+   * top color) and the header (top→bottom gradient) so the whole top
+   * chrome reads as one continuous surface. */
+  --material-top: rgb(240 243 249 / 0.95);
+  --material-bottom: rgb(200 211 230 / 0.62);
 
   /* Semantic status — backgrounds */
   --status-modified-bg: var(--color-yellow-100);
@@ -41,6 +59,9 @@
   --border-color: rgba(55, 65, 81, 0.5);
   --accent: var(--color-blue-500);
   --accent-hover: var(--color-blue-600);
+
+  --material-top: rgb(30 33 43 / 0.85);
+  --material-bottom: rgb(15 17 23 / 0.45);
 
   --tooltip-bg: #374151;
 
@@ -75,9 +96,10 @@
  *   - Section gap:       1.5rem  (gap-6)
  *
  * Transitions:
- *   - Micro:             150ms ease-out
- *   - Dropdown entrance: fadeIn 0.15s ease-out
- *   - Toast entrance:    slideIn 0.2s ease-out
+ *   - Micro press:       90ms ease-out (.press)
+ *   - Theme:             150ms ease-in-out (global *)
+ *   - Overlay entrances: see "Unified Overlay Motion" below; use the
+ *     class constants exported from ui/primitives.tsx
  */
 
 @custom-variant dark (&:where(.dark, .dark *));
@@ -88,6 +110,11 @@ body,
   min-width: 0;
   min-height: 100%;
   margin: 0;
+}
+
+html {
+  /* Comfortable body leading (§15); large headings override tighter */
+  line-height: 1.5;
 }
 
 body {
@@ -101,7 +128,8 @@ body {
   }
 }
 
-/* Scrollbar styling */
+/* Scrollbar styling — hidden until the scroll surface is hovered
+ * (macOS-like: chrome stays quiet until it's relevant) */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -112,19 +140,24 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background-color: rgba(156, 163, 175, 0.4);
+  background-color: transparent;
   border-radius: 4px;
+  transition: background-color 200ms ease;
 }
 
-::-webkit-scrollbar-thumb:hover {
+:hover::-webkit-scrollbar-thumb {
+  background-color: rgba(156, 163, 175, 0.4);
+}
+
+:hover::-webkit-scrollbar-thumb:hover {
   background-color: rgba(156, 163, 175, 0.6);
 }
 
-.dark ::-webkit-scrollbar-thumb {
+.dark :hover::-webkit-scrollbar-thumb {
   background-color: rgba(75, 85, 99, 0.5);
 }
 
-.dark ::-webkit-scrollbar-thumb:hover {
+.dark :hover::-webkit-scrollbar-thumb:hover {
   background-color: rgba(75, 85, 99, 0.7);
 }
 
@@ -133,35 +166,94 @@ body {
   background-color: rgba(59, 130, 246, 0.3);
 }
 
-/* Dropdown fade-in animation */
-@keyframes fadeIn {
+/* Sidebar drawer entrance (narrow windows); docked sidebar opts out */
+@keyframes drawerIn {
   from {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/* Toast slide-in animation */
-@keyframes slideIn {
-  from {
-    transform: translateX(100%);
-    opacity: 0;
+    transform: translateX(-100%);
   }
   to {
     transform: translateX(0);
+  }
+}
+
+/* ═══ Unified Overlay Motion ═══
+ *
+ * Single source of truth for floating-layer entrances/exits. Components
+ * must use the animation class constants exported from ui/primitives.tsx
+ * instead of writing inline animate-[...] values.
+ *
+ * - popoverIn: anchored popovers/menus — scale from the trigger (§7)
+ * - sheetIn:   dialogs — material arriving, slight lift (§12)
+ * - scrimIn:   backdrop dim, synced with its surface
+ * - toastIn/Out: enter from the right, exit along the same path (§7)
+ */
+@keyframes popoverIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes sheetIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes scrimIn {
+  from {
+    opacity: 0;
+  }
+  to {
     opacity: 1;
   }
 }
 
-/* Smooth transitions for theme switching */
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes toastOut {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+
+/* Smooth transitions for theme switching.
+ * Transform/box-shadow are intentionally excluded: they are not theme
+ * properties and gating them here would add latency to drag & press. */
 * {
-  transition-property: background-color, border-color, color, box-shadow;
+  transition-property: background-color, border-color, color;
   transition-duration: 150ms;
   transition-timing-function: ease-in-out;
+}
+
+/* Press feedback: snappier than the 150ms theme transition so
+ * pointer-down feels instant (apply alongside transition-all) */
+.press {
+  transition-duration: 90ms;
+  transition-timing-function: ease-out;
 }
 
 /* Disable transition on page load */
@@ -210,4 +302,124 @@ body {
 }
 .dark .syn-number {
   color: #fbbf24;
+}
+
+/* ═══ Materials ═══
+ *
+ * Floating functional chrome (header, sidebar, sheets) rendered as a
+ * translucent layer. Usage rolls out in later phases; defined here as the
+ * single source of truth.
+ *
+ * Look: soft vertical gradient + backdrop blur gives the glass feel; when
+ * content scrolls beneath the chrome, blur/saturate frosts it. Never
+ * stack two light materials on top of each other (§12).
+ */
+.material {
+  /* Cool blue-gray tint, deliberately deeper than the white cards below:
+   * passing content shifts visibly to a frosted cool tone. */
+  background-image: linear-gradient(
+    to bottom,
+    var(--material-top),
+    var(--material-bottom)
+  );
+  -webkit-backdrop-filter: blur(20px) saturate(170%);
+  backdrop-filter: blur(20px) saturate(170%);
+  /* Edge light + soft drop shadow: the floating layer keeps a visible
+   * boundary even over near-white content (§12 materials). */
+  box-shadow:
+    inset 0 -0.5px 0 rgb(255 255 255 / 0.7),
+    0 1px 5px rgb(15 23 42 / 0.12);
+}
+
+.dark .material {
+  box-shadow:
+    inset 0 -0.5px 0 rgb(255 255 255 / 0.08),
+    0 1px 5px rgb(0 0 0 / 0.35);
+}
+
+/* Title bar sits directly above the header — flat color equal to the
+ * gradient's top endpoint, so both read as one continuous chrome. */
+.app-titlebar {
+  background-color: var(--material-top);
+}
+
+/* Heavier material for larger structural regions (sidebar) */
+.material-heavy {
+  background-image: linear-gradient(
+    to right,
+    rgb(235 240 247 / 0.94),
+    rgb(206 215 231 / 0.8)
+  );
+  -webkit-backdrop-filter: blur(32px) saturate(180%);
+  backdrop-filter: blur(32px) saturate(180%);
+}
+
+.dark .material-heavy {
+  background-image: linear-gradient(
+    to right,
+    rgb(28 31 40 / 0.8),
+    rgb(15 17 23 / 0.6)
+  );
+}
+
+/* ═══ Accessibility Preferences ═══ */
+
+/* Reduced motion: collapse animation/transition timing to an instant.
+ * Spinners/pulses are kept — they are continuous status feedback, not
+ * decorative motion (Vestibular-safe loading indication). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .animate-spin,
+  .animate-pulse {
+    animation-duration: revert !important;
+    animation-iteration-count: infinite !important;
+  }
+}
+
+/* Reduced transparency: frostier, near-solid surfaces */
+@media (prefers-reduced-transparency: reduce) {
+  .material,
+  .material-heavy {
+    background-color: var(--surface-1);
+    background-image: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: none;
+  }
+
+  .app-titlebar {
+    background-color: var(--surface-1);
+  }
+}
+
+/* Increased contrast: solid surfaces with defined borders */
+@media (prefers-contrast: more) {
+  :root {
+    --border-color: var(--color-gray-500);
+  }
+
+  .dark {
+    --border-color: rgb(156 163 175 / 0.8);
+  }
+
+  .material,
+  .material-heavy {
+    background-color: var(--surface-1);
+    background-image: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: none;
+  }
+
+  .app-titlebar {
+    background-color: var(--surface-1);
+  }
 }
