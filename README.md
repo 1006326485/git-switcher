@@ -14,7 +14,7 @@
   <img src="https://img.shields.io/badge/React_19-TypeScript-61DAFB?logo=react&logoColor=white" alt="React 19" />
   <img src="https://img.shields.io/badge/Vite_8-FF6B35?logo=vite&logoColor=white" alt="Vite 8" />
   <img src="https://img.shields.io/badge/Tailwind_CSS_4-38BDF8?logo=tailwindcss&logoColor=white" alt="Tailwind CSS 4" />
-  <img src="https://img.shields.io/badge/v1.3.0-blue?style=flat-square" alt="Version" />
+  <img src="https://img.shields.io/badge/v1.4.0-blue?style=flat-square" alt="Version" />
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License" />
 </p>
 
