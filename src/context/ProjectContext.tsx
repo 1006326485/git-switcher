@@ -1,5 +1,5 @@
 import { createContext, useContext, type ReactNode } from "react";
-import type { ProjectDetail } from "../lib/types";
+import type { ProjectDetail, ProjectScript } from "../lib/types";
 import type { ActiveGitOp } from "../hooks/useGitOpTracker";
 
 /**
@@ -18,6 +18,10 @@ export interface ProjectActions {
   onAliasChange?: (id: string, alias: string) => Promise<void>;
   /** Synchronize a successfully persisted color change into the project list. */
   onColorChange?: (id: string, color: string | null) => void;
+  /** Open the built-in terminal panel with a session for the project path. */
+  onOpenBuiltInTerminal?: (path: string, title: string) => void;
+  /** Run a project script in the built-in terminal. */
+  onRunProjectScript?: (path: string, title: string, script: ProjectScript) => void;
   /** Check if a specific op is active for a path */
   isOpActive?: (op: string, path: string) => boolean;
   /** Get the active op details for a specific op+path */
@@ -44,6 +48,14 @@ export function ProjectProvider({
   return (
     <ProjectContext.Provider value={value}>{children}</ProjectContext.Provider>
   );
+}
+
+/**
+ * Hook to consume project actions from context, returning null when rendered
+ * outside <ProjectProvider> (standalone dialogs, tests, previews).
+ */
+export function useOptionalProjectActions(): ProjectActions | null {
+  return useContext(ProjectContext);
 }
 
 /**

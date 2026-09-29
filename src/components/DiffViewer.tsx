@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef, useMemo, useCallback, memo } from "react";
+import { createPortal } from "react-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import * as api from "../lib/tauri";
 import { parseError, type GitFileEntry, type FileDiffStats } from "../lib/types";
 import { parseDiff, parseDiffSideBySide, computeDiffStats, type DiffLine, type DiffHunkPair, type DiffSummary } from "./diffUtils";
 import { getLanguage, getLanguageLabel, highlightLine } from "../lib/syntaxHighlight";
+import { getOrComputeHighlight } from "../lib/highlightCache";
 
 /**
  * Wrap all case-insensitive occurrences of `query` in an HTML string with <mark> tags.
@@ -152,6 +154,105 @@ const lineColors = {
 const ROW_HEIGHT = 20; // matches leading-5 (1.25rem = 20px)
 const VIRTUALIZE_THRESHOLD = 200; // only virtualize for large diffs
 
+/** Flat side-by-side row produced by buildSplitLines */
+type SplitRowData = ReturnType<typeof buildSplitLines>[number];
+
+/**
+ * Highlight one diff row to HTML through the shared cache (see highlightCache.ts).
+ * `prefix` is the diff marker shown before the highlighted code ("" in unified view).
+ */
+function rowHtml(content: string, prefix: string, language: string, searchQuery: string, currentOccurrence?: number): string {
+  return getOrComputeHighlight(
+    { content: prefix + content, language, searchQuery, currentOccurrence },
+    () => {
+      let html = prefix + highlightLine(content, language);
+      if (searchQuery) html = highlightSearchMatchesWithCurrent(html, searchQuery, currentOccurrence);
+      return html;
+    },
+  );
+}
+
+interface UnifiedRowProps {
+  line: DiffLine;
+  language: string;
+  searchQuery: string;
+  currentOccurrence?: number;
+}
+
+/** In-flow unified-view row (small diffs render as a plain table). */
+const UnifiedRow = memo(function UnifiedRow({ line, language, searchQuery, currentOccurrence }: UnifiedRowProps) {
+  return (
+    <tr className={lineColors[line.type]}>
+      <td className="w-10 text-right pr-1 pl-1 select-none text-gray-400 dark:text-gray-500 border-r border-gray-200 dark:border-gray-700">{line.oldLine ?? ""}</td>
+      <td className="w-10 text-right pr-1 pl-1 select-none text-gray-400 dark:text-gray-500 border-r border-gray-200 dark:border-gray-700">{line.newLine ?? ""}</td>
+      <td className="whitespace-pre px-2" dangerouslySetInnerHTML={{ __html: rowHtml(line.content, "", language, searchQuery, currentOccurrence) }} />
+    </tr>
+  );
+});
+
+/** Virtualized unified-view row: absolutely positioned at `top`, matching the split view. */
+const UnifiedVirtualRow = memo(function UnifiedVirtualRow({ line, top, language, searchQuery, currentOccurrence }: UnifiedRowProps & { top: number }) {
+  return (
+    <div className={`absolute w-full grid grid-cols-[2.5rem_2.5rem_1fr] ${lineColors[line.type]}`} style={{ top, height: ROW_HEIGHT }}>
+      <div className="text-right pr-1 pl-1 select-none text-gray-400 dark:text-gray-500 border-r border-gray-200 dark:border-gray-700">{line.oldLine ?? ""}</div>
+      <div className="text-right pr-1 pl-1 select-none text-gray-400 dark:text-gray-500 border-r border-gray-200 dark:border-gray-700">{line.newLine ?? ""}</div>
+      <div className="whitespace-pre px-2" dangerouslySetInnerHTML={{ __html: rowHtml(line.content, "", language, searchQuery, currentOccurrence) }} />
+    </div>
+  );
+});
+
+interface SplitRowProps {
+  row: SplitRowData;
+  side: "old" | "new";
+  language: string;
+  searchQuery: string;
+  currentOccurrence?: number;
+  /** Absolute offset for virtualized panes; omit for in-flow rows. */
+  top?: number;
+}
+
+/** One side-by-side diff row (old or new pane). Memoized so scroll only re-renders changed rows. */
+const SplitRow = memo(function SplitRow({ row, side, language, searchQuery, currentOccurrence, top }: SplitRowProps) {
+  const isOld = side === "old";
+  const sideLine = isOld ? row.old : row.new;
+  const otherLine = isOld ? row.new : row.old;
+  const changed = row.old.content !== row.new.content;
+  const changedBg = isOld
+    ? "bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200"
+    : "bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200";
+  const bg = row.type === "header"
+    ? "bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 font-semibold"
+    : sideLine.line !== null && otherLine.line === null
+      ? changedBg
+      : sideLine.line === null && otherLine.line !== null
+        ? "bg-gray-50 dark:bg-gray-800/50"
+        : changed
+          ? changedBg
+          : "bg-white dark:bg-gray-900";
+  const marker = isOld ? "-" : "+";
+  const stripped = sideLine.content.startsWith(marker) ? sideLine.content.slice(1) : sideLine.content;
+  const prefix = sideLine.content.startsWith(marker) ? `${marker} ` : "  ";
+  const html = row.type === "header" ? stripped : rowHtml(stripped, prefix, language, searchQuery, currentOccurrence);
+  const cells = (
+    <>
+      <div className="text-right pr-1 pl-1 select-none text-gray-400 dark:text-gray-500">{sideLine.line ?? ""}</div>
+      <div className="whitespace-pre px-2" dangerouslySetInnerHTML={{ __html: html }} />
+    </>
+  );
+  if (top !== undefined) {
+    return (
+      <div className={`absolute w-full grid grid-cols-[3rem_1fr] ${bg}`} style={{ top, height: ROW_HEIGHT }}>
+        {cells}
+      </div>
+    );
+  }
+  return (
+    <div className={`grid grid-cols-[3rem_1fr] ${bg}`} style={{ height: ROW_HEIGHT }}>
+      {cells}
+    </div>
+  );
+});
+
 const FILE_STATUS_STYLES: Record<GitFileEntry["status"], { dot: string; label: string }> = {
   added: { dot: "bg-green-500", label: "A" },
   modified: { dot: "bg-yellow-500", label: "M" },
@@ -216,8 +317,22 @@ export const DiffViewer = memo(function DiffViewer({ path, filePath, onClose, st
 
   // ── Search state ─────────────────────────────────────────────────────
   const [searchOpen, setSearchOpen] = useState(false);
+  const [searchInput, setSearchInput] = useState("");
+  // Effective query: debounced so typing does not rescan the diff on every keystroke.
   const [searchQuery, setSearchQuery] = useState("");
   const [currentMatch, setCurrentMatch] = useState(0);
+
+  useEffect(() => {
+    if (searchInput === "") {
+      setSearchQuery("");
+      return;
+    }
+    const timer = setTimeout(() => {
+      setSearchQuery(searchInput);
+      setCurrentMatch(0);
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchStyleInjected = useRef(false);
 
@@ -388,14 +503,14 @@ export const DiffViewer = memo(function DiffViewer({ path, filePath, onClose, st
     count: lines.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => ROW_HEIGHT,
-    overscan: 50,
+    overscan: 12,
   });
 
   const splitLeftVirtualizer = useVirtualizer({
     count: splitLines.length,
     getScrollElement: () => splitLeftRef.current,
     estimateSize: () => ROW_HEIGHT,
-    overscan: 50,
+    overscan: 12,
   });
 
   // Scroll sync handlers for split view
@@ -409,27 +524,11 @@ export const DiffViewer = memo(function DiffViewer({ path, filePath, onClose, st
   }, []);
 
   // ── Search logic ─────────────────────────────────────────────────────
-  // Total match count across all lines
-  const totalMatches = useMemo(() => {
-    if (!searchQuery) return 0;
-    const src = viewMode === "split" ? splitLines : lines;
-    let count = 0;
-    for (const item of src) {
-      if (viewMode === "split") {
-        const row = item as typeof splitLines[number];
-        count += countOccurrences(row.old.content, searchQuery) + countOccurrences(row.new.content, searchQuery);
-      } else {
-        const line = item as DiffLine;
-        if (line.type !== "header") count += countOccurrences(line.content, searchQuery);
-      }
-    }
-    return count;
-  }, [lines, splitLines, viewMode, searchQuery]);
-
-  // Build a flat list of { lineIndex, charOffset } for each match (for current-match tracking)
+  // Single pass over the diff: each match is recorded as one position, so the
+  // total match count is just the length of this list.
   const matchPositions = useMemo(() => {
-    if (!searchQuery) return [];
     const positions: { lineIdx: number; side?: "old" | "new" }[] = [];
+    if (!searchQuery) return positions;
     if (viewMode === "split") {
       for (let i = 0; i < splitLines.length; i++) {
         const row = splitLines[i];
@@ -448,6 +547,8 @@ export const DiffViewer = memo(function DiffViewer({ path, filePath, onClose, st
     return positions;
   }, [lines, splitLines, viewMode, searchQuery]);
 
+  const totalMatches = matchPositions.length;
+
   // Clamp currentMatch when total changes
   useEffect(() => {
     if (totalMatches === 0) { setCurrentMatch(0); return; }
@@ -461,12 +562,14 @@ export const DiffViewer = memo(function DiffViewer({ path, filePath, onClose, st
 
   const openSearch = useCallback(() => {
     setSearchOpen(true);
+    setSearchInput("");
     setSearchQuery("");
     setCurrentMatch(0);
   }, []);
 
   const closeSearch = useCallback(() => {
     setSearchOpen(false);
+    setSearchInput("");
     setSearchQuery("");
     setCurrentMatch(0);
   }, []);
@@ -623,26 +726,6 @@ export const DiffViewer = memo(function DiffViewer({ path, filePath, onClose, st
     [closeSearch, navigateMatch],
   );
 
-  /** Highlight full diff content line (includes +/- prefix) for unified view */
-  const hl = useCallback(
-    (content: string, currentOcc?: number) => {
-      let html = highlightLine(content, language);
-      if (searchQuery) html = highlightSearchMatchesWithCurrent(html, searchQuery, currentOcc);
-      return { __html: html };
-    },
-    [language, searchQuery],
-  );
-
-  /** Highlight code content + prefix for split view */
-  const hlSplit = useCallback(
-    (prefix: string, content: string, currentOcc?: number) => {
-      let html = prefix + highlightLine(content, language);
-      if (searchQuery) html = highlightSearchMatchesWithCurrent(html, searchQuery, currentOcc);
-      return { __html: html };
-    },
-    [language, searchQuery],
-  );
-
   // Map currentMatch → which occurrence on its line to highlight
   const curLineOcc = useMemo(() => {
     if (!searchQuery || totalMatches === 0) return { unified: new Map<number, number>(), split: new Map<string, number>() };
@@ -667,19 +750,7 @@ export const DiffViewer = memo(function DiffViewer({ path, filePath, onClose, st
     }
   }, [matchPositions, currentMatch, searchQuery, totalMatches, viewMode]);
 
-  const renderLine = (line: DiffLine, i: number) => (
-    <tr key={i} className={lineColors[line.type]}>
-      <td className="w-10 text-right pr-1 pl-1 select-none text-gray-400 dark:text-gray-500 border-r border-gray-200 dark:border-gray-700">
-        {line.oldLine ?? ""}
-      </td>
-      <td className="w-10 text-right pr-1 pl-1 select-none text-gray-400 dark:text-gray-500 border-r border-gray-200 dark:border-gray-700">
-        {line.newLine ?? ""}
-      </td>
-      <td className="whitespace-pre px-2" dangerouslySetInnerHTML={hl(line.content, curLineOcc.unified.get(i))} />
-    </tr>
-  );
-
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}
       onKeyDown={(e) => {
         if ((e.metaKey || e.ctrlKey) && e.key === "f") { e.preventDefault(); openSearch(); }
@@ -824,8 +895,8 @@ export const DiffViewer = memo(function DiffViewer({ path, filePath, onClose, st
             <input
               ref={searchInputRef}
               type="text"
-              value={searchQuery}
-              onChange={(e) => { setSearchQuery(e.target.value); setCurrentMatch(0); }}
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
               onKeyDown={handleSearchKeyDown}
               placeholder="Search diff content..."
               className="flex-1 min-w-0 text-xs bg-transparent border-none outline-none text-gray-700 dark:text-gray-300 placeholder-gray-400"
@@ -943,7 +1014,7 @@ export const DiffViewer = memo(function DiffViewer({ path, filePath, onClose, st
           )}
 
           {/* Diff content */}
-          <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+          <div className="select-text flex-1 flex flex-col overflow-hidden min-w-0">
             {loading ? (
               <div className="flex-1 flex items-center justify-center text-gray-400">Loading diff...</div>
             ) : error ? (
@@ -967,51 +1038,29 @@ export const DiffViewer = memo(function DiffViewer({ path, filePath, onClose, st
                     >
                       {useVirtualSplit ? (
                         <div style={{ height: splitLeftVirtualizer.getTotalSize(), position: "relative" }}>
-                          {splitLeftVirtualizer.getVirtualItems().map((vi) => {
-                            const row = splitLines[vi.index];
-                            const bg = row.type === "header"
-                              ? "bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 font-semibold"
-                              : row.old.line !== null && row.new.line === null
-                                ? "bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200"
-                                : row.old.line === null && row.new.line !== null
-                                  ? "bg-gray-50 dark:bg-gray-800/50"
-                                  : row.old.content !== row.new.content
-                                    ? "bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200"
-                                    : "bg-white dark:bg-gray-900";
-                            const oldContent = row.old.content.startsWith("-") ? row.old.content.slice(1) : row.old.content;
-                            const prefix = row.old.content.startsWith("-") ? "- " : "  ";
-                            return (
-                              <div
-                                key={vi.index}
-                                className={`absolute w-full grid grid-cols-[3rem_1fr] ${bg}`}
-                                style={{ top: vi.start, height: ROW_HEIGHT }}
-                              >
-                                <div className="text-right pr-1 pl-1 select-none text-gray-400 dark:text-gray-500">{row.old.line ?? ""}</div>
-                                <div className="whitespace-pre px-2" dangerouslySetInnerHTML={row.type === "header" ? { __html: oldContent } : hlSplit(prefix, oldContent, curLineOcc.split.get(`${vi.index}:old`))} />
-                              </div>
-                            );
-                          })}
+                          {splitLeftVirtualizer.getVirtualItems().map((vi) => (
+                            <SplitRow
+                              key={vi.index}
+                              row={splitLines[vi.index]}
+                              side="old"
+                              language={language}
+                              searchQuery={searchQuery}
+                              currentOccurrence={curLineOcc.split.get(`${vi.index}:old`)}
+                              top={vi.start}
+                            />
+                          ))}
                         </div>
                       ) : (
-                        splitLines.map((row, i) => {
-                          const bg = row.type === "header"
-                            ? "bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 font-semibold"
-                            : row.old.line !== null && row.new.line === null
-                              ? "bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200"
-                              : row.old.line === null && row.new.line !== null
-                                ? "bg-gray-50 dark:bg-gray-800/50"
-                                : row.old.content !== row.new.content
-                                  ? "bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200"
-                                  : "bg-white dark:bg-gray-900";
-                          const oldContent = row.old.content.startsWith("-") ? row.old.content.slice(1) : row.old.content;
-                          const prefix = row.old.content.startsWith("-") ? "- " : "  ";
-                          return (
-                            <div key={i} className={`grid grid-cols-[3rem_1fr] ${bg}`} style={{ height: ROW_HEIGHT }}>
-                              <div className="text-right pr-1 pl-1 select-none text-gray-400 dark:text-gray-500">{row.old.line ?? ""}</div>
-                              <div className="whitespace-pre px-2" dangerouslySetInnerHTML={row.type === "header" ? { __html: oldContent } : hlSplit(prefix, oldContent, curLineOcc.split.get(`${i}:old`))} />
-                            </div>
-                          );
-                        })
+                        splitLines.map((row, i) => (
+                          <SplitRow
+                            key={i}
+                            row={row}
+                            side="old"
+                            language={language}
+                            searchQuery={searchQuery}
+                            currentOccurrence={curLineOcc.split.get(`${i}:old`)}
+                          />
+                        ))
                       )}
                     </div>
                     {/* Divider */}
@@ -1024,51 +1073,29 @@ export const DiffViewer = memo(function DiffViewer({ path, filePath, onClose, st
                     >
                       {useVirtualSplit ? (
                         <div style={{ height: splitLeftVirtualizer.getTotalSize(), position: "relative" }}>
-                          {splitLeftVirtualizer.getVirtualItems().map((vi) => {
-                            const row = splitLines[vi.index];
-                            const bg = row.type === "header"
-                              ? "bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 font-semibold"
-                              : row.new.line !== null && row.old.line === null
-                                ? "bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200"
-                                : row.new.line === null && row.old.line !== null
-                                  ? "bg-gray-50 dark:bg-gray-800/50"
-                                  : row.old.content !== row.new.content
-                                    ? "bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200"
-                                    : "bg-white dark:bg-gray-900";
-                            const newContent = row.new.content.startsWith("+") ? row.new.content.slice(1) : row.new.content;
-                            const prefix = row.new.content.startsWith("+") ? "+ " : "  ";
-                            return (
-                              <div
-                                key={vi.index}
-                                className={`absolute w-full grid grid-cols-[3rem_1fr] ${bg}`}
-                                style={{ top: vi.start, height: ROW_HEIGHT }}
-                              >
-                                <div className="text-right pr-1 pl-1 select-none text-gray-400 dark:text-gray-500">{row.new.line ?? ""}</div>
-                                <div className="whitespace-pre px-2" dangerouslySetInnerHTML={row.type === "header" ? { __html: newContent } : hlSplit(prefix, newContent, curLineOcc.split.get(`${vi.index}:new`))} />
-                              </div>
-                            );
-                          })}
+                          {splitLeftVirtualizer.getVirtualItems().map((vi) => (
+                            <SplitRow
+                              key={vi.index}
+                              row={splitLines[vi.index]}
+                              side="new"
+                              language={language}
+                              searchQuery={searchQuery}
+                              currentOccurrence={curLineOcc.split.get(`${vi.index}:new`)}
+                              top={vi.start}
+                            />
+                          ))}
                         </div>
                       ) : (
-                        splitLines.map((row, i) => {
-                          const bg = row.type === "header"
-                            ? "bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 font-semibold"
-                            : row.new.line !== null && row.old.line === null
-                              ? "bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200"
-                              : row.new.line === null && row.old.line !== null
-                                ? "bg-gray-50 dark:bg-gray-800/50"
-                                : row.old.content !== row.new.content
-                                  ? "bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200"
-                                  : "bg-white dark:bg-gray-900";
-                          const newContent = row.new.content.startsWith("+") ? row.new.content.slice(1) : row.new.content;
-                          const prefix = row.new.content.startsWith("+") ? "+ " : "  ";
-                          return (
-                            <div key={i} className={`grid grid-cols-[3rem_1fr] ${bg}`} style={{ height: ROW_HEIGHT }}>
-                              <div className="text-right pr-1 pl-1 select-none text-gray-400 dark:text-gray-500">{row.new.line ?? ""}</div>
-                              <div className="whitespace-pre px-2" dangerouslySetInnerHTML={row.type === "header" ? { __html: newContent } : hlSplit(prefix, newContent, curLineOcc.split.get(`${i}:new`))} />
-                            </div>
-                          );
-                        })
+                        splitLines.map((row, i) => (
+                          <SplitRow
+                            key={i}
+                            row={row}
+                            side="new"
+                            language={language}
+                            searchQuery={searchQuery}
+                            currentOccurrence={curLineOcc.split.get(`${i}:new`)}
+                          />
+                        ))
                       )}
                     </div>
                   </div>
@@ -1078,15 +1105,24 @@ export const DiffViewer = memo(function DiffViewer({ path, filePath, onClose, st
               /* Unified view */
               <div ref={scrollRef} className="flex-1 overflow-auto font-mono text-xs leading-5">
                 {useVirtual ? (
-                  <table className="w-full border-collapse" style={{ height: virtualizer.getTotalSize() }}>
-                    <tbody>
-                      {virtualizer.getVirtualItems().map((vi) => renderLine(lines[vi.index], vi.index))}
-                    </tbody>
-                  </table>
+                  <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
+                    {virtualizer.getVirtualItems().map((vi) => (
+                      <UnifiedVirtualRow
+                        key={vi.index}
+                        line={lines[vi.index]}
+                        top={vi.start}
+                        language={language}
+                        searchQuery={searchQuery}
+                        currentOccurrence={curLineOcc.unified.get(vi.index)}
+                      />
+                    ))}
+                  </div>
                 ) : (
                   <table className="w-full border-collapse">
                     <tbody>
-                      {lines.map((line, i) => renderLine(line, i))}
+                      {lines.map((line, i) => (
+                        <UnifiedRow key={i} line={line} language={language} searchQuery={searchQuery} currentOccurrence={curLineOcc.unified.get(i)} />
+                      ))}
                     </tbody>
                   </table>
                 )}
@@ -1095,7 +1131,10 @@ export const DiffViewer = memo(function DiffViewer({ path, filePath, onClose, st
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    // Portal to body: card ancestors apply hover translate, which turns them
+    // into the containing block for fixed descendants and traps this overlay.
+    document.body
   );
 });
 export default DiffViewer;

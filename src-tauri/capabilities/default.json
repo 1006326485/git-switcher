@@ -1,7 +1,7 @@
 {
   "identifier": "default",
   "description": "Default capabilities for Git Switcher",
-  "windows": ["main"],
+  "windows": ["main", "terminal"],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",

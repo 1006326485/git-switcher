@@ -88,7 +88,7 @@ export function OperationConfirmDialog({
           </p>
           <div className="rounded-md border border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-950/30 p-2">
             <p className="text-xs font-medium text-red-800 dark:text-red-200 mb-1">Affected targets ({preview.targets.length})</p>
-            <ul className="max-h-32 overflow-y-auto space-y-1 text-xs font-mono text-red-700 dark:text-red-300">
+            <ul className="select-text max-h-32 overflow-y-auto space-y-1 text-xs font-mono text-red-700 dark:text-red-300">
               {preview.targets.map((target) => (
                 <li key={`${target.path}:${target.label}`}>{target.path} — {target.label}</li>
               ))}

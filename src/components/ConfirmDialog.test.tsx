@@ -25,4 +25,21 @@ describe("ConfirmDialog", () => {
     await waitFor(() => expect(onConfirm).toHaveBeenCalledTimes(1));
     expect(onCancel).not.toHaveBeenCalled();
   });
+
+  it("mounts its overlay through a portal so transformed ancestors cannot trap it", () => {
+    // Project cards apply hover translate, becoming the containing block for
+    // fixed descendants; the dialog must escape the React tree entirely.
+    const { container } = render(
+      <ConfirmDialog
+        open
+        title="Delete branch"
+        message="This action cannot be undone."
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+  });
 });

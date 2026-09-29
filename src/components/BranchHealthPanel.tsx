@@ -1,6 +1,7 @@
 import { memo, useCallback, useState } from "react";
 import type { BranchHealthItem, BranchHealthReport } from "../lib/types";
 import { deleteMergedBranches } from "../lib/tauri";
+import { useOptionalProjectActions } from "../context/ProjectContext";
 import { OperationConfirmDialog } from "./OperationConfirmDialog";
 
 interface BranchHealthPanelProps {
@@ -29,6 +30,7 @@ export const BranchHealthPanel = memo(function BranchHealthPanel({
   error,
   onRefresh,
 }: BranchHealthPanelProps) {
+  const actions = useOptionalProjectActions();
   const [expandedMerged, setExpandedMerged] = useState(true);
   const [expandedStale, setExpandedStale] = useState(true);
   const [expandedBehind, setExpandedBehind] = useState(true);
@@ -57,12 +59,15 @@ export const BranchHealthPanel = memo(function BranchHealthPanel({
       for (const [path, branches] of byPath) {
         await deleteMergedBranches(path, branches);
       }
+      for (const path of byPath.keys()) {
+        await actions?.onRefresh(path).catch(() => {});
+      }
       onRefresh();
     } finally {
       setDeleting(false);
       setConfirmDeleteAll(false);
     }
-  }, [allMerged, onRefresh]);
+  }, [allMerged, actions, onRefresh]);
 
   if (loading) {
     return (

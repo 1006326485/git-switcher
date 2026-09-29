@@ -53,7 +53,7 @@ export const BranchCompareView = memo(function BranchCompareView({
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+        <div className="select-text flex-1 overflow-y-auto p-5 space-y-4">
           {loading && (
             <div className="flex items-center justify-center py-8">
               <div className="animate-spin rounded-full h-6 w-6 border-2 border-blue-500 border-t-transparent" />

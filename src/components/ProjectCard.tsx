@@ -1,5 +1,4 @@
 import { memo, useRef, useState, useEffect, useCallback } from "react";
-import { motion } from "motion/react";
 import type { ProjectDetail } from "../lib/types";
 import { PROJECT_COLORS } from "../lib/types";
 import { StatusBadge, GroupDot } from "./ui/primitives";
@@ -62,11 +61,11 @@ export const ProjectCard = memo(function ProjectCard({ detail, sortable, project
       {({ detail: d, row, actionButtons, errorBanner, activeOpIndicator }) => {
         const { project, current_branch, branches, status, group } = d;
         const totalChanges = status.modified + status.staged + status.untracked;
+        const branchCount = branches.filter((b) => !b.is_tag).length;
         const hasUpstream = status.ahead > 0 || status.behind > 0;
 
         return (
-          <motion.div
-            layout
+          <div
             ref={(node) => {
               setNodeRef(node);
               (cardRef as React.MutableRefObject<HTMLDivElement | null>).current = node;
@@ -213,11 +212,11 @@ export const ProjectCard = memo(function ProjectCard({ detail, sortable, project
               <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
                 <span style={{ color: "#9ca3af", wordBreak: "break-all" }}>{project.path}</span>
                 <span style={{ color: "#9ca3af" }}>
-                  {branches.length} branch{branches.length !== 1 ? "es" : ""}
+                  {branchCount} branch{branchCount !== 1 ? "es" : ""}
                 </span>
               </div>
             </HoverTooltip>
-          </motion.div>
+          </div>
         );
       }}
     </ProjectRowShell>

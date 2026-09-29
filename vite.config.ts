@@ -10,6 +10,22 @@ export default defineConfig(async () => ({
   plugins: [react(), tailwindcss()],
   clearScreen: false,
   define: { __APP_VERSION__: JSON.stringify(appVersion) },
+  build: {
+    rollupOptions: {
+      output: {
+        // rolldown (Vite 8) requires the function form of manualChunks
+        manualChunks(id: string) {
+          if (!id.includes("node_modules")) return undefined;
+          if (/node_modules\/(react|react-dom|scheduler)\//.test(id)) return "vendor-react";
+          if (/node_modules\/@tauri-apps\//.test(id)) return "vendor-tauri";
+          if (/node_modules\/@tanstack\//.test(id)) return "vendor-tanstack";
+          if (/node_modules\/@dnd-kit\//.test(id)) return "vendor-dnd";
+          if (/node_modules\/@xterm\//.test(id)) return "vendor-xterm";
+          return undefined;
+        },
+      },
+    },
+  },
   test: {
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],

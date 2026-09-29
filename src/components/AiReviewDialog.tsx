@@ -80,7 +80,7 @@ export const AiReviewDialog = memo(function AiReviewDialog({
   useEffect(() => {
     if (open) {
       const mainBranch = branches.find(
-        (b) => !b.is_remote && (b.name === "main" || b.name === "master")
+        (b) => !b.is_remote && !b.is_tag && (b.name === "main" || b.name === "master")
       );
       if (mainBranch) setBaseBranch(mainBranch.name);
       setHeadBranch(currentBranch);
@@ -342,7 +342,7 @@ export const AiReviewDialog = memo(function AiReviewDialog({
               </div>
             </div>
           ) : (
-            <div className="max-h-[60vh] overflow-y-auto space-y-2 pr-1">
+            <div className="select-text max-h-[60vh] overflow-y-auto space-y-2 pr-1">
               {history.map((review) => (
                 <div
                   key={review.id}

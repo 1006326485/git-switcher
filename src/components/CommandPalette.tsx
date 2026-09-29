@@ -10,6 +10,7 @@ export interface Command {
   label: string;
   category: string;
   shortcut?: string;
+  description?: string;
   action: () => void;
   _needsProject?: boolean;
   _projectAction?: (projectPath: string) => void;
@@ -123,7 +124,8 @@ export const CommandPalette = memo(function CommandPalette({
       commands.filter(
         (c) =>
           c.label.toLowerCase().includes(query.toLowerCase()) ||
-          c.category.toLowerCase().includes(query.toLowerCase())
+          c.category.toLowerCase().includes(query.toLowerCase()) ||
+          (c.description ?? "").toLowerCase().includes(query.toLowerCase())
       ),
     [commands, query]
   );
@@ -295,7 +297,7 @@ export const CommandPalette = memo(function CommandPalette({
       onClick={onClose}
     >
       <div
-        className={`w-full max-w-2xl bg-(--surface-1) rounded-xl shadow-2xl border border-(--border-color) overflow-hidden origin-top ${popoverAnimation}`}
+        className={`select-none w-full max-w-2xl bg-(--surface-1) rounded-xl shadow-2xl border border-(--border-color) overflow-hidden origin-top ${popoverAnimation}`}
         onClick={(e) => e.stopPropagation()}
       >
         <input
@@ -550,9 +552,12 @@ export const CommandPalette = memo(function CommandPalette({
                       setCmdIdx(i);
                     }}
                   >
-                    <span>
+                    <span className="flex-1 min-w-0">
                       <span className="text-gray-400 mr-2">{cmd.category}</span>
                       {cmd.label}
+                      {cmd.description && (
+                        <span className="ml-2 text-xs text-gray-400 truncate">{cmd.description}</span>
+                      )}
                     </span>
                     {cmd.shortcut && (
                       <kbd className="text-xs text-gray-400 bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded">

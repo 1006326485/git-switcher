@@ -13,6 +13,7 @@ import type {
   GitFileEntry,
   GitignoreTemplate,
   GitHook,
+  GitOperationState,
   MergeResult,
   ReviewResult,
   StashInfo,
@@ -44,7 +45,65 @@ import type {
   ImportResult,
   ReflogEntry,
   RemoteInfo,
+  ProjectScript,
+  RunPreset,
+  RunPresetItem,
+  DestructiveOpKind,
+  DestructiveOpRecord,
+  PreOpSnapshot,
 } from "./types";
+import type { TerminalSessionState } from "./terminalTabs";
+
+// ── Undo tracking ─────────────────────────────────────────────────────────
+//
+// Destructive git wrappers capture the pre-op HEAD/branch (refresh_project
+// resolves HEAD the way git rev-parse does) before running, so the UI can
+// offer "undo last operation" once they complete.
+
+export type DestructiveOpListener = (record: DestructiveOpRecord) => void;
+
+let destructiveOpListener: DestructiveOpListener | null = null;
+let undoRecordingEnabled = true;
+let destructiveOpSeq = 0;
+
+export function setDestructiveOpRecorder(listener: DestructiveOpListener | null): void {
+  destructiveOpListener = listener;
+}
+
+/** Run an operation (e.g. an undo itself) without recording a new undo entry. */
+export async function runWithoutUndoRecording<T>(run: () => Promise<T>): Promise<T> {
+  undoRecordingEnabled = false;
+  try {
+    return await run();
+  } finally {
+    undoRecordingEnabled = true;
+  }
+}
+
+async function capturePreOpSnapshot(path: string): Promise<PreOpSnapshot> {
+  try {
+    const detail = await refreshProject(path);
+    const branch = detail.current_branch;
+    return {
+      head: detail.project.last_commit_hash ?? null,
+      branch: branch && !branch.startsWith("(") ? branch : null,
+    };
+  } catch {
+    return { head: null, branch: null };
+  }
+}
+
+async function trackDestructiveOp<T>(
+  kind: DestructiveOpKind,
+  path: string,
+  run: () => Promise<T>
+): Promise<T> {
+  if (!undoRecordingEnabled || !destructiveOpListener) return run();
+  const pre = await capturePreOpSnapshot(path);
+  const result = await run();
+  destructiveOpListener({ id: ++destructiveOpSeq, kind, path, pre, at: Date.now() });
+  return result;
+}
 
 // ── Projects ────────────────────────────────────────────────────────────
 
@@ -95,7 +154,7 @@ export async function bulkImportProjects(paths: string[], groupId: string): Prom
 // ── Git Operations ──────────────────────────────────────────────────────
 
 export async function switchBranch(path: string, branch: string): Promise<ProjectDetail> {
-  return invoke("switch_branch", { path, branch });
+  return trackDestructiveOp("checkout", path, () => invoke("switch_branch", { path, branch }));
 }
 
 export async function refreshProject(path: string): Promise<ProjectDetail> {
@@ -158,8 +217,8 @@ export async function gitCommit(path: string, message: string): Promise<string> 
   return invoke("git_commit", { path, message });
 }
 
-export async function gitPush(path: string, branch?: string): Promise<string> {
-  return invoke("git_push", { path, branch });
+export async function gitPush(path: string, branch?: string, forceWithLease?: boolean): Promise<string> {
+  return invoke("git_push", { path, branch, forceWithLease: forceWithLease ?? false });
 }
 
 export async function gitPull(path: string): Promise<string> {
@@ -217,7 +276,9 @@ export async function deleteBranch(path: string, name: string): Promise<void> {
 }
 
 export async function mergeBranch(path: string, branch: string, strategy?: string): Promise<MergeResult> {
-  return invoke("merge_branch", { path, branch, strategy: strategy || null });
+  return trackDestructiveOp("merge", path, () =>
+    invoke("merge_branch", { path, branch, strategy: strategy || null })
+  );
 }
 
 
@@ -357,11 +418,11 @@ export async function gitInitSubmodules(path: string): Promise<string> {
 // ── Cherry-pick / Rebase ──────────────────────────────────────────────
 
 export async function gitCherryPick(path: string, commitHash: string): Promise<MergeResult> {
-  return invoke("git_cherry_pick", { path, commitHash });
+  return trackDestructiveOp("cherry_pick", path, () => invoke("git_cherry_pick", { path, commitHash }));
 }
 
 export async function gitCherryPickRange(path: string, from: string, to: string): Promise<MergeResult> {
-  return invoke("git_cherry_pick_range", { path, from, to });
+  return trackDestructiveOp("cherry_pick", path, () => invoke("git_cherry_pick_range", { path, from, to }));
 }
 
 // ── Patch Operations ─────────────────────────────────────────────────
@@ -379,23 +440,59 @@ export async function gitApplyPatch(path: string, patchContent: string): Promise
 }
 
 export async function gitSquashCommits(path: string, n: number, message?: string): Promise<MergeResult> {
-  return invoke("git_squash_commits", { path, n, message: message ?? null });
+  return trackDestructiveOp("squash", path, () => invoke("git_squash_commits", { path, n, message: message ?? null }));
 }
 
 export async function gitRebase(path: string, ontoBranch: string): Promise<MergeResult> {
-  return invoke("git_rebase", { path, ontoBranch });
+  return trackDestructiveOp("rebase", path, () => invoke("git_rebase", { path, ontoBranch }));
 }
 
 export async function gitRewordCommit(path: string, commitHash: string, newMessage: string): Promise<string> {
-  return invoke("git_reword_commit", { path, commitHash, newMessage });
+  return trackDestructiveOp("reword", path, () => invoke("git_reword_commit", { path, commitHash, newMessage }));
 }
 
 export async function gitDropCommit(path: string, commitHash: string): Promise<string> {
-  return invoke("git_drop_commit", { path, commitHash });
+  return trackDestructiveOp("drop", path, () => invoke("git_drop_commit", { path, commitHash }));
+}
+
+export async function gitRevertCommit(path: string, commitHash: string): Promise<MergeResult> {
+  return trackDestructiveOp("revert", path, () => invoke("git_revert_commit", { path, commitHash }));
+}
+
+export async function gitAmendCommit(path: string, message?: string): Promise<string> {
+  return trackDestructiveOp("amend", path, () => invoke("git_amend_commit", { path, message: message ?? null }));
+}
+
+export async function gitOperationState(path: string): Promise<GitOperationState> {
+  return invoke("git_operation_state", { path });
+}
+
+export async function gitRebaseContinue(path: string): Promise<string> {
+  return invoke("git_rebase_continue", { path });
+}
+
+export async function gitRebaseSkip(path: string): Promise<string> {
+  return invoke("git_rebase_skip", { path });
+}
+
+export async function gitRebaseAbort(path: string): Promise<string> {
+  return invoke("git_rebase_abort", { path });
+}
+
+export async function gitRevertContinue(path: string): Promise<string> {
+  return invoke("git_revert_continue", { path });
+}
+
+export async function gitRevertAbort(path: string): Promise<string> {
+  return invoke("git_revert_abort", { path });
+}
+
+export async function gitDeleteRemoteBranch(path: string, remote: string, branch: string): Promise<string> {
+  return invoke("git_delete_remote_branch", { path, remote, branch });
 }
 
 export async function gitReset(path: string, target: string, mode: string): Promise<string> {
-  return invoke("git_reset", { path, target, mode });
+  return trackDestructiveOp("reset", path, () => invoke("git_reset", { path, target, mode }));
 }
 
 // ── Batch Operations ────────────────────────────────────────────────────
@@ -492,6 +589,58 @@ export async function getReadmePreview(path: string): Promise<string | null> {
 
 export async function openInTerminal(path: string): Promise<void> {
   return invoke("open_in_terminal", { path });
+}
+
+export async function terminalOpen(
+  cwd: string,
+  cols: number,
+  rows: number,
+  opts: { title?: string; projectTitle?: string; command?: string } = {}
+): Promise<TerminalSessionState> {
+  return invoke("terminal_open", {
+    cwd,
+    cols,
+    rows,
+    title: opts.title,
+    projectTitle: opts.projectTitle,
+    command: opts.command,
+  });
+}
+
+export async function terminalList(): Promise<TerminalSessionState[]> {
+  return invoke("terminal_list");
+}
+
+export async function terminalWrite(id: string, data: string): Promise<void> {
+  return invoke("terminal_write", { id, data });
+}
+
+export async function terminalResize(id: string, cols: number, rows: number): Promise<void> {
+  return invoke("terminal_resize", { id, cols, rows });
+}
+
+export async function terminalClose(id: string): Promise<void> {
+  return invoke("terminal_close", { id });
+}
+
+export async function terminalWindowDismiss(): Promise<void> {
+  return invoke("terminal_window_dismiss");
+}
+
+export async function listProjectScripts(path: string): Promise<ProjectScript[]> {
+  return invoke("list_project_scripts", { path });
+}
+
+export async function createRunPreset(name: string, items: RunPresetItem[]): Promise<RunPreset> {
+  return invoke("create_run_preset", { name, items });
+}
+
+export async function listRunPresets(): Promise<RunPreset[]> {
+  return invoke("list_run_presets");
+}
+
+export async function deleteRunPreset(id: string): Promise<void> {
+  return invoke("delete_run_preset", { id });
 }
 
 export async function openInFinder(path: string): Promise<void> {
@@ -644,8 +793,9 @@ export async function createCustomCommand(
   name: string,
   command: string,
   shortcut?: string,
+  projectPath?: string | null,
 ): Promise<CustomCommand> {
-  return invoke("create_custom_command", { name, command, shortcut });
+  return invoke("create_custom_command", { name, command, shortcut, projectPath });
 }
 
 export async function listCustomCommands(): Promise<CustomCommand[]> {
@@ -740,7 +890,7 @@ export async function gitGetReflog(path: string, maxCount?: number): Promise<Ref
 }
 
 export async function gitCheckoutCommit(path: string, hash: string): Promise<void> {
-  return invoke("git_checkout_commit", { path, hash });
+  return trackDestructiveOp("checkout", path, () => invoke("git_checkout_commit", { path, hash }));
 }
 
 // ── Drag & Drop ────────────────────────────────────────────────────────
@@ -817,3 +967,29 @@ export async function executeTaskWorkspacePlan(plan: TaskWorkspacePlan, continue
 export async function listTaskWorkspaceOutcomes(workspaceId: string): Promise<TaskWorkspaceOutcome[]> { return invoke("list_task_workspace_outcomes", { workspaceId }); }
 
 export async function reorderTaskWorkspaceEntries(workspaceId: string, entryIds: string[]): Promise<TaskWorkspaceDetail> { return invoke("reorder_task_workspace_entries", { workspaceId, entryIds }); }
+
+import type { GitCredential } from "./types";
+
+export async function getGitCredentials(): Promise<GitCredential[]> {
+  return invoke("get_git_credentials");
+}
+
+export async function upsertGitCredential(input: {
+  id: string;
+  project_path: string;
+  remote_url: string;
+  username: string;
+  secret: string;
+}): Promise<void> {
+  return invoke("upsert_git_credential", {
+    id: input.id,
+    projectPath: input.project_path,
+    remoteUrl: input.remote_url,
+    username: input.username,
+    secret: input.secret,
+  });
+}
+
+export async function deleteGitCredential(id: string): Promise<void> {
+  return invoke("delete_git_credential", { id });
+}

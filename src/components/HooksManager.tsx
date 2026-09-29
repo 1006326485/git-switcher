@@ -135,7 +135,7 @@ export const HooksManager = memo(function HooksManager({ path, onSuccess, onErro
                 </div>
                 {viewingHook === hook.name && (
                   <div className="ml-9 rounded border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 overflow-hidden">
-                    <pre className="p-2 text-[11px] font-mono max-h-40 overflow-y-auto whitespace-pre-wrap break-all text-gray-800 dark:text-gray-200">
+                    <pre className="select-text p-2 text-[11px] font-mono max-h-40 overflow-y-auto whitespace-pre-wrap break-all text-gray-800 dark:text-gray-200">
                       {loadingContent ? "Loading..." : hookContent ?? "Empty"}
                     </pre>
                   </div>

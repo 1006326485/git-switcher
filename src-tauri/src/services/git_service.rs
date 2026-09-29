@@ -2,14 +2,15 @@ use git2::{
     build::CheckoutBuilder, BranchType, DiffOptions, IndexAddOption, Repository, Status,
     StatusOptions,
 };
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock, RwLock};
 
 use crate::models::{
     BisectState, BlameLine, BranchCompareResult, BranchHealthItem, BranchHealthReport, BranchInfo,
-    ChangedFileInfo, CommitInfo, FileCommitEntry, FileStatus, GitFileEntry, GitProject, GitStatus,
-    Group, LogEntry, MergeResult, ProjectDetail, ProjectStats, ReflogEntry, RemoteInfo, StashInfo,
-    SubmoduleInfo, TagInfo, WorktreeInfo,
+    ChangedFileInfo, CommitInfo, FileCommitEntry, FileStatus, GitCredential, GitFileEntry,
+    GitProject, GitStatus, Group, LogEntry, MergeResult, ProjectDetail, ProjectStats, ReflogEntry,
+    RemoteInfo, StashInfo, SubmoduleInfo, TagInfo, WorktreeInfo,
 };
 use crate::AppError;
 
@@ -166,6 +167,7 @@ impl GitService {
                                     is_current,
                                     is_remote: false,
                                     is_merged,
+                                    is_tag: false,
                                 });
                             }
                             Ok(None) => log::warn!("Local branch with no UTF-8 name, skipping"),
@@ -189,6 +191,7 @@ impl GitService {
                                     is_current: false,
                                     is_remote: true,
                                     is_merged: false,
+                                    is_tag: false,
                                 });
                             }
                             Ok(None) => log::warn!("Remote branch with no UTF-8 name, skipping"),
@@ -201,6 +204,21 @@ impl GitService {
             Err(e) => log::warn!("Failed to list remote branches: {}", e),
         }
 
+        match repo.tag_names(None) {
+            Ok(tag_names) => {
+                for name in tag_names.iter().flatten() {
+                    branches.push(BranchInfo {
+                        name: name.to_string(),
+                        is_current: false,
+                        is_remote: false,
+                        is_merged: false,
+                        is_tag: true,
+                    });
+                }
+            }
+            Err(e) => log::warn!("Failed to list tags: {}", e),
+        }
+
         branches.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(branches)
     }
@@ -210,6 +228,10 @@ impl GitService {
 
         // If a local branch with this exact name exists, check it out directly
         let is_local = repo.find_branch(branch_name, BranchType::Local).is_ok();
+        let is_tag = !is_local
+            && repo
+                .revparse_single(&format!("refs/tags/{}", branch_name))
+                .is_ok();
 
         if is_local {
             let head_ref = format!("refs/heads/{}", branch_name);
@@ -220,7 +242,7 @@ impl GitService {
                 .map_err(|e| AppError::Git(format!("Failed to checkout tree: {}", e)))?;
             repo.set_head(&head_ref)
                 .map_err(|e| AppError::Git(format!("Failed to set HEAD: {}", e)))?;
-        } else if branch_name.contains('/') {
+        } else if !is_tag && branch_name.contains('/') {
             // Remote branch — use CLI for auto-stash/pop behavior
             let local_name = branch_name
                 .find('/')
@@ -248,22 +270,16 @@ impl GitService {
             };
 
             // Use git CLI for the switch (handles remote tracking branches correctly)
-            let output = std::process::Command::new("git")
-                .args(["checkout", local_name])
-                .current_dir(path)
-                .output()
-                .map_err(|e| AppError::Git(format!("Failed to switch branch: {}", e)))?;
+            let checkout = Self::run_cli(path, &["checkout", local_name], 120, "git checkout");
 
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
+            if let Err(e) = checkout {
                 // If checkout failed and we stashed, try to pop the stash back
                 if stashed {
                     let _ = Self::stash_pop(path);
                 }
                 return Err(AppError::Git(format!(
                     "Failed to switch to '{}': {}",
-                    branch_name,
-                    stderr.trim()
+                    branch_name, e
                 )));
             }
 
@@ -274,8 +290,13 @@ impl GitService {
                 }
             }
         } else {
+            let spec = if is_tag {
+                format!("refs/tags/{}", branch_name)
+            } else {
+                branch_name.to_string()
+            };
             let (object, reference) = repo
-                .revparse_ext(branch_name)
+                .revparse_ext(&spec)
                 .map_err(|e| AppError::Git(format!("Branch '{}' not found: {}", branch_name, e)))?;
 
             repo.checkout_tree(&object, None)
@@ -750,27 +771,31 @@ impl GitService {
     pub fn push(
         path: &str,
         branch: Option<&str>,
+        force_with_lease: bool,
         cancel_flag: Option<Arc<AtomicBool>>,
     ) -> Result<String, AppError> {
         let mut cmd = Self::git_cmd(path);
         cmd.arg("push");
+        if force_with_lease {
+            cmd.arg("--force-with-lease");
+        }
         if let Some(b) = branch {
             // Use git's configured upstream (don't hardcode "origin")
             cmd.arg(b);
         }
-        Self::run_with_timeout(cmd, 120, cancel_flag)
+        Self::run_with_timeout(path, "git push", cmd, 120, cancel_flag)
     }
 
     pub fn pull(path: &str, cancel_flag: Option<Arc<AtomicBool>>) -> Result<String, AppError> {
         let mut cmd = Self::git_cmd(path);
         cmd.args(["pull", "--rebase"]);
-        Self::run_with_timeout(cmd, 120, cancel_flag)
+        Self::run_with_timeout(path, "git pull", cmd, 120, cancel_flag)
     }
 
     pub fn fetch(path: &str, cancel_flag: Option<Arc<AtomicBool>>) -> Result<String, AppError> {
         let mut cmd = Self::git_cmd(path);
         cmd.arg("fetch").arg("--all");
-        Self::run_with_timeout(cmd, 120, cancel_flag)
+        Self::run_with_timeout(path, "git fetch", cmd, 120, cancel_flag)
     }
 
     pub fn stash(
@@ -888,6 +913,85 @@ impl GitService {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 
+    // ── Git Credentials (HTTPS auth injection via GIT_ASKPASS) ───────────
+
+    /// In-memory credential cache keyed by remote URL. The command layer reloads
+    /// this from SQLite whenever stored credentials change; the git subprocess
+    /// paths read from it so no extra DB round-trip happens per call.
+    fn credential_cache() -> &'static RwLock<HashMap<String, GitCredential>> {
+        static CACHE: OnceLock<RwLock<HashMap<String, GitCredential>>> = OnceLock::new();
+        CACHE.get_or_init(|| RwLock::new(HashMap::new()))
+    }
+
+    /// Replace the in-memory credential cache (keyed by remote URL).
+    pub fn set_git_credentials(creds: Vec<GitCredential>) {
+        let mut map = Self::credential_cache()
+            .write()
+            .unwrap_or_else(|p| p.into_inner());
+        map.clear();
+        for c in creds {
+            map.insert(c.remote_url.clone(), c);
+        }
+    }
+
+    /// Find a stored credential matching one of the repository's remotes.
+    fn lookup_credential_for_repo(path: &str) -> Option<GitCredential> {
+        // Skip the repo probe entirely when nothing is stored.
+        if Self::credential_cache()
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .is_empty()
+        {
+            return None;
+        }
+        let repo = Repository::open(path).ok()?;
+        let remotes = repo.remotes().ok()?;
+        let map = Self::credential_cache()
+            .read()
+            .unwrap_or_else(|p| p.into_inner());
+        for name in remotes.iter().flatten() {
+            if let Ok(remote) = repo.find_remote(name) {
+                if let Some(url) = remote.url() {
+                    if let Some(cred) = map.get(url) {
+                        return Some(cred.clone());
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Lazily write a private GIT_ASKPASS helper script once. The script reads the
+    /// credential from env vars so the secret never lands in the script file.
+    fn askpass_script() -> Option<&'static std::path::Path> {
+        static SCRIPT: OnceLock<Option<std::path::PathBuf>> = OnceLock::new();
+        SCRIPT
+            .get_or_init(|| {
+                use std::io::Write;
+                let mut file = tempfile::Builder::new()
+                    .prefix("gs-askpass-")
+                    .suffix(".sh")
+                    .tempfile()
+                    .ok()?;
+                file.write_all(
+                    b"#!/bin/sh\ncase \"$1\" in\n  *[Uu]sername*) printf '%s' \"$GIT_CREDS_USERNAME\" ;;\n  *) printf '%s' \"$GIT_CREDS_SECRET\" ;;\nesac\n",
+                )
+                .ok()?;
+                file.flush().ok()?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    file.as_file()
+                        .set_permissions(std::fs::Permissions::from_mode(0o700))
+                        .ok()?;
+                }
+                // Keep the file alive for the process lifetime.
+                let (_f, path) = file.keep().ok()?;
+                Some(path)
+            })
+            .as_deref()
+    }
+
     /// Build a git Command with env vars that prevent interactive prompts from hanging.
     fn git_cmd(path: &str) -> std::process::Command {
         let mut cmd = std::process::Command::new("git");
@@ -899,12 +1003,24 @@ impl GitService {
                 "GIT_SSH_COMMAND",
                 "ssh -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new",
             );
+        // If a credential is stored for this repo's remote, supply it non-interactively
+        // via GIT_ASKPASS (works with GIT_TERMINAL_PROMPT=0). SSH keeps BatchMode above.
+        if let Some(cred) = Self::lookup_credential_for_repo(path) {
+            if let Some(script) = Self::askpass_script() {
+                cmd.env("GIT_ASKPASS", script);
+                cmd.env("GIT_CREDS_USERNAME", &cred.username);
+                cmd.env("GIT_CREDS_SECRET", &cred.secret);
+            }
+        }
         cmd
     }
 
     /// Run a Command with a timeout (seconds). Kills the process if it doesn't finish.
     /// If a cancel_flag is provided, checks it during polling and kills the process if set to false.
+    /// `op` names the operation (e.g. "git push") so failures carry context instead of raw stderr.
     fn run_with_timeout(
+        path: &str,
+        op: &str,
         mut cmd: std::process::Command,
         timeout_secs: u64,
         cancel_flag: Option<Arc<AtomicBool>>,
@@ -912,7 +1028,10 @@ impl GitService {
         let mut child = cmd
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .spawn()?;
+            .spawn()
+            .map_err(|e| {
+                AppError::git_with_context(op, path, format!("could not start git: {}", e))
+            })?;
 
         // Read stdout/stderr on separate threads to prevent pipe deadlock
         let stdout_handle = child.stdout.take().map(|mut o| {
@@ -952,13 +1071,22 @@ impl GitService {
                     if start.elapsed() > timeout {
                         let _ = child.kill();
                         let _ = child.wait();
-                        return Err(AppError::Git(format!("Timed out after {}s", timeout_secs)));
+                        return Err(AppError::git_with_context(
+                            op,
+                            path,
+                            format!("timed out after {}s", timeout_secs),
+                        ));
                     }
                     std::thread::sleep(std::time::Duration::from_millis(100));
                 }
                 Err(e) => {
                     let _ = child.kill();
-                    return Err(AppError::Io(e));
+                    let _ = child.wait();
+                    return Err(AppError::git_with_context(
+                        op,
+                        path,
+                        format!("failed while waiting for git: {}", e),
+                    ));
                 }
             }
         };
@@ -983,8 +1111,30 @@ impl GitService {
             } else {
                 stderr
             };
-            Err(AppError::Git(err))
+            let detail = if err.trim().is_empty() {
+                match status.code() {
+                    Some(code) => format!("git exited with status {}", code),
+                    None => "git was terminated by a signal".to_string(),
+                }
+            } else {
+                err
+            };
+            Err(AppError::git_with_context(op, path, detail))
         }
+    }
+
+    /// Run a git CLI invocation with the standard anti-hang environment and a timeout.
+    /// Shared by internal helpers and command handlers so every call gets the same
+    /// cancellation/timeout semantics and contextual errors.
+    pub(crate) fn run_cli(
+        path: &str,
+        args: &[&str],
+        timeout_secs: u64,
+        op: &str,
+    ) -> Result<String, AppError> {
+        let mut cmd = Self::git_cmd(path);
+        cmd.args(args);
+        Self::run_with_timeout(path, op, cmd, timeout_secs, None)
     }
 
     // ── Branch Management ───────────────────────────────────────────────
@@ -1546,24 +1696,33 @@ impl GitService {
     pub fn rebase(path: &str, onto_branch: &str) -> Result<MergeResult, AppError> {
         let mut cmd = Self::git_cmd(path);
         cmd.args(["rebase", onto_branch]);
-        match Self::run_with_timeout(cmd, 120, None) {
+        match Self::run_with_timeout(path, "git rebase", cmd, 120, None) {
             Ok(output) => Ok(MergeResult {
                 success: true,
                 message: output.trim().to_string(),
                 conflicts: vec![],
             }),
             Err(e) => {
-                // Collect conflicting files BEFORE aborting (abort clears them)
                 let conflicts = Self::collect_unmerged_files(path).unwrap_or_default();
-
-                // Abort to restore repo to a clean state
-                let mut abort_cmd = Self::git_cmd(path);
-                abort_cmd.args(["rebase", "--abort"]);
-                let _ = Self::run_with_timeout(abort_cmd, 30, None);
-
+                if conflicts.is_empty() {
+                    // Failed without stopping at conflicts — nothing to resolve, so
+                    // clean up any half-started state instead of leaving it behind.
+                    let mut abort_cmd = Self::git_cmd(path);
+                    abort_cmd.args(["rebase", "--abort"]);
+                    let _ = Self::run_with_timeout(path, "git rebase --abort", abort_cmd, 30, None);
+                    return Ok(MergeResult {
+                        success: false,
+                        message: format!("Rebase onto '{}' failed: {}", onto_branch, e),
+                        conflicts,
+                    });
+                }
                 Ok(MergeResult {
                     success: false,
-                    message: format!("Rebase onto '{}' failed: {}", onto_branch, e),
+                    message: format!(
+                        "Rebase onto '{}' stopped at {} conflict(s) — resolve them, then continue, skip or abort",
+                        onto_branch,
+                        conflicts.len()
+                    ),
                     conflicts,
                 })
             }
@@ -1767,7 +1926,7 @@ impl GitService {
     }
 
     pub fn push_all_projects(paths: &[String]) -> Vec<(String, Result<String, AppError>)> {
-        Self::run_batch(paths, |p| Self::push(&p, None, None))
+        Self::run_batch(paths, |p| Self::push(&p, None, false, None))
     }
 
     pub fn sync_all_projects(paths: &[String]) -> Vec<(String, Result<String, AppError>)> {
@@ -1780,7 +1939,7 @@ impl GitService {
                 let msg = Self::pull(&p, None)?;
                 Ok(format!("Pulled: {}", msg))
             } else if status.ahead > 0 {
-                let msg = Self::push(&p, None, None)?;
+                let msg = Self::push(&p, None, false, None)?;
                 Ok(format!("Pushed: {}", msg))
             } else {
                 Ok("Up to date".to_string())
@@ -2461,18 +2620,15 @@ impl GitService {
         Ok(files)
     }
 
+    /// Run a git CLI subcommand with the shared anti-hang environment, timeout and
+    /// contextual errors. Returns trimmed stdout (or stderr when stdout is empty).
     fn run_git_command(path: &str, args: &[&str]) -> Result<String, AppError> {
-        let output = std::process::Command::new("git")
-            .current_dir(path)
-            .args(args)
-            .output()
-            .map_err(|e| AppError::Git(format!("Failed to run git: {}", e)))?;
-        if output.status.success() {
-            Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-        } else {
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            Err(AppError::Git(format!("Git error: {}", stderr)))
-        }
+        let op = match args.first() {
+            Some(sub) => format!("git {}", sub),
+            None => "git".to_string(),
+        };
+        let output = Self::run_cli(path, args, 120, &op)?;
+        Ok(output.trim().to_string())
     }
 
     fn parse_bisect_output(output: &str) -> BisectState {
@@ -2532,22 +2688,31 @@ impl GitService {
         Ok(output)
     }
 
-    pub fn check_patch(path: &str, patch_content: &str) -> Result<String, AppError> {
-        // Write patch to a temp file and run git apply --check
-        let tmp = std::env::temp_dir().join(format!("git-switcher-{}.patch", std::process::id()));
-        std::fs::write(&tmp, patch_content)
+    /// Write patch content to a private, uniquely-named temp file (no predictable
+    /// name, no symlink/overwrite window) and return it for git to consume.
+    fn write_patch_tmpfile(patch_content: &str) -> Result<tempfile::NamedTempFile, AppError> {
+        use std::io::Write as _;
+        let mut tmp = tempfile::NamedTempFile::new()
+            .map_err(|e| AppError::Git(format!("Failed to create temp patch file: {}", e)))?;
+        tmp.write_all(patch_content.as_bytes())
             .map_err(|e| AppError::Git(format!("Failed to write temp patch: {}", e)))?;
-        let result = Self::run_git_command(path, &["apply", "--check", &tmp.to_string_lossy()]);
-        let _ = std::fs::remove_file(&tmp);
+        Ok(tmp)
+    }
+
+    pub fn check_patch(path: &str, patch_content: &str) -> Result<String, AppError> {
+        // Write patch to a private temp file and run git apply --check
+        let tmp = Self::write_patch_tmpfile(patch_content)?;
+        let tmp_path = tmp.path().to_string_lossy().to_string();
+        let result = Self::run_git_command(path, &["apply", "--check", &tmp_path]);
+        drop(tmp); // removes the temp file
         result
     }
 
     pub fn apply_patch(path: &str, patch_content: &str) -> Result<String, AppError> {
-        let tmp = std::env::temp_dir().join(format!("git-switcher-{}.patch", std::process::id()));
-        std::fs::write(&tmp, patch_content)
-            .map_err(|e| AppError::Git(format!("Failed to write temp patch: {}", e)))?;
-        let result = Self::run_git_command(path, &["apply", &tmp.to_string_lossy()]);
-        let _ = std::fs::remove_file(&tmp);
+        let tmp = Self::write_patch_tmpfile(patch_content)?;
+        let tmp_path = tmp.path().to_string_lossy().to_string();
+        let result = Self::run_git_command(path, &["apply", &tmp_path]);
+        drop(tmp); // removes the temp file
         match result {
             Ok(_) => Ok("Patch applied successfully".to_string()),
             Err(e) => Err(e),
@@ -2972,20 +3137,158 @@ impl GitService {
         })
     }
 
-    /// Shared helper: run an interactive rebase on `commit_hash` with automated editors.
-    /// `seq_editor_script` is passed to `perl -i -pe` as the GIT_SEQUENCE_EDITOR.
-    /// `git_editor` is set as GIT_EDITOR (defaults to "true" = no-op if None).
-    fn run_interactive_rebase(
+    /// Refuse history rewrites while another Git operation is mid-flight.
+    fn ensure_clean_state(repo: &Repository) -> Result<(), AppError> {
+        match repo.state() {
+            git2::RepositoryState::Clean => Ok(()),
+            _ => Err(AppError::Git(
+                "Another Git operation (merge/rebase/cherry-pick) is in progress — finish or abort it first"
+                    .to_string(),
+            )),
+        }
+    }
+
+    /// History rewrites only make sense for commits reachable from HEAD.
+    fn ensure_ancestor(
+        repo: &Repository,
+        commit: git2::Oid,
+        head: git2::Oid,
+        commit_hash: &str,
+    ) -> Result<(), AppError> {
+        let reachable = repo
+            .graph_descendant_of(head, commit)
+            .map_err(|e| AppError::Git(format!("Ancestry check failed: {}", e)))?;
+        if reachable {
+            Ok(())
+        } else {
+            Err(AppError::Git(format!(
+                "Commit {} is not reachable from HEAD",
+                commit_hash
+            )))
+        }
+    }
+
+    /// Replay every commit in `root..HEAD` on top of `new_root`, preserving trees,
+    /// author/committer signatures and messages verbatim. Parents pointing at a
+    /// rewritten commit are remapped; `new_root == None` removes `root` from the
+    /// chain entirely (dropping the initial commit orphans its descendants, like
+    /// `git rebase` does). Moves HEAD to the new tip and returns it.
+    fn replay_history(
+        repo: &Repository,
+        root: git2::Oid,
+        new_root: Option<git2::Oid>,
+    ) -> Result<git2::Oid, AppError> {
+        let detached = repo
+            .head_detached()
+            .map_err(|e| AppError::Git(format!("HEAD error: {}", e)))?;
+        let head_refname = if detached {
+            None
+        } else {
+            let head = repo
+                .head()
+                .map_err(|e| AppError::Git(format!("HEAD error: {}", e)))?;
+            Some(
+                head.name()
+                    .ok_or_else(|| AppError::Git("HEAD has no refname".to_string()))?
+                    .to_string(),
+            )
+        };
+
+        let mut revwalk = repo
+            .revwalk()
+            .map_err(|e| AppError::Git(format!("Revwalk error: {}", e)))?;
+        revwalk
+            .push_head()
+            .map_err(|e| AppError::Git(format!("Revwalk push error: {}", e)))?;
+        revwalk
+            .hide(root)
+            .map_err(|e| AppError::Git(format!("Revwalk hide error: {}", e)))?;
+        // Oldest first, so every parent is rewritten before its children.
+        revwalk
+            .set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::REVERSE)
+            .ok();
+
+        let mut rewritten: std::collections::HashMap<git2::Oid, Option<git2::Oid>> =
+            std::collections::HashMap::new();
+        rewritten.insert(root, new_root);
+
+        let mut tip = new_root;
+        for oid in revwalk {
+            let oid = oid.map_err(|e| AppError::Git(format!("Revwalk error: {}", e)))?;
+            let commit = repo
+                .find_commit(oid)
+                .map_err(|e| AppError::Git(format!("Commit error: {}", e)))?;
+
+            let mut parents: Vec<git2::Oid> = Vec::with_capacity(commit.parent_count());
+            for parent_id in commit.parent_ids() {
+                match rewritten.get(&parent_id) {
+                    Some(Some(new_parent)) => parents.push(*new_parent),
+                    Some(None) => {} // parent was dropped from history
+                    None => parents.push(parent_id),
+                }
+            }
+            let mut parent_commits = Vec::with_capacity(parents.len());
+            for parent_id in &parents {
+                parent_commits.push(
+                    repo.find_commit(*parent_id)
+                        .map_err(|e| AppError::Git(format!("Parent commit error: {}", e)))?,
+                );
+            }
+            let parent_refs: Vec<&git2::Commit> = parent_commits.iter().collect();
+
+            let tree = commit
+                .tree()
+                .map_err(|e| AppError::Git(format!("Tree error: {}", e)))?;
+            let message = commit.message().unwrap_or("").to_string();
+            let new_oid = repo
+                .commit(
+                    None,
+                    &commit.author(),
+                    &commit.committer(),
+                    &message,
+                    &tree,
+                    &parent_refs,
+                )
+                .map_err(|e| AppError::Git(format!("Failed to rewrite commit: {}", e)))?;
+
+            rewritten.insert(oid, Some(new_oid));
+            tip = Some(new_oid);
+        }
+
+        let tip = tip.ok_or_else(|| AppError::Git("Nothing to rewrite".to_string()))?;
+
+        if detached {
+            repo.set_head_detached(tip)
+                .map_err(|e| AppError::Git(format!("Failed to update HEAD: {}", e)))?;
+        } else if let Some(refname) = head_refname {
+            repo.reference(&refname, tip, true, "history rewritten by Git Switcher")
+                .map_err(|e| AppError::Git(format!("Failed to update {}: {}", refname, e)))?;
+            repo.set_head(&refname)
+                .map_err(|e| AppError::Git(format!("Failed to set HEAD: {}", e)))?;
+        }
+
+        Ok(tip)
+    }
+
+    /// Rewrite the commit message of a specific commit, replaying its descendants
+    /// on top. Fully cross-platform (pure git2 — no perl/shell editor) and keeps
+    /// the new message byte-for-byte, including `$`, `@`, quotes and backslashes.
+    pub fn reword_commit(
         path: &str,
         commit_hash: &str,
-        seq_editor_script: &str,
-        git_editor: Option<&str>,
+        new_message: &str,
     ) -> Result<String, AppError> {
+        if new_message.trim().is_empty() {
+            return Err(AppError::Git("Commit message cannot be empty".to_string()));
+        }
+
         let repo = Self::open_repo(path)?;
+        Self::ensure_clean_state(&repo)?;
 
         let oid = git2::Oid::from_str(commit_hash)
             .map_err(|_| AppError::Git(format!("Invalid commit hash: {}", commit_hash)))?;
-        repo.find_commit(oid)
+        let target = repo
+            .find_commit(oid)
             .map_err(|_| AppError::Git(format!("Commit not found: {}", commit_hash)))?;
 
         let head = repo
@@ -2997,69 +3300,37 @@ impl GitService {
 
         if oid == head_oid {
             return Err(AppError::Git(
-                "Cannot rebase HEAD commit — use amend instead".to_string(),
+                "Cannot reword HEAD commit — use amend instead".to_string(),
             ));
         }
+        Self::ensure_ancestor(&repo, oid, head_oid, commit_hash)?;
 
-        // Count commits between target (exclusive) and HEAD (inclusive) → HEAD~(count+1) is parent of target
-        let range = format!("{}..{}", commit_hash, head_oid);
-        let count_output = Self::run_with_timeout(
-            {
-                let mut cmd = Self::git_cmd(path);
-                cmd.args(["rev-list", &range, "--count"]);
-                cmd
-            },
-            10,
-            None,
-        )?;
-        let count: usize = count_output
-            .trim()
-            .parse()
-            .map_err(|_| AppError::Git("Failed to parse commit count".to_string()))?;
-        let rebase_target = format!("HEAD~{}", count + 1);
+        // Recreate the target commit with the new message, keeping tree and parents.
+        let mut parents = Vec::with_capacity(target.parent_count());
+        for i in 0..target.parent_count() {
+            parents.push(
+                target
+                    .parent(i)
+                    .map_err(|e| AppError::Git(format!("Parent error: {}", e)))?,
+            );
+        }
+        let parent_refs: Vec<&git2::Commit> = parents.iter().collect();
+        let tree = target
+            .tree()
+            .map_err(|e| AppError::Git(format!("Tree error: {}", e)))?;
+        let new_root = repo
+            .commit(
+                None,
+                &target.author(),
+                &target.committer(),
+                new_message,
+                &tree,
+                &parent_refs,
+            )
+            .map_err(|e| AppError::Git(format!("Failed to rewrite commit message: {}", e)))?;
 
-        let mut cmd = Self::git_cmd(path);
-        cmd.arg("rebase").arg("-i").arg(&rebase_target);
-        cmd.env(
-            "GIT_SEQUENCE_EDITOR",
-            format!("perl -i -pe '{}'", seq_editor_script),
-        );
-        cmd.env("GIT_EDITOR", git_editor.unwrap_or("true"));
+        Self::replay_history(&repo, oid, Some(new_root))?;
 
-        Self::run_with_timeout(cmd, 60, None)
-    }
-
-    /// Rewrite the commit message of a specific commit via interactive rebase.
-    pub fn reword_commit(
-        path: &str,
-        commit_hash: &str,
-        new_message: &str,
-    ) -> Result<String, AppError> {
-        let pid = std::process::id();
-        let msg_editor_path = std::env::temp_dir().join(format!("gs-msg-{}", pid));
-
-        // Sequence editor: change `pick <hash>` to `reword <hash>` (safe for inline perl -pe)
-        let seq_script = format!("s/^pick ({})/reword $1/", commit_hash);
-
-        // Message editor: overwrite the file with the new message
-        // Perl reads the script from the file; `shift(@ARGV)` gets the message-file path
-        let perl_msg = format!(
-            "open(F,\">\",shift(@ARGV)) or die;binmode(F,\":utf8\");print F \"{}\";close F",
-            new_message.replace('\\', "\\\\").replace('"', "\\\"")
-        );
-        std::fs::write(&msg_editor_path, &perl_msg)
-            .map_err(|e| AppError::Git(format!("Failed to write msg editor: {}", e)))?;
-
-        let result = Self::run_interactive_rebase(
-            path,
-            commit_hash,
-            &seq_script,
-            Some(&format!("perl {}", msg_editor_path.display())),
-        );
-
-        let _ = std::fs::remove_file(&msg_editor_path);
-
-        result?;
         Ok(format!(
             "Reworded commit {}: {}",
             &commit_hash[..7.min(commit_hash.len())],
@@ -3067,14 +3338,305 @@ impl GitService {
         ))
     }
 
-    /// Drop (remove) a specific commit from history via interactive rebase.
+    /// Drop (remove) a specific commit from history, replaying its descendants on
+    /// top of the dropped commit's parent. Fully cross-platform (pure git2).
     pub fn drop_commit(path: &str, commit_hash: &str) -> Result<String, AppError> {
-        let seq_editor = format!("s/^pick ({})/drop $1/", commit_hash);
+        let repo = Self::open_repo(path)?;
+        Self::ensure_clean_state(&repo)?;
 
-        Self::run_interactive_rebase(path, commit_hash, &seq_editor, None)?;
+        let oid = git2::Oid::from_str(commit_hash)
+            .map_err(|_| AppError::Git(format!("Invalid commit hash: {}", commit_hash)))?;
+        let target = repo
+            .find_commit(oid)
+            .map_err(|_| AppError::Git(format!("Commit not found: {}", commit_hash)))?;
+
+        let head = repo
+            .head()
+            .map_err(|e| AppError::Git(format!("HEAD error: {}", e)))?;
+        let head_oid = head
+            .target()
+            .ok_or_else(|| AppError::Git("HEAD has no target".to_string()))?;
+
+        if oid == head_oid {
+            return Err(AppError::Git(
+                "Cannot drop HEAD commit — use reset or amend instead".to_string(),
+            ));
+        }
+        Self::ensure_ancestor(&repo, oid, head_oid, commit_hash)?;
+
+        // Dropping the initial commit orphans its descendants (same as `git rebase`).
+        let new_root = target.parent(0).ok().map(|parent| parent.id());
+
+        Self::replay_history(&repo, oid, new_root)?;
+
         Ok(format!(
             "Dropped commit {}",
             &commit_hash[..7.min(commit_hash.len())]
+        ))
+    }
+
+    // ── Amend / Revert / In-progress recovery ────────────────────────────
+
+    /// Amend the HEAD commit with the staged tree and/or a new message, keeping
+    /// the original author and parents (like `git commit --amend`).
+    pub fn amend_commit(path: &str, message: Option<&str>) -> Result<String, AppError> {
+        if let Some(m) = message {
+            if m.trim().is_empty() {
+                return Err(AppError::Git("Commit message cannot be empty".to_string()));
+            }
+        }
+        let repo = Self::open_repo(path)?;
+        Self::ensure_clean_state(&repo)?;
+
+        let head = repo.head().map_err(|_| {
+            AppError::Git("Nothing to amend — the repository has no commits".to_string())
+        })?;
+        let head_oid = head
+            .target()
+            .ok_or_else(|| AppError::Git("HEAD has no target".to_string()))?;
+        let head_commit = repo
+            .find_commit(head_oid)
+            .map_err(|e| AppError::Git(format!("Commit error: {}", e)))?;
+
+        let mut index = repo
+            .index()
+            .map_err(|e| AppError::Git(format!("Failed to get index: {}", e)))?;
+        let tree_id = index
+            .write_tree()
+            .map_err(|e| AppError::Git(format!("Failed to write tree: {}", e)))?;
+
+        if message.is_none() && tree_id == head_commit.tree_id() {
+            return Err(AppError::Git(
+                "Nothing to amend — stage changes or provide a new message".to_string(),
+            ));
+        }
+
+        let tree = repo
+            .find_tree(tree_id)
+            .map_err(|e| AppError::Git(format!("Failed to find tree: {}", e)))?;
+        let new_message = message
+            .map(str::to_string)
+            .unwrap_or_else(|| head_commit.message().unwrap_or("").to_string());
+
+        let mut parents = Vec::with_capacity(head_commit.parent_count());
+        for i in 0..head_commit.parent_count() {
+            parents.push(
+                head_commit
+                    .parent(i)
+                    .map_err(|e| AppError::Git(format!("Parent error: {}", e)))?,
+            );
+        }
+        let parent_refs: Vec<&git2::Commit> = parents.iter().collect();
+
+        let committer = Self::get_signature(&repo)?;
+        let new_oid = repo
+            .commit(
+                None,
+                &head_commit.author(),
+                &committer,
+                &new_message,
+                &tree,
+                &parent_refs,
+            )
+            .map_err(|e| AppError::Git(format!("Failed to amend commit: {}", e)))?;
+
+        // Move HEAD onto the amended commit (update_ref can't be used because the
+        // original HEAD commit is not the new commit's parent).
+        let detached = repo
+            .head_detached()
+            .map_err(|e| AppError::Git(format!("HEAD error: {}", e)))?;
+        if detached {
+            repo.set_head_detached(new_oid)
+                .map_err(|e| AppError::Git(format!("Failed to update HEAD: {}", e)))?;
+        } else {
+            let refname = head
+                .name()
+                .ok_or_else(|| AppError::Git("HEAD has no refname".to_string()))?
+                .to_string();
+            repo.reference(&refname, new_oid, true, "amended by Git Switcher")
+                .map_err(|e| AppError::Git(format!("Failed to update {}: {}", refname, e)))?;
+            repo.set_head(&refname)
+                .map_err(|e| AppError::Git(format!("Failed to set HEAD: {}", e)))?;
+        }
+
+        Ok(format!(
+            "Amended commit {}: {}",
+            &new_oid.to_string()[..7],
+            new_message.lines().next().unwrap_or("")
+        ))
+    }
+
+    /// Revert a commit by creating a new commit that undoes its changes.
+    /// Conflicts leave the revert in progress for `continue_revert`/`abort_revert`.
+    pub fn revert_commit(path: &str, commit_hash: &str) -> Result<MergeResult, AppError> {
+        {
+            let repo = Self::open_repo(path)?;
+            Self::ensure_clean_state(&repo)?;
+
+            let oid = git2::Oid::from_str(commit_hash)
+                .map_err(|_| AppError::Git(format!("Invalid commit hash: {}", commit_hash)))?;
+            let target = repo
+                .find_commit(oid)
+                .map_err(|_| AppError::Git(format!("Commit not found: {}", commit_hash)))?;
+            if target.parent_count() > 1 {
+                return Err(AppError::Git(format!(
+                    "Commit {} is a merge commit — revert it from the command line with --mainline",
+                    &commit_hash[..7.min(commit_hash.len())]
+                )));
+            }
+        }
+
+        let short = &commit_hash[..7.min(commit_hash.len())];
+        match Self::run_cli(
+            path,
+            &["revert", "--no-edit", commit_hash],
+            120,
+            "git revert",
+        ) {
+            Ok(output) => Ok(MergeResult {
+                success: true,
+                message: output.trim().to_string(),
+                conflicts: vec![],
+            }),
+            Err(e) => {
+                let conflicts = Self::collect_unmerged_files(path).unwrap_or_default();
+                if conflicts.is_empty() {
+                    return Err(AppError::Git(format!("Revert of {} failed: {}", short, e)));
+                }
+                Ok(MergeResult {
+                    success: false,
+                    message: format!(
+                        "Revert of {} stopped at {} conflict(s) — resolve them, then continue or abort",
+                        short,
+                        conflicts.len()
+                    ),
+                    conflicts,
+                })
+            }
+        }
+    }
+
+    /// Coarse repository state used by the UI to offer continue/skip/abort.
+    pub fn operation_state(path: &str) -> Result<String, AppError> {
+        let repo = Self::open_repo(path)?;
+        let state = match repo.state() {
+            git2::RepositoryState::Clean => "clean",
+            git2::RepositoryState::Merge => "merge",
+            git2::RepositoryState::Revert | git2::RepositoryState::RevertSequence => "revert",
+            git2::RepositoryState::CherryPick | git2::RepositoryState::CherryPickSequence => {
+                "cherry_pick"
+            }
+            git2::RepositoryState::Bisect => "bisect",
+            git2::RepositoryState::Rebase
+            | git2::RepositoryState::RebaseInteractive
+            | git2::RepositoryState::RebaseMerge => "rebase",
+            git2::RepositoryState::ApplyMailbox | git2::RepositoryState::ApplyMailboxOrRebase => {
+                "am"
+            }
+        };
+        Ok(state.to_string())
+    }
+
+    fn ensure_operation_state(path: &str, expected: &[&str], op: &str) -> Result<(), AppError> {
+        let state = Self::operation_state(path)?;
+        if expected.contains(&state.as_str()) {
+            Ok(())
+        } else {
+            Err(AppError::Git(format!(
+                "Cannot {} — no {} in progress (repository state: {})",
+                op, expected[0], state
+            )))
+        }
+    }
+
+    fn ensure_resolved(path: &str, op: &str) -> Result<(), AppError> {
+        let conflicts = Self::collect_unmerged_files(path).unwrap_or_default();
+        if conflicts.is_empty() {
+            Ok(())
+        } else {
+            Err(AppError::Git(format!(
+                "Cannot {} — resolve these files first: {}",
+                op,
+                conflicts.join(", ")
+            )))
+        }
+    }
+
+    /// Run a git command that would otherwise open an editor (never hang the app).
+    fn run_cli_no_editor(
+        path: &str,
+        args: &[&str],
+        timeout_secs: u64,
+        op: &str,
+    ) -> Result<String, AppError> {
+        let mut cmd = Self::git_cmd(path);
+        cmd.args(args)
+            .env("GIT_EDITOR", "true")
+            .env("GIT_SEQUENCE_EDITOR", "true");
+        Self::run_with_timeout(path, op, cmd, timeout_secs, None)
+    }
+
+    pub fn continue_rebase(path: &str) -> Result<String, AppError> {
+        Self::ensure_operation_state(path, &["rebase"], "continue the rebase")?;
+        Self::ensure_resolved(path, "continue the rebase")?;
+        Self::run_cli_no_editor(
+            path,
+            &["rebase", "--continue"],
+            120,
+            "git rebase --continue",
+        )
+    }
+
+    pub fn skip_rebase(path: &str) -> Result<String, AppError> {
+        Self::ensure_operation_state(path, &["rebase"], "skip this commit")?;
+        Self::run_cli_no_editor(path, &["rebase", "--skip"], 120, "git rebase --skip")
+    }
+
+    pub fn abort_rebase(path: &str) -> Result<String, AppError> {
+        Self::ensure_operation_state(path, &["rebase"], "abort the rebase")?;
+        Self::run_cli_no_editor(path, &["rebase", "--abort"], 120, "git rebase --abort")
+    }
+
+    pub fn continue_revert(path: &str) -> Result<String, AppError> {
+        Self::ensure_operation_state(path, &["revert"], "continue the revert")?;
+        Self::ensure_resolved(path, "continue the revert")?;
+        Self::run_cli_no_editor(
+            path,
+            &["revert", "--continue"],
+            120,
+            "git revert --continue",
+        )
+    }
+
+    pub fn abort_revert(path: &str) -> Result<String, AppError> {
+        Self::ensure_operation_state(path, &["revert"], "abort the revert")?;
+        Self::run_cli_no_editor(path, &["revert", "--abort"], 120, "git revert --abort")
+    }
+
+    pub fn delete_remote_branch(
+        path: &str,
+        remote: &str,
+        branch: &str,
+    ) -> Result<String, AppError> {
+        let remote = remote.trim();
+        let branch = branch.trim();
+        if remote.is_empty() || branch.is_empty() {
+            return Err(AppError::Git(
+                "Remote and branch names are required".to_string(),
+            ));
+        }
+        if remote.starts_with('-') || branch.starts_with('-') {
+            return Err(AppError::Git("Invalid remote or branch name".to_string()));
+        }
+        Self::run_cli(
+            path,
+            &["push", remote, "--delete", branch],
+            120,
+            "git push --delete",
+        )?;
+        Ok(format!(
+            "Deleted branch '{}' on remote '{}'",
+            branch, remote
         ))
     }
 
@@ -3374,9 +3936,10 @@ impl GitBackend for GitService {
     fn push(
         path: &str,
         branch: Option<&str>,
+        force_with_lease: bool,
         cancel_flag: Option<Arc<AtomicBool>>,
     ) -> Result<String, AppError> {
-        Self::push(path, branch, cancel_flag)
+        Self::push(path, branch, force_with_lease, cancel_flag)
     }
     fn pull(path: &str, cancel_flag: Option<Arc<AtomicBool>>) -> Result<String, AppError> {
         Self::pull(path, cancel_flag)
@@ -3437,5 +4000,339 @@ impl GitBackend for GitService {
     }
     fn init_submodules(path: &str) -> Result<String, AppError> {
         Self::init_submodules(path)
+    }
+}
+
+#[cfg(test)]
+mod history_rewrite_tests {
+    use super::GitService;
+    use crate::test_support::{commit_file, log_messages, GitFixture};
+
+    #[test]
+    fn reword_preserves_message_verbatim_including_special_characters() {
+        let fixture = GitFixture::new();
+        let path = fixture.path();
+        commit_file(&fixture, "a.txt", "a\n", "first");
+        let second = commit_file(&fixture, "b.txt", "b\n", "second");
+        commit_file(&fixture, "c.txt", "c\n", "third");
+
+        // Perl interpolation used to rewrite $/@ here; it must survive byte-for-byte.
+        let tricky =
+            "fix: keep $HOME and @user and \"quotes\" and 'single' and C:\\path and 中文 ✓\n\n$body $1";
+        GitService::reword_commit(path, &second, tricky).expect("reword succeeds");
+
+        assert_eq!(
+            log_messages(&fixture),
+            vec![
+                "third".to_string(),
+                tricky.to_string(),
+                "first".to_string(),
+                "Initial commit".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn drop_removes_the_commit_and_keeps_descendants() {
+        let fixture = GitFixture::new();
+        let path = fixture.path();
+        commit_file(&fixture, "a.txt", "a\n", "first");
+        let second = commit_file(&fixture, "b.txt", "b\n", "second");
+        commit_file(&fixture, "c.txt", "c\n", "third");
+
+        GitService::drop_commit(path, &second).expect("drop succeeds");
+
+        assert_eq!(
+            log_messages(&fixture),
+            vec![
+                "third".to_string(),
+                "first".to_string(),
+                "Initial commit".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn refuses_to_reword_or_drop_head_and_rejects_empty_messages() {
+        let fixture = GitFixture::new();
+        let path = fixture.path();
+        commit_file(&fixture, "a.txt", "a\n", "first");
+        let tip = commit_file(&fixture, "b.txt", "b\n", "second");
+
+        assert!(GitService::reword_commit(path, &tip, "new message").is_err());
+        assert!(GitService::drop_commit(path, &tip).is_err());
+        assert!(GitService::reword_commit(path, &tip, "   ").is_err());
+    }
+}
+
+#[cfg(test)]
+mod git_workflow_tests {
+    use super::GitService;
+    use crate::test_support::{
+        commit_file, commit_file_on_branch, configure_identity, log_messages, reset_hard_to_head,
+        stage_file, GitFixture,
+    };
+    use std::path::Path;
+
+    fn read_worktree_file(fixture: &GitFixture, file: &str) -> String {
+        std::fs::read_to_string(Path::new(fixture.path()).join(file)).expect("read worktree file")
+    }
+
+    #[test]
+    fn amend_updates_head_message_and_staged_tree() {
+        let fixture = GitFixture::new();
+        let path = fixture.path();
+        commit_file(&fixture, "a.txt", "1\n", "first");
+        commit_file(&fixture, "a.txt", "2\n", "second");
+        stage_file(&fixture, "a.txt", "3\n");
+
+        let msg = GitService::amend_commit(path, Some("amended message")).expect("amend");
+
+        assert!(msg.contains("amended message"));
+        assert_eq!(
+            log_messages(&fixture),
+            vec![
+                "amended message".to_string(),
+                "first".to_string(),
+                "Initial commit".to_string(),
+            ]
+        );
+        assert_eq!(read_worktree_file(&fixture, "a.txt"), "3\n");
+    }
+
+    #[test]
+    fn amend_without_message_keeps_message_and_folds_staged_changes() {
+        let fixture = GitFixture::new();
+        let path = fixture.path();
+        commit_file(&fixture, "a.txt", "1\n", "first");
+        stage_file(&fixture, "b.txt", "b\n");
+
+        GitService::amend_commit(path, None).expect("amend");
+
+        assert_eq!(
+            log_messages(&fixture),
+            vec!["first".to_string(), "Initial commit".to_string()]
+        );
+        let repo = fixture.open();
+        let head = repo
+            .head()
+            .expect("read HEAD")
+            .peel_to_commit()
+            .expect("peel");
+        let tree = head.tree().expect("head tree");
+        assert!(tree.get_path(Path::new("b.txt")).is_ok());
+    }
+
+    #[test]
+    fn amend_rejects_nothing_to_do_and_empty_messages() {
+        let fixture = GitFixture::new();
+        let path = fixture.path();
+        commit_file(&fixture, "a.txt", "1\n", "first");
+
+        assert!(GitService::amend_commit(path, None).is_err());
+        assert!(GitService::amend_commit(path, Some("   ")).is_err());
+    }
+
+    #[test]
+    fn revert_creates_a_commit_undoing_the_changes() {
+        let fixture = GitFixture::new();
+        configure_identity(&fixture);
+        let path = fixture.path();
+        commit_file(&fixture, "a.txt", "1\n", "first");
+        let second = commit_file(&fixture, "a.txt", "2\n", "second");
+
+        let result = GitService::revert_commit(path, &second).expect("revert");
+
+        assert!(result.success);
+        assert_eq!(read_worktree_file(&fixture, "a.txt"), "1\n");
+        assert!(log_messages(&fixture)[0].starts_with("Revert"));
+    }
+
+    #[test]
+    fn revert_conflicts_leave_state_and_abort_restores_it() {
+        let fixture = GitFixture::new();
+        configure_identity(&fixture);
+        let path = fixture.path();
+        let first = commit_file(&fixture, "a.txt", "1\n", "first");
+        commit_file(&fixture, "a.txt", "2\n", "second");
+
+        let result = GitService::revert_commit(path, &first).expect("revert attempt");
+
+        assert!(!result.success);
+        assert_eq!(result.conflicts, vec!["a.txt".to_string()]);
+        assert_eq!(GitService::operation_state(path).expect("state"), "revert");
+
+        GitService::abort_revert(path).expect("abort revert");
+        assert_eq!(GitService::operation_state(path).expect("state"), "clean");
+        assert_eq!(log_messages(&fixture)[0], "second");
+    }
+
+    #[test]
+    fn revert_conflict_can_be_resolved_and_continued() {
+        let fixture = GitFixture::new();
+        configure_identity(&fixture);
+        let path = fixture.path();
+        let first = commit_file(&fixture, "a.txt", "1\n", "first");
+        commit_file(&fixture, "a.txt", "2\n", "second");
+
+        let result = GitService::revert_commit(path, &first).expect("revert attempt");
+        assert!(!result.success);
+
+        stage_file(&fixture, "a.txt", "kept\n");
+        GitService::continue_revert(path).expect("continue revert");
+
+        assert_eq!(GitService::operation_state(path).expect("state"), "clean");
+        assert!(log_messages(&fixture)[0].starts_with("Revert"));
+        assert_eq!(read_worktree_file(&fixture, "a.txt"), "kept\n");
+    }
+
+    /// Fixture where master ("second") and topic ("topic change") both rewrite
+    /// a.txt on top of "first", so rebasing master onto topic conflicts on a.txt.
+    fn divergent_fixture() -> GitFixture {
+        let fixture = GitFixture::new();
+        configure_identity(&fixture);
+        let first = commit_file(&fixture, "a.txt", "1\n", "first");
+        {
+            let repo = fixture.open();
+            let oid = git2::Oid::from_str(&first).expect("oid");
+            let commit = repo.find_commit(oid).expect("find first");
+            repo.branch("topic", &commit, false).expect("create topic");
+        }
+        commit_file(&fixture, "a.txt", "2\n", "second");
+        commit_file_on_branch(&fixture, "topic", "a.txt", "topic\n", "topic change");
+        reset_hard_to_head(&fixture);
+        fixture
+    }
+
+    #[test]
+    fn rebase_conflict_can_be_resolved_and_continued() {
+        let fixture = divergent_fixture();
+        let path = fixture.path();
+
+        let result = GitService::rebase(path, "topic").expect("rebase attempt");
+        assert!(!result.success);
+        assert_eq!(result.conflicts, vec!["a.txt".to_string()]);
+        assert_eq!(GitService::operation_state(path).expect("state"), "rebase");
+        assert!(GitService::continue_rebase(path).is_err());
+
+        stage_file(&fixture, "a.txt", "resolved\n");
+        GitService::continue_rebase(path).expect("continue rebase");
+
+        assert_eq!(GitService::operation_state(path).expect("state"), "clean");
+        assert_eq!(
+            log_messages(&fixture),
+            vec![
+                "second".to_string(),
+                "topic change".to_string(),
+                "first".to_string(),
+                "Initial commit".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn rebase_conflict_can_be_skipped() {
+        let fixture = divergent_fixture();
+        let path = fixture.path();
+
+        let result = GitService::rebase(path, "topic").expect("rebase attempt");
+        assert!(!result.success);
+
+        GitService::skip_rebase(path).expect("skip commit");
+
+        assert_eq!(GitService::operation_state(path).expect("state"), "clean");
+        assert_eq!(log_messages(&fixture)[0], "topic change");
+    }
+
+    #[test]
+    fn rebase_conflict_abort_restores_the_original_branch() {
+        let fixture = divergent_fixture();
+        let path = fixture.path();
+
+        let result = GitService::rebase(path, "topic").expect("rebase attempt");
+        assert!(!result.success);
+
+        GitService::abort_rebase(path).expect("abort rebase");
+
+        assert_eq!(GitService::operation_state(path).expect("state"), "clean");
+        assert_eq!(log_messages(&fixture)[0], "second");
+    }
+
+    #[test]
+    fn recovery_commands_refuse_without_an_operation_in_progress() {
+        let fixture = GitFixture::new();
+        configure_identity(&fixture);
+        let path = fixture.path();
+
+        assert!(GitService::continue_rebase(path).is_err());
+        assert!(GitService::skip_rebase(path).is_err());
+        assert!(GitService::abort_rebase(path).is_err());
+        assert!(GitService::continue_revert(path).is_err());
+        assert!(GitService::abort_revert(path).is_err());
+    }
+
+    #[test]
+    fn force_with_lease_push_and_remote_branch_deletion() {
+        let fixture = GitFixture::new();
+        configure_identity(&fixture);
+        let path = fixture.path();
+
+        let remote_dir = tempfile::tempdir().expect("remote dir");
+        let remote_path = remote_dir.path().join("remote.git");
+        git2::Repository::init_bare(&remote_path).expect("init bare remote");
+        let remote_url = remote_path.to_str().expect("utf-8 remote path").to_string();
+        {
+            let repo = fixture.open();
+            repo.remote("origin", &remote_url).expect("add origin");
+        }
+
+        commit_file(&fixture, "a.txt", "1\n", "first");
+        let branch = {
+            let repo = fixture.open();
+            let head = repo.head().expect("read HEAD");
+            head.shorthand().expect("branch name").to_string()
+        };
+        GitService::run_cli(path, &["push", "-u", "origin", &branch], 60, "git push -u")
+            .expect("initial push");
+
+        GitService::amend_commit(path, Some("amended")).expect("amend");
+        assert!(GitService::push(path, None, false, None).is_err());
+
+        GitService::push(path, None, true, None).expect("force-with-lease push");
+
+        {
+            let repo = fixture.open();
+            let head = repo
+                .head()
+                .expect("read HEAD")
+                .peel_to_commit()
+                .expect("peel");
+            repo.branch("to-delete", &head, false)
+                .expect("create branch to delete");
+        }
+        GitService::run_cli(
+            path,
+            &["push", "-u", "origin", "to-delete"],
+            60,
+            "git push -u",
+        )
+        .expect("push branch to delete");
+        GitService::delete_remote_branch(path, "origin", "to-delete")
+            .expect("delete remote branch");
+
+        let bare = git2::Repository::open_bare(&remote_url).expect("open bare remote");
+        assert!(bare.refname_to_id("refs/heads/to-delete").is_err());
+        assert!(bare
+            .refname_to_id(&format!("refs/heads/{}", branch))
+            .is_ok());
+    }
+
+    #[test]
+    fn delete_remote_branch_rejects_empty_or_flag_like_names() {
+        let fixture = GitFixture::new();
+        let path = fixture.path();
+
+        assert!(GitService::delete_remote_branch(path, "", "main").is_err());
+        assert!(GitService::delete_remote_branch(path, "origin", "--delete").is_err());
     }
 }

@@ -8,7 +8,7 @@ export const MarkdownViewer = memo(function MarkdownViewer({ content }: Markdown
   const blocks = useMemo(() => parseBlocks(content), [content]);
 
   return (
-    <div className="space-y-3 text-sm leading-relaxed">
+    <div className="select-text space-y-3 text-sm leading-relaxed">
       {blocks.map((block, i) => (
         <Block key={i} block={block} index={i} />
       ))}

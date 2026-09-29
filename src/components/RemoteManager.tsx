@@ -2,6 +2,7 @@ import { useState, useCallback, memo } from "react";
 import * as api from "../lib/tauri";
 import type { RemoteInfo } from "../lib/types";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { ChipButton } from "./ui/ChipButton";
 
 interface RemoteManagerProps {
   path: string;
@@ -109,22 +110,24 @@ export const RemoteManager = memo(function RemoteManager({ path, onSuccess, onEr
           aria-label="Remote URL"
           className="px-2 py-1 rounded-lg border border-[var(--border-color)] bg-[var(--surface-1)] text-xs min-w-0 flex-1 basis-24 focus:outline-none focus:ring-2 focus:ring-purple-500"
         />
-        <button
+        <ChipButton
           onClick={handleAdd}
           disabled={!newName.trim() || !newUrl.trim() || loading}
           aria-label="Add remote"
-          className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-purple-100 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/50 hover:bg-purple-200 dark:hover:bg-purple-900/40 disabled:opacity-50 transition-colors duration-150 active:scale-[0.98]"
+          tone="purple"
+          size="md"
         >
           {loading ? "Adding..." : "Add Remote"}
-        </button>
-        <button
+        </ChipButton>
+        <ChipButton
           onClick={handleToggle}
           aria-label="Toggle remote list"
           aria-expanded={showList}
-          className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-[var(--surface-2)] text-gray-700 dark:text-gray-300 border border-[var(--border-color)] hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors duration-150 active:scale-[0.98]"
+          tone="surface"
+          size="md"
         >
           Remotes {remotes.length > 0 ? `(${remotes.length})` : ""}
-        </button>
+        </ChipButton>
       </div>
 
       {showList && (
@@ -174,23 +177,25 @@ export const RemoteManager = memo(function RemoteManager({ path, onSuccess, onEr
                         push: {r.push_url}
                       </span>
                     )}
-                    <button
+                    <ChipButton
                       onClick={() => handleStartEdit(r)}
-                      className="px-1.5 py-0.5 rounded-lg bg-blue-100 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800/50 hover:bg-blue-200 dark:hover:bg-blue-900/40 transition-colors active:scale-[0.98]"
+                      tone="blue"
+                      size="sm"
                       aria-label={`Edit URL for ${r.name}`}
                       title="Edit URL"
                     >
                       Edit
-                    </button>
-                    <button
+                    </ChipButton>
+                    <ChipButton
                       onClick={() => setConfirmDelete(r)}
                       disabled={loading}
-                      className="px-1.5 py-0.5 rounded-lg bg-red-100 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800/50 hover:bg-red-200 dark:hover:bg-red-900/40 disabled:opacity-50 transition-colors active:scale-[0.98]"
+                      tone="red"
+                      size="sm"
                       aria-label={`Remove remote ${r.name}`}
                       title="Remove"
                     >
                       Del
-                    </button>
+                    </ChipButton>
                   </>
                 )}
               </div>

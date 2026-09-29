@@ -1,6 +1,8 @@
 import { useState, useCallback } from "react";
-import type { ProjectDetail } from "../lib/types";
+import type { ProjectDetail, ProjectScript } from "../lib/types";
 import { parseError } from "../lib/types";
+import { getRecentCommand, type RecentCommandEntry } from "../lib/recentCommands";
+import { useProjectActions } from "../context/ProjectContext";
 
 interface UseProjectRowOptions {
   detail: ProjectDetail;
@@ -13,6 +15,8 @@ interface UseProjectRowOptions {
 
 export function useProjectRow({ detail, onSwitchBranch, onRefresh, onRemove, onConfirmDirtySwitch }: UseProjectRowOptions) {
   const { project, status } = detail;
+  const { onOpenBuiltInTerminal, onRunProjectScript } = useProjectActions();
+  const [recent, setRecent] = useState<RecentCommandEntry | null>(() => getRecentCommand(project.path));
   const [switching, setSwitching] = useState(false);
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -67,6 +71,20 @@ export function useProjectRow({ detail, onSwitchBranch, onRefresh, onRemove, onC
   }, [handleGitRefresh]);
 
   const handleOpenLog = useCallback(() => setLogOpen(true), []);
+  const handleOpenBuiltInTerminal = useCallback(
+    () => onOpenBuiltInTerminal?.(project.path, project.name),
+    [onOpenBuiltInTerminal, project.path, project.name]
+  );
+  const handleRunProjectScript = useCallback(
+    (script: ProjectScript) => {
+      onRunProjectScript?.(project.path, project.name, script);
+      setRecent({ name: script.name, command: script.command });
+    },
+    [onRunProjectScript, project.path, project.name]
+  );
+  const handleRunRecentCommand = useCallback(() => {
+    if (recent) onRunProjectScript?.(project.path, project.name, recent);
+  }, [recent, onRunProjectScript, project.path, project.name]);
   const handleCloseLog = useCallback(() => setLogOpen(false), []);
   const handleOpenBranchMgr = useCallback(() => setBranchMgrOpen(true), []);
   const handleCloseBranchMgr = useCallback(() => setBranchMgrOpen(false), []);
@@ -100,6 +118,10 @@ export function useProjectRow({ detail, onSwitchBranch, onRefresh, onRemove, onC
     handleRefresh,
     handleGitRefresh,
     handleOpenLog,
+    handleOpenBuiltInTerminal,
+    recent,
+    handleRunProjectScript,
+    handleRunRecentCommand,
     handleCloseLog,
     handleOpenBranchMgr,
     handleCloseBranchMgr,

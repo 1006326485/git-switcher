@@ -1,9 +1,11 @@
-import { useState, useCallback, useEffect, memo } from "react";
+import { useState, useCallback, useEffect, memo, lazy, Suspense } from "react";
 import * as api from "../lib/tauri";
 import type { GitFileEntry, StashInfo } from "../lib/types";
 import { DiffViewer } from "./DiffViewer";
 import { AiGenerateIcon } from "./ui/icons";
 import { OperationConfirmDialog } from "./OperationConfirmDialog";
+
+const StashManager = lazy(() => import("./StashManager").then((m) => ({ default: m.StashManager })));
 
 interface GitOpsPanelProps {
   path: string;
@@ -47,6 +49,8 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
   const [loadingDiff, setLoadingDiff] = useState(false);
   const [diffFile, setDiffFile] = useState<string | null>(null);
   const [confirmStashDrop, setConfirmStashDrop] = useState<number | null>(null);
+  const [confirmForcePush, setConfirmForcePush] = useState(false);
+  const [stashManagerOpen, setStashManagerOpen] = useState(false);
 
   const loadFiles = useCallback(async () => {
     try {
@@ -95,7 +99,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
   const handleAction = useCallback(
     async (name: string, fn: () => Promise<void>, successMsg?: string) => {
       setLoadingOps((prev) => new Set(prev).add(name));
-      const label = { fetch: "Fetching", pull: "Pulling", push: "Pushing", stash: "Stashing", pop: "Popping", stash_drop: "Dropping", stage_all: "Staging all", unstage_all: "Unstaging all", stash_apply: "Applying stash" }[name] ?? name;
+      const label = { fetch: "Fetching", pull: "Pulling", push: "Pushing", force_push: "Force pushing", stash: "Stashing", pop: "Popping", stash_drop: "Dropping", stage_all: "Staging all", unstage_all: "Unstaging all", stash_apply: "Applying stash" }[name] ?? name;
       onInfo?.(`${label}...`);
       try {
         await fn();
@@ -177,6 +181,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
   const handleFetch = useCallback(() => handleAction("fetch", async () => { await api.gitFetch(path); }, "Fetch completed"), [handleAction, path]);
   const handlePull = useCallback(() => handleAction("pull", async () => { await api.gitPull(path); }, "Pull completed"), [handleAction, path]);
   const handlePush = useCallback(() => handleAction("push", async () => { await api.gitPush(path); }, "Push completed"), [handleAction, path]);
+  const handleForcePush = useCallback(() => handleAction("force_push", async () => { await api.gitPush(path, undefined, true); }, "Force push completed"), [handleAction, path]);
   const handlePop = useCallback(() => handleAction("pop", async () => { await api.gitStashPop(path); }, "Stash popped"), [handleAction, path]);
 
   const handleStash = useCallback(() => {
@@ -274,6 +279,14 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
               {isLoading("push") ? "Pushing..." : "Push"}
             </button>
             <button
+              onClick={() => setConfirmForcePush(true)}
+              disabled={isLoading("force_push")}
+              aria-label="Force push to remote"
+              className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-red-100 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800/50 hover:bg-red-200 dark:hover:bg-red-900/40 disabled:opacity-50 transition-colors duration-150 active:scale-[0.98]"
+            >
+              {isLoading("force_push") ? "Force Pushing..." : "Force Push"}
+            </button>
+            <button
               onClick={handleStash}
               disabled={isLoading("stash")}
               aria-label="Stash changes"
@@ -305,6 +318,13 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
               className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-[var(--surface-2)] text-gray-700 dark:text-gray-300 border border-[var(--border-color)] hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors duration-150 active:scale-[0.98]"
             >
               Stash List {stashList.length > 0 ? `(${stashList.length})` : ""}
+            </button>
+            <button
+              onClick={() => setStashManagerOpen(true)}
+              aria-label="Open stash manager"
+              className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-[var(--surface-2)] text-gray-700 dark:text-gray-300 border border-[var(--border-color)] hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors duration-150 active:scale-[0.98]"
+            >
+              Stash Manager
             </button>
           </div>
 
@@ -495,7 +515,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
                   {loadingDiff ? "Loading..." : "Refresh"}
                 </button>
               </div>
-              <pre className="p-3 text-xs font-mono max-h-48 overflow-y-auto whitespace-pre-wrap break-all text-gray-800 dark:text-gray-200">
+              <pre className="select-text p-3 text-xs font-mono max-h-48 overflow-y-auto whitespace-pre-wrap break-all text-gray-800 dark:text-gray-200">
                 {stagedDiff === null ? (
                   <span className="text-gray-400 italic">Loading...</span>
                 ) : stagedDiff.length === 0 ? (
@@ -527,6 +547,19 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
 
       {diffFile && <DiffViewer path={path} filePath={diffFile} onClose={() => setDiffFile(null)} />}
 
+      {stashManagerOpen && (
+        <Suspense fallback={null}>
+          <StashManager
+            path={path}
+            open
+            onClose={() => setStashManagerOpen(false)}
+            onRefresh={onRefresh}
+            onSuccess={onSuccess}
+            onError={onError}
+          />
+        </Suspense>
+      )}
+
       {confirmStashDrop !== null && (
         <OperationConfirmDialog
           open
@@ -534,6 +567,19 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
           targets={[{ path, label: `stash@{${confirmStashDrop}}` }]}
           onConfirm={() => handleStashDrop(confirmStashDrop)}
           onCancel={() => setConfirmStashDrop(null)}
+        />
+      )}
+
+      {confirmForcePush && (
+        <OperationConfirmDialog
+          open
+          operation="git_push_force"
+          targets={[{ path, label: "force-with-lease" }]}
+          onConfirm={() => {
+            setConfirmForcePush(false);
+            return handleForcePush();
+          }}
+          onCancel={() => setConfirmForcePush(false)}
         />
       )}
     </>

@@ -2,7 +2,7 @@ import { memo, useState, useEffect, useCallback } from "react";
 import * as api from "../lib/tauri";
 import type { Theme, ViewMode, SortOption } from "../lib/types";
 import { SegmentedControl, DropdownMenu, MenuItem, IconButton } from "./ui/primitives";
-import { SearchIcon, PlusIcon, KebabIcon } from "./ui/icons";
+import { SearchIcon, PlusIcon, KebabIcon, TerminalIcon } from "./ui/icons";
 import { NotificationPanel } from "./NotificationPanel";
 import { OperationLogPanel } from "./OperationLogPanel";
 import { BatchOpsToolbar } from "./BatchOpsToolbar";
@@ -47,6 +47,7 @@ interface HeaderProps {
   onSettings: () => void;
   onTaskWorkspaces: () => void;
   onToggleCommandPalette: () => void;
+  onToggleTerminal: () => void;
   batchLoading: string | null;
   batchProgress: BatchProgress;
   onFetchAll: () => void;
@@ -55,6 +56,7 @@ interface HeaderProps {
   onPullBehind: () => void;
   onPushAhead: () => void;
   onSyncAll: () => void;
+  onRunCommandAll: () => void;
   behindCount: number;
   aheadCount: number;
   needsAttention: number;
@@ -106,6 +108,7 @@ export const Header = memo(function Header({
   onSettings,
   onTaskWorkspaces,
   onToggleCommandPalette,
+  onToggleTerminal,
   batchLoading,
   batchProgress,
   onFetchAll,
@@ -114,6 +117,7 @@ export const Header = memo(function Header({
   onPullBehind,
   onPushAhead,
   onSyncAll,
+  onRunCommandAll,
   behindCount,
   aheadCount,
   needsAttention,
@@ -122,7 +126,7 @@ export const Header = memo(function Header({
   elevated = false,
 }: HeaderProps) {
   return (
-    <div className="relative z-10 shrink-0 select-none material px-3 sm:px-4">
+    <div className="relative z-10 shrink-0 select-none chrome chrome-edge px-3 sm:px-4">
       {/* Scroll edge: appears only while content moves beneath the chrome */}
       {elevated && (
         <div
@@ -195,8 +199,10 @@ export const Header = memo(function Header({
             <div className="ml-auto shrink-0">
               <DropdownMenu
                 trigger={
-                  <button className="flex items-center gap-1.5 px-2 py-1 text-xs rounded-full border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
-                    <svg aria-hidden="true" width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                  <button
+                    aria-label={`Sort: ${SORT_OPTIONS.find((o) => o.value === sortBy)?.label ?? ""}`}
+                    className="flex items-center gap-1.5 px-2 py-1 text-xs rounded-full border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                  >                    <svg aria-hidden="true" width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
                       <path d="M3.5 2.75a.75.75 0 00-1.5 0v10.5a.75.75 0 001.5 0v-10.5zM5.75 2a.75.75 0 00-.75.75v10.5a.75.75 0 001.5 0V2.75A.75.75 0 005.75 2zm3.25.75a.75.75 0 011.5 0v5.5a.75.75 0 01-1.5 0v-5.5zM10.25 14a.75.75 0 001.5 0V8.5a.75.75 0 00-1.5 0V14zm4-11.25a.75.75 0 01.75.75v8.5a.75.75 0 01-1.5 0V3.5a.75.75 0 01.75-.75z" />
                     </svg>
                     <span className="hidden text-[11px] sm:inline">{SORT_OPTIONS.find((o) => o.value === sortBy)?.label}</span>
@@ -207,7 +213,8 @@ export const Header = memo(function Header({
                   <MenuItem
                     key={opt.value}
                     icon={<span className="text-xs font-mono">{opt.icon}</span>}
-                    label={opt.label + (sortBy === opt.value ? "  ✓" : "")}
+                    label={opt.label}
+                    selected={sortBy === opt.value}
                     onClick={() => onSortChange(opt.value)}
                   />
                 ))}
@@ -243,6 +250,13 @@ export const Header = memo(function Header({
               <path d="M8 1.5a.5.5 0 01.5.5v2.5h2.5a.5.5 0 010 1H8.5v2.5a.5.5 0 01-1 0V5.5H5a.5.5 0 010-1h2.5V2a.5.5 0 01.5-.5z" />
               <path fillRule="evenodd" d="M1.5 3A1.5 1.5 0 013 1.5h10A1.5 1.5 0 0114.5 3v10a1.5 1.5 0 01-1.5 1.5H3A1.5 1.5 0 011.5 13V3zM3 0a3 3 0 00-3 3v10a3 3 0 003 3h10a3 3 0 003-3V3a3 3 0 00-3-3H3z" />
             </svg>
+          </IconButton>
+          </div>
+
+          {/* Built-in terminal */}
+          <div className="hidden sm:block">
+          <IconButton onClick={onToggleTerminal} title="Terminal" aria-label="Terminal">
+            <TerminalIcon size={16} />
           </IconButton>
           </div>
 
@@ -308,6 +322,7 @@ export const Header = memo(function Header({
                 onPullBehind={onPullBehind}
                 onPushAhead={onPushAhead}
                 onSyncAll={onSyncAll}
+                onRunCommand={onRunCommandAll}
                 behindCount={behindCount}
                 aheadCount={aheadCount}
               />
@@ -317,7 +332,8 @@ export const Header = memo(function Header({
                 <MenuItem
                   key={option.value}
                   icon={<span>{option.icon}</span>}
-                  label={`View: ${option.label}${viewMode === option.value ? "  ✓" : ""}`}
+                  label={`View: ${option.label}`}
+                  selected={viewMode === option.value}
                   onClick={() => onViewModeChange(option.value)}
                 />
               ))}
@@ -326,7 +342,8 @@ export const Header = memo(function Header({
                 <MenuItem
                   key={option.value}
                   icon={<span>{option.icon}</span>}
-                  label={`Theme: ${option.label}${theme === option.value ? "  ✓" : ""}`}
+                  label={`Theme: ${option.label}`}
+                  selected={theme === option.value}
                   onClick={() => onThemeChange(option.value)}
                 />
               ))}
@@ -393,9 +410,32 @@ function NotificationBell() {
   }, []);
 
   useEffect(() => {
+    // Visibility-gated polling: skip refresh while the window is hidden
+    // (same pattern as useAutoRefresh) to avoid background CPU/IPC churn.
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const startTimer = () => {
+      timer = setInterval(() => {
+        if (!document.hidden) refresh();
+      }, 30000);
+    };
+    const onVisibility = () => {
+      if (document.hidden) {
+        if (timer) {
+          clearInterval(timer);
+          timer = null;
+        }
+      } else {
+        refresh();
+        if (!timer) startTimer();
+      }
+    };
     refresh();
-    const interval = setInterval(refresh, 30000);
-    return () => clearInterval(interval);
+    startTimer();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      if (timer) clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [refresh]);
 
   return (

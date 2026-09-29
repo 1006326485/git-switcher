@@ -11,6 +11,11 @@
         var saved = localStorage.getItem("git-switcher-theme");
         var isDark = saved === "dark" || (!saved && window.matchMedia("(prefers-color-scheme: dark)").matches);
         if (isDark) document.documentElement.classList.add("dark");
+        // The summoned terminal window draws its own rounded shell; the page
+        // background must stay transparent so the corners show the desktop.
+        if (new URLSearchParams(location.search).get("window") === "terminal") {
+          document.documentElement.classList.add("terminal-window");
+        }
       })();
     </script>
   </head>

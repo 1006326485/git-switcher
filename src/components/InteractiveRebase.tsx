@@ -229,7 +229,7 @@ export const InteractiveRebase = memo(function InteractiveRebase({
               No commits found
             </div>
           ) : (
-            <div className="space-y-1 max-h-[400px] overflow-y-auto" role="list" aria-label="Commits for rebase">
+            <div className="select-text space-y-1 max-h-[400px] overflow-y-auto" role="list" aria-label="Commits for rebase">
               {entries.map((entry, index) => {
                 const isDragging = dragIndex === index;
                 const isDropTarget = dropIndex === index && dragIndex !== null && dragIndex !== index;

@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, memo, lazy, Suspense } from "react";
+import { useState, useEffect, useCallback, useMemo, memo, lazy, Suspense } from "react";
 import * as api from "../lib/tauri";
 import type { BranchInfo, MergeResult } from "../lib/types";
 import { parseError } from "../lib/types";
@@ -8,6 +8,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { OperationConfirmDialog } from "./OperationConfirmDialog";
 
 const BranchCompareView = lazy(() => import("./BranchCompareView"));
+const ConflictResolver = lazy(() => import("./ConflictResolver").then((m) => ({ default: m.ConflictResolver })));
 
 interface BranchManagerProps {
   path: string;
@@ -45,13 +46,32 @@ export const BranchManager = memo(function BranchManager({
   const [mergeStrategy, setMergeStrategy] = useState<"default" | "no-ff" | "squash">("default");
   const [confirmCherryPick, setConfirmCherryPick] = useState(false);
   const [cherryPickConflicts, setCherryPickConflicts] = useState<string[] | null>(null);
+  const [mergeConflicts, setMergeConflicts] = useState<string[] | null>(null);
+  const [resolveOpen, setResolveOpen] = useState(false);
   const [abortingCherryPick, setAbortingCherryPick] = useState(false);
   const [squashN, setSquashN] = useState(2);
   const [squashMsg, setSquashMsg] = useState("");
   const [confirmSquash, setConfirmSquash] = useState(false);
   const [confirmRebase, setConfirmRebase] = useState(false);
+  const [rebaseConflicts, setRebaseConflicts] = useState<string[] | null>(null);
+  const [rebaseRecovering, setRebaseRecovering] = useState(false);
+  const [confirmDeleteRemote, setConfirmDeleteRemote] = useState<string | null>(null);
 
-  const localBranches = branches.filter((b) => !b.is_remote);
+  const localBranches = branches.filter((b) => !b.is_remote && !b.is_tag);
+  const remoteBranches = branches.filter((b) => b.is_remote && !b.is_tag);
+  const compareA = compareBranchA || currentBranch;
+
+  // Branches can disappear from outside this panel (other panels, terminal,
+  // auto-refresh); drop selections that no longer exist so actions can't target
+  // a deleted branch.
+  useEffect(() => {
+    const names = new Set(branches.map((b) => b.name));
+    if (selectedBranch && !names.has(selectedBranch)) setSelectedBranch("");
+    if (fromBranch && !names.has(fromBranch)) setFromBranch("");
+    if (rebaseBranch && !names.has(rebaseBranch)) setRebaseBranch("");
+    if (compareBranchA && !names.has(compareBranchA)) setCompareBranchA("");
+    if (compareBranchB && !names.has(compareBranchB)) setCompareBranchB("");
+  }, [branches, selectedBranch, fromBranch, rebaseBranch, compareBranchA, compareBranchB]);
 
   const fromBranchOptions = useMemo(() => [
     { value: "", label: "HEAD (current)" },
@@ -97,14 +117,32 @@ export const BranchManager = memo(function BranchManager({
     }
   }, [path, selectedBranch, currentBranch, onRefresh, onSuccess, onError]);
 
+  const handleDeleteRemote = useCallback(async (name: string) => {
+    const sep = name.indexOf("/");
+    const remote = name.slice(0, sep);
+    const branch = name.slice(sep + 1);
+    setLoading(true);
+    try {
+      await api.gitDeleteRemoteBranch(path, remote, branch);
+      onSuccess(`Deleted remote branch "${name}"`);
+      await onRefresh();
+    } catch (e) {
+      onError(parseError(e));
+    } finally {
+      setLoading(false);
+    }
+  }, [path, onRefresh, onSuccess, onError]);
+
   const handleMerge = useCallback(async () => {
     if (!selectedBranch || selectedBranch === currentBranch) return;
     setLoading(true);
     try {
       const result: MergeResult = await api.mergeBranch(path, selectedBranch, mergeStrategy);
       if (result.success) {
+        setMergeConflicts(null);
         onSuccess(result.message);
       } else {
+        setMergeConflicts(result.conflicts?.length ? result.conflicts : []);
         onError(`${result.message}: ${result.conflicts?.join(", ") || "unknown conflicts"}`);
       }
       setSelectedBranch("");
@@ -142,9 +180,11 @@ export const BranchManager = memo(function BranchManager({
     try {
       const result = await api.gitRebase(path, rebaseBranch);
       if (result.success) {
+        setRebaseConflicts(null);
         onSuccess(result.message || `Rebased onto "${rebaseBranch}"`);
         setRebaseBranch("");
       } else {
+        setRebaseConflicts(result.conflicts);
         const conflictInfo = result.conflicts.length > 0
           ? `\nConflicts: ${result.conflicts.join(", ")}`
           : "";
@@ -157,6 +197,39 @@ export const BranchManager = memo(function BranchManager({
       setLoading(false);
     }
   }, [path, rebaseBranch, onRefresh, onSuccess, onError]);
+
+  const handleRebaseRecovery = useCallback(async (action: "continue" | "skip" | "abort") => {
+    setRebaseRecovering(true);
+    try {
+      if (action === "continue") await api.gitRebaseContinue(path);
+      else if (action === "skip") await api.gitRebaseSkip(path);
+      else await api.gitRebaseAbort(path);
+      setRebaseConflicts(null);
+      onSuccess(action === "continue" ? "Rebase continued" : action === "skip" ? "Commit skipped" : "Rebase aborted");
+      await onRefresh();
+    } catch (e) {
+      onError(parseError(e));
+    } finally {
+      setRebaseRecovering(false);
+    }
+  }, [path, onRefresh, onSuccess, onError]);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const state = await api.gitOperationState(path);
+        if (state === "rebase") {
+          const conflicts = await api.gitListConflicts(path);
+          if (!cancelled) setRebaseConflicts(conflicts);
+        }
+      } catch {
+        // best-effort probe only
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [open, path]);
 
   const handleConfirmDelete = useCallback(() => {
     setConfirmDelete(false);
@@ -229,6 +302,7 @@ export const BranchManager = memo(function BranchManager({
   const openConfirmRebase = useCallback(() => setConfirmRebase(true), []);
 
   return (
+    <>
     <Modal open={open} onClose={onClose} title="Branch Manager">
       <Tabs
         tabs={[
@@ -244,6 +318,51 @@ export const BranchManager = memo(function BranchManager({
       />
 
       <div className="px-6 py-5">
+        {rebaseConflicts !== null && (
+          <div className="mb-4 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/40 rounded-lg space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-amber-700 dark:text-amber-300">
+                Rebase in progress — resolve conflicts, then continue, skip or abort
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleRebaseRecovery("continue")}
+                  disabled={rebaseRecovering}
+                  className="px-3 py-1 rounded text-xs bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 transition-colors"
+                >
+                  {rebaseRecovering ? "Working..." : "Continue"}
+                </button>
+                <button
+                  onClick={() => handleRebaseRecovery("skip")}
+                  disabled={rebaseRecovering}
+                  className="px-3 py-1 rounded text-xs bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50 transition-colors"
+                >
+                  Skip
+                </button>
+                <button
+                  onClick={() => handleRebaseRecovery("abort")}
+                  disabled={rebaseRecovering}
+                  className="px-3 py-1 rounded text-xs bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 transition-colors"
+                >
+                  Abort
+                </button>
+              </div>
+            </div>
+            {rebaseConflicts.length > 0 && (
+              <ul className="text-xs text-amber-600 dark:text-amber-400 space-y-0.5 pl-4 list-disc">
+                {rebaseConflicts.map((f) => (
+                  <li key={f} className="font-mono">{f}</li>
+                ))}
+              </ul>
+            )}
+            <button
+              onClick={() => setResolveOpen(true)}
+              className="px-3 py-1 rounded text-xs bg-blue-500 text-white hover:bg-blue-600 transition-colors"
+            >
+              Resolve conflicts
+            </button>
+          </div>
+        )}
         {tab === "create" && (
           <div className="space-y-4">
             <div>
@@ -301,6 +420,30 @@ export const BranchManager = memo(function BranchManager({
             >
               {loading ? "Deleting..." : "Delete Branch"}
             </PrimaryButton>
+
+            <hr className="border-[var(--border-color)]" />
+            <div className="space-y-3">
+              <h4 className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide">Remote Branches</h4>
+              {remoteBranches.length === 0 ? (
+                <p className="text-xs text-gray-400 dark:text-gray-500 italic">No remote branches</p>
+              ) : (
+                <div className="space-y-1 max-h-40 overflow-y-auto">
+                  {remoteBranches.map((b) => (
+                    <div key={b.name} className="flex items-center gap-2 text-xs">
+                      <span className="flex-1 truncate font-mono text-gray-700 dark:text-gray-300">{b.name}</span>
+                      <button
+                        onClick={() => setConfirmDeleteRemote(b.name)}
+                        disabled={loading}
+                        className="px-2 py-0.5 rounded text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 transition-colors"
+                        aria-label={`Delete remote branch ${b.name}`}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -428,19 +571,56 @@ export const BranchManager = memo(function BranchManager({
               {loading ? "Cherry-picking..." : "Cherry-pick Commit"}
             </PrimaryButton>
 
+            {mergeConflicts && mergeConflicts.length > 0 && (
+              <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/40 rounded-lg space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-red-700 dark:text-red-300">
+                    Merge conflict ({mergeConflicts.length} file{mergeConflicts.length !== 1 ? "s" : ""})
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setResolveOpen(true)}
+                      className="px-3 py-1 rounded text-xs bg-blue-500 text-white hover:bg-blue-600 transition-colors"
+                    >
+                      Resolve conflicts
+                    </button>
+                    <button
+                      onClick={() => setMergeConflicts(null)}
+                      className="px-3 py-1 rounded text-xs text-red-500 hover:text-red-700 dark:hover:text-red-300 transition-colors"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+                <ul className="text-xs text-red-600 dark:text-red-400 space-y-0.5 pl-4 list-disc">
+                  {mergeConflicts.map((f) => (
+                    <li key={f} className="font-mono">{f}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             {cherryPickConflicts && (
               <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/40 rounded-lg space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium text-red-700 dark:text-red-300">
                     Cherry-pick conflict ({cherryPickConflicts.length} file{cherryPickConflicts.length !== 1 ? "s" : ""})
                   </span>
-                  <button
-                    onClick={handleAbortCherryPick}
-                    disabled={abortingCherryPick}
-                    className="px-3 py-1 rounded text-xs bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 transition-colors"
-                  >
-                    {abortingCherryPick ? "Aborting..." : "Abort Cherry-pick"}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setResolveOpen(true)}
+                      className="px-3 py-1 rounded text-xs bg-blue-500 text-white hover:bg-blue-600 transition-colors"
+                    >
+                      Resolve conflicts
+                    </button>
+                    <button
+                      onClick={handleAbortCherryPick}
+                      disabled={abortingCherryPick}
+                      className="px-3 py-1 rounded text-xs bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 transition-colors"
+                    >
+                      {abortingCherryPick ? "Aborting..." : "Abort Cherry-pick"}
+                    </button>
+                  </div>
                 </div>
                 <ul className="text-xs text-red-600 dark:text-red-400 space-y-0.5 pl-4 list-disc">
                   {cherryPickConflicts.map((f) => (
@@ -448,6 +628,46 @@ export const BranchManager = memo(function BranchManager({
                   ))}
                 </ul>
               </div>
+            )}
+          </div>
+        )}
+        {tab === "compare" && (
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Branch A</label>
+              <SelectDropdown
+                options={localBranches.map((b) => ({ value: b.name, label: b.name + (b.name === currentBranch ? " (current)" : "") }))}
+                value={compareA}
+                onChange={setCompareBranchA}
+                placeholder="Select branch"
+                ariaLabel="Branch A"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Branch B</label>
+              <SelectDropdown
+                options={localBranches.map((b) => ({ value: b.name, label: b.name + (b.name === currentBranch ? " (current)" : "") }))}
+                value={compareBranchB}
+                onChange={setCompareBranchB}
+                placeholder="Select branch"
+                ariaLabel="Branch B"
+              />
+            </div>
+            <PrimaryButton
+              onClick={() => setCompareOpen(true)}
+              disabled={!compareBranchB || compareA === compareBranchB}
+            >
+              Compare
+            </PrimaryButton>
+            {compareOpen && compareBranchB && (
+              <Suspense fallback={null}>
+                <BranchCompareView
+                  path={path}
+                  branchA={compareA}
+                  branchB={compareBranchB}
+                  onClose={() => setCompareOpen(false)}
+                />
+              </Suspense>
             )}
           </div>
         )}
@@ -460,6 +680,19 @@ export const BranchManager = memo(function BranchManager({
         onConfirm={handleConfirmDelete}
         onCancel={handleCancelDelete}
       />
+      {confirmDeleteRemote !== null && (
+        <OperationConfirmDialog
+          open
+          operation="git_delete_remote_branch"
+          targets={[{ path, label: confirmDeleteRemote }]}
+          onConfirm={() => {
+            const name = confirmDeleteRemote;
+            setConfirmDeleteRemote(null);
+            return handleDeleteRemote(name);
+          }}
+          onCancel={() => setConfirmDeleteRemote(null)}
+        />
+      )}
       <ConfirmDialog
         open={confirmMerge}
         title="Merge Branch"
@@ -492,48 +725,23 @@ export const BranchManager = memo(function BranchManager({
         onCancel={handleCancelRebase}
       />
 
-        {tab === "compare" && (
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Branch A</label>
-              <SelectDropdown
-                options={localBranches.map((b) => ({ value: b.name, label: b.name + (b.name === currentBranch ? " (current)" : "") }))}
-                value={compareBranchA || currentBranch}
-                onChange={setCompareBranchA}
-                placeholder="Select branch"
-                ariaLabel="Branch A"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Branch B</label>
-              <SelectDropdown
-                options={localBranches.map((b) => ({ value: b.name, label: b.name + (b.name === currentBranch ? " (current)" : "") }))}
-                value={compareBranchB}
-                onChange={setCompareBranchB}
-                placeholder="Select branch"
-                ariaLabel="Branch B"
-              />
-            </div>
-            <PrimaryButton
-              onClick={() => setCompareOpen(true)}
-              disabled={!compareBranchA || !compareBranchB || compareBranchA === compareBranchB}
-            >
-              Compare
-            </PrimaryButton>
-            {compareOpen && compareBranchA && compareBranchB && (
-              <Suspense fallback={null}>
-                <BranchCompareView
-                  path={path}
-                  branchA={compareBranchA}
-                  branchB={compareBranchB}
-                  onClose={() => setCompareOpen(false)}
-                />
-              </Suspense>
-            )}
-          </div>
-        )}
-
     </Modal>
+
+    {resolveOpen && (
+      <Modal open onClose={() => setResolveOpen(false)} title="Resolve conflicts" maxWidth="max-w-2xl">
+        <div className="p-3">
+          <Suspense fallback={null}>
+            <ConflictResolver
+              path={path}
+              onSuccess={onSuccess}
+              onError={onError}
+              onRefresh={() => { onRefresh(); }}
+            />
+          </Suspense>
+        </div>
+      </Modal>
+    )}
+    </>
   );
 });
 export default BranchManager;

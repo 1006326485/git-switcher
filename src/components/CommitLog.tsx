@@ -1,10 +1,13 @@
-import { useState, useEffect, useCallback, memo, useRef } from "react";
+import { useState, useEffect, useCallback, memo, useRef, lazy, Suspense } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import * as api from "../lib/tauri";
 import type { LogEntry } from "../lib/types";
 import { parseError } from "../lib/types";
 import { CommitGraph } from "./CommitGraph";
 import { OperationConfirmDialog } from "./OperationConfirmDialog";
+import { Modal } from "./ui/primitives";
+
+const ConflictResolver = lazy(() => import("./ConflictResolver").then((m) => ({ default: m.ConflictResolver })));
 
 const ROW_HEIGHT = 28;
 
@@ -36,6 +39,7 @@ export const CommitLog = memo(function CommitLog({ path, onSuccess, onError, onR
   const [confirmRangePick, setConfirmRangePick] = useState<{ from: string; to: string; count: number } | null>(null);
   const [cherryPickConflicts, setCherryPickConflicts] = useState<string[] | null>(null);
   const [abortingCherryPick, setAbortingCherryPick] = useState(false);
+  const [resolveOpen, setResolveOpen] = useState(false);
 
   const parentRef = useRef<HTMLDivElement>(null);
 
@@ -208,6 +212,12 @@ export const CommitLog = memo(function CommitLog({ path, onSuccess, onError, onR
               Cherry-pick conflict ({cherryPickConflicts.length} file{cherryPickConflicts.length !== 1 ? "s" : ""})
             </span>
             <button
+              onClick={() => setResolveOpen(true)}
+              className="px-2 py-0.5 rounded text-xs bg-blue-500 text-white hover:bg-blue-600 transition-colors"
+            >
+              Resolve conflicts
+            </button>
+            <button
               onClick={handleAbortCherryPick}
               disabled={abortingCherryPick}
               className="px-2 py-0.5 rounded text-xs bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 transition-colors"
@@ -224,7 +234,7 @@ export const CommitLog = memo(function CommitLog({ path, onSuccess, onError, onR
       )}
 
       {/* Commit graph + log */}
-      <div ref={parentRef} className="max-h-[60vh] overflow-auto">
+      <div ref={parentRef} className="select-text max-h-[60vh] overflow-auto">
         <div className="flex" style={{ height: `${virtualizer.getTotalSize()}px`, position: "relative", width: "100%" }}>
           {/* SVG Graph column (sticky left) */}
           <div
@@ -337,6 +347,21 @@ export const CommitLog = memo(function CommitLog({ path, onSuccess, onError, onR
           onConfirm={() => handleCherryPickRange(confirmRangePick.from, confirmRangePick.to)}
           onCancel={() => setConfirmRangePick(null)}
         />
+      )}
+
+      {resolveOpen && (
+        <Modal open onClose={() => setResolveOpen(false)} title="Resolve conflicts" maxWidth="max-w-2xl">
+          <div className="p-3">
+            <Suspense fallback={null}>
+              <ConflictResolver
+                path={path}
+                onSuccess={(msg) => onSuccess?.(msg)}
+                onError={(msg) => onError?.(msg)}
+                onRefresh={() => { onRefresh?.(); }}
+              />
+            </Suspense>
+          </div>
+        </Modal>
       )}
     </div>
   );

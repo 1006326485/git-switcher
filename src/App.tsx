@@ -6,6 +6,7 @@ import { ProjectGrid } from "./components/ProjectGrid";
 import { ProjectGroupsPanel } from "./components/ProjectGroupsPanel";
 import { ErrorBoundary } from "./components/ui/ErrorBoundary";
 import { ToastContainer } from "./components/Toast";
+import { OfflineBanner, type AutoFetchFailure } from "./components/OfflineBanner";
 import { ProjectProvider } from "./context/ProjectContext";
 
 const AddProjectDialog = lazy(() => import("./components/AddProjectDialog"));
@@ -16,8 +17,11 @@ const ExportArchiveDialog = lazy(() => import("./components/ExportArchiveDialog"
 const SettingsDialog = lazy(() => import("./components/SettingsDialog"));
 const ShortcutsHelp = lazy(() => import("./components/ShortcutsHelp"));
 const QuickDiffPanel = lazy(() => import("./components/QuickDiffPanel"));
+const TerminalPanel = lazy(() => import("./components/TerminalPanel"));
 const CommandPalette = lazy(() => import("./components/CommandPalette"));
+const ScriptPickerDialog = lazy(() => import("./components/ScriptPickerDialog"));
 const TaskWorkspaceDialog = lazy(() => import("./components/TaskWorkspaceDialog").then((module) => ({ default: module.TaskWorkspaceDialog })));
+const ConflictResolver = lazy(() => import("./components/ConflictResolver").then((module) => ({ default: module.ConflictResolver })));
 import { useProjects } from "./hooks/useProjects";
 import { useTheme } from "./hooks/useTheme";
 import { useToast } from "./hooks/useToast";
@@ -28,15 +32,30 @@ import { useAppSettings } from "./hooks/useAppSettings";
 import { useCommandPalette } from "./hooks/useCommandPalette";
 import { useRecentProjects } from "./hooks/useRecentProjects";
 import { useGitOpTracker } from "./hooks/useGitOpTracker";
-import type { ProjectDetail, ViewMode, SortOption } from "./lib/types";
+import { useOperationHistory } from "./hooks/useOperationHistory";
+import type { ProjectDetail, ViewMode, SortOption, RunPresetItem } from "./lib/types";
+import { parseError, isBenignFetchFailure, createErrorAggregator } from "./lib/types";
+import { setRecentCommand } from "./lib/recentCommands";
 import type { DashboardFilter } from "./components/DashboardView";
-import { listProjectsInGroup, gitFetch, gitPull, gitPush, gitStash, gitAutoFetchAll, getSettings, onDragDropEnter, onDragDropLeave, onDragDropResult, logOperation } from "./lib/tauri";
-import { scrimAnimation } from "./components/ui/primitives";
+import { listProjectsInGroup, gitFetch, gitPull, gitPush, gitStash, getSettings, onDragDropEnter, onDragDropLeave, onDragDropResult, logOperation } from "./lib/tauri";
+import { Modal, scrimAnimation } from "./components/ui/primitives";
 import { useScrollEdge } from "./hooks/useScrollEdge";
 
 export default function App() {
   const { theme, setTheme } = useTheme();
-  const toast = useToast();
+  const rawToast = useToast();
+  const toastSinkRef = useRef(rawToast.error);
+  toastSinkRef.current = rawToast.error;
+  // Collapse bursts of identical errors (one per repo during batch work or
+  // while offline) into a single aggregated toast instead of one per repo.
+  const aggregatedError = useMemo(
+    () =>
+      createErrorAggregator((message, retry, rawError, path) =>
+        toastSinkRef.current(message, retry, rawError, path)
+      ),
+    []
+  );
+  const toast = useMemo(() => ({ ...rawToast, error: aggregatedError }), [rawToast, aggregatedError]);
   const toastRef = useRef(toast);
   toastRef.current = toast;
 
@@ -55,8 +74,20 @@ export default function App() {
   const [bulkImportOpen, setBulkImportOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [taskWorkspacesOpen, setTaskWorkspacesOpen] = useState(false);
+  const [conflictResolvePath, setConflictResolvePath] = useState<string | null>(null);
   const [shortcutsHelpOpen, setShortcutsHelpOpen] = useState(false);
   const [quickDiffOpen, setQuickDiffOpen] = useState(false);
+  const [terminalPanelOpen, setTerminalPanelOpen] = useState(false);
+  const [terminalInitial, setTerminalInitial] = useState<{
+    cwd: string;
+    title: string;
+    command?: string;
+    tabTitle?: string;
+  } | null>(null);
+  const [workspaceLaunch, setWorkspaceLaunch] = useState<{
+    items: RunPresetItem[];
+    token: number;
+  } | null>(null);
   const [exportArchiveOpen, setExportArchiveOpen] = useState(false);
   const [exportArchivePath, setExportArchivePath] = useState("");
   const scrollParentRef = useRef<HTMLElement>(null);
@@ -173,24 +204,68 @@ export default function App() {
 
   const { cancelOp, isOpActive, getActiveOp, getAnyActiveOp } = useGitOpTracker();
 
+  // ── Undo last destructive git operation ───────────────────────────────
+  const { undoPrompt, undoLast, dismissUndo } = useOperationHistory({
+    onDone: (msg) => toastRef.current.success(msg),
+    onError: (msg, rawError) => toastRef.current.error(msg, undefined, rawError),
+    onAfterUndo: () => refreshAll(),
+  });
+
+  // ── Connectivity ───────────────────────────────────────────────────────
+  const [online, setOnline] = useState(() => navigator.onLine);
+  useEffect(() => {
+    const goOnline = () => setOnline(true);
+    const goOffline = () => setOnline(false);
+    window.addEventListener("online", goOnline);
+    window.addEventListener("offline", goOffline);
+    return () => {
+      window.removeEventListener("online", goOnline);
+      window.removeEventListener("offline", goOffline);
+    };
+  }, []);
+
+  const projectsRef = useRef(projects);
+  projectsRef.current = projects;
+
   // ── Auto-fetch on launch ─────────────────────────────────────────────
+  // Fetches each project through the tracked per-project command so failures
+  // can be aggregated and shown, instead of being swallowed silently.
   const autoFetchDoneRef = useRef(false);
+  const [autoFetchFailures, setAutoFetchFailures] = useState<AutoFetchFailure[]>([]);
+  const runAutoFetch = useCallback(async () => {
+    const targets = projectsRef.current.map((p) => ({ name: p.project.name, path: p.project.path }));
+    if (targets.length === 0) return;
+    const failures: AutoFetchFailure[] = [];
+    const queue = [...targets];
+    const worker = async () => {
+      for (;;) {
+        const target = queue.shift();
+        if (!target) return;
+        try {
+          await gitFetch(target.path);
+        } catch (e) {
+          const message = parseError(e);
+          if (!isBenignFetchFailure(message)) failures.push({ ...target, message });
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(3, queue.length) }, worker));
+    setAutoFetchFailures(failures);
+  }, []);
+
   useEffect(() => {
     if (loading || projects.length === 0 || autoFetchDoneRef.current) return;
     autoFetchDoneRef.current = true;
 
     getSettings()
       .then((s) => {
-        if (!s.auto_fetch_on_launch) return;
-        gitAutoFetchAll().then(() => {
-          refreshAll();
-        }).catch(() => {});
+        if (!s.auto_fetch_on_launch || !navigator.onLine) return;
+        runAutoFetch()
+          .then(() => refreshAll())
+          .catch(() => {});
       })
       .catch(() => {});
-  }, [loading, projects.length, refreshAll]);
-
-  const projectsRef = useRef(projects);
-  projectsRef.current = projects;
+  }, [loading, projects.length, refreshAll, runAutoFetch]);
 
   // Compute status stats for batch toolbar and attention badge
   const { behindCount, aheadCount, needsAttention } = useMemo(() => {
@@ -349,6 +424,46 @@ export default function App() {
   const handleOpenShortcutsHelp = useCallback(() => setShortcutsHelpOpen(true), []);
   const handleOpenQuickDiff = useCallback(() => setQuickDiffOpen(true), []);
   const handleCloseQuickDiff = useCallback(() => setQuickDiffOpen(false), []);
+  const handleOpenBuiltInTerminal = useCallback((path: string, title: string) => {
+    setTerminalInitial({ cwd: path, title });
+    setTerminalPanelOpen(true);
+  }, []);
+  const handleRunProjectScript = useCallback(
+    (path: string, title: string, script: { name: string; command: string }) => {
+      setRecentCommand(path, { name: script.name, command: script.command });
+      setTerminalInitial({ cwd: path, title, command: script.command, tabTitle: script.name });
+      setTerminalPanelOpen(true);
+    },
+    []
+  );
+  const handleLaunchWorkspace = useCallback((items: RunPresetItem[]) => {
+    setWorkspaceLaunch({ items, token: Date.now() });
+    setTerminalPanelOpen(true);
+  }, []);
+  const [batchPickerOpen, setBatchPickerOpen] = useState(false);
+  const handleRunCommandAll = useCallback(() => setBatchPickerOpen(true), []);
+  const handleBatchRun = useCallback(
+    (script: { name: string; command: string }) => {
+      setBatchPickerOpen(false);
+      for (const p of projects) {
+        setRecentCommand(p.project.path, { name: script.name, command: script.command });
+      }
+      handleLaunchWorkspace(
+        projects.map((p) => ({
+          cwd: p.project.path,
+          projectTitle: p.project.name,
+          title: script.name,
+          command: script.command,
+        }))
+      );
+    },
+    [projects, handleLaunchWorkspace]
+  );
+  const handleToggleTerminalPanel = useCallback(() => setTerminalPanelOpen((v) => !v), []);
+  const handleCloseTerminalPanel = useCallback(() => {
+    setTerminalPanelOpen(false);
+    setTerminalInitial(null);
+  }, []);
   const handleOpenExportArchive = useCallback((path: string) => {
     setExportArchivePath(path);
     setExportArchiveOpen(true);
@@ -394,6 +509,8 @@ export default function App() {
       onThemeChange: setTheme,
       onViewModeChange: setViewMode,
       currentTheme: theme,
+      onRunProjectScript: handleRunProjectScript,
+      onLaunchWorkspace: handleLaunchWorkspace,
     },
     projects,
     recentProjectsList,
@@ -470,6 +587,9 @@ export default function App() {
           break;
         case "abort_merge":
           toastRef.current.info("Use 'git merge --abort' in terminal to abort the merge");
+          break;
+        case "resolve_conflicts":
+          setConflictResolvePath(path);
           break;
         default:
           break;
@@ -608,17 +728,19 @@ export default function App() {
       onFetch: handleFetchProject,
       onPull: handlePullProject,
       onPush: handlePushProject,
+      onOpenBuiltInTerminal: handleOpenBuiltInTerminal,
+      onRunProjectScript: handleRunProjectScript,
     }),
-    [switchBranch, refreshProject, handleRemoveRequest, toast, handleReorder, updateAlias, setProjectColorLocally, isOpActive, getActiveOp, getAnyActiveOp, cancelOp, handleFetchProject, handlePullProject, handlePushProject]
+    [switchBranch, refreshProject, handleRemoveRequest, toast, handleReorder, updateAlias, setProjectColorLocally, isOpActive, getActiveOp, getAnyActiveOp, cancelOp, handleFetchProject, handlePullProject, handlePushProject, handleOpenBuiltInTerminal, handleRunProjectScript]
   );
 
   return (
     <div className="app-root h-screen min-w-0 bg-[var(--surface-0)] flex flex-col">
-      {/* Title bar — draggable, spans full width above sidebar */}
+      {/* Title bar — draggable top band of the unified window chrome */}
       <div
         data-tauri-drag-region
         role="presentation"
-        className="app-titlebar h-8 pl-20 select-none shrink-0"
+        className="app-titlebar h-[var(--titlebar-h)] pl-20 select-none shrink-0"
       />
 
       {/* Drag & drop overlay */}
@@ -635,21 +757,26 @@ export default function App() {
       )}
 
       <ProjectProvider value={projectActions}>
-        <div className="flex flex-1 min-w-0 overflow-hidden">
+        <div
+          className="flex flex-1 min-w-0 overflow-hidden"
+          style={{ "--header-h": `${headerHeight}px` } as React.CSSProperties}
+        >
           {/* Sidebar: docked on wide windows, drawer on narrow windows. */}
           {showSidebar && (
             <>
               <button
                 type="button"
-                className={`fixed inset-0 top-8 z-30 bg-black/30 lg:hidden ${scrimAnimation}`}
+                className={`fixed inset-0 top-[var(--titlebar-h)] z-30 bg-black/30 lg:hidden ${scrimAnimation}`}
                 aria-label="Close sidebar"
                 onClick={handleToggleSidebar}
               />
-              <aside className="material-heavy fixed inset-y-0 left-0 top-8 z-40 w-72 max-w-[85vw] overflow-y-auto p-4 shadow-2xl animate-[drawerIn_280ms_var(--ease-spring)] lg:relative lg:top-auto lg:z-auto lg:w-56 lg:max-w-none lg:shrink-0 lg:shadow-none lg:animate-none">
-                {/* Material depth edge — replaces a hard border-r */}
+              <aside className="chrome fixed inset-y-0 left-0 top-[var(--titlebar-h)] z-40 w-72 max-w-[85vw] overflow-y-auto p-4 shadow-2xl animate-[drawerIn_280ms_var(--ease-spring)] lg:relative lg:top-auto lg:z-auto lg:w-56 lg:max-w-none lg:shrink-0 lg:shadow-none lg:animate-none">
+                {/* Depth wash along the chrome/content boundary — starts
+                  * below the menu bar so the chrome corner stays seamless;
+                  * replaces a hard border-r */}
                 <div
                   aria-hidden
-                  className="pointer-events-none absolute inset-y-0 right-0 hidden w-8 bg-gradient-to-r from-transparent to-black/5 dark:to-white/5 lg:block"
+                  className="pointer-events-none absolute right-0 bottom-0 top-[var(--header-h,3.25rem)] hidden w-8 bg-gradient-to-r from-transparent to-black/5 dark:to-white/5 lg:block"
                 />
                 <ProjectGroupsPanel
                   activeGroup={activeGroup}
@@ -662,11 +789,8 @@ export default function App() {
           )}
 
         {/* Main area: toolbar + content */}
-        <div
-          className="relative flex-1 min-w-0 flex flex-col overflow-hidden"
-          style={{ "--header-h": `${headerHeight}px` } as React.CSSProperties}
-        >
-          {/* Floating material header — content scrolls beneath it */}
+        <div className="relative flex-1 min-w-0 flex flex-col overflow-hidden">
+          {/* Menu bar (floating chrome) — content scrolls beneath it */}
           <div ref={headerRef} className="absolute inset-x-0 top-0 z-20">
             <Header
             projectCount={sortedProjects.length}
@@ -689,6 +813,7 @@ export default function App() {
             onSettings={handleOpenSettings}
             onTaskWorkspaces={() => setTaskWorkspacesOpen(true)}
             onToggleCommandPalette={togglePalette}
+            onToggleTerminal={handleToggleTerminalPanel}
             batchLoading={batchLoading}
             batchProgress={batchProgress}
             onFetchAll={fetchAll}
@@ -697,6 +822,7 @@ export default function App() {
             onPullBehind={pullBehind}
             onPushAhead={pushAhead}
             onSyncAll={syncAll}
+            onRunCommandAll={handleRunCommandAll}
             behindCount={behindCount}
             aheadCount={aheadCount}
             needsAttention={needsAttention}
@@ -713,6 +839,14 @@ export default function App() {
             className="flex-1 min-w-0 overflow-y-auto bg-[var(--surface-0)] px-3 pb-3 sm:px-4 sm:pb-4 lg:px-6 lg:pb-6"
           >
             <ErrorBoundary>
+              <OfflineBanner
+                online={online}
+                failures={autoFetchFailures}
+                onRetry={() => {
+                  runAutoFetch().then(() => refreshAll()).catch(() => {});
+                }}
+                onDismissFailures={() => setAutoFetchFailures([])}
+              />
               <ScrollParentProvider value={scrollParentRef}>
                 <ProjectGrid
                   projects={sortedProjects}
@@ -815,7 +949,24 @@ export default function App() {
         />
       </Suspense>
 
-      <ToastContainer toasts={toast.toasts} onRemove={toast.removeToast} onPause={toast.pauseToast} onResume={toast.resumeToast} onAction={handleToastAction} />
+      <Suspense fallback={null}>
+        {conflictResolvePath && (
+          <Modal open onClose={() => setConflictResolvePath(null)} title="Resolve conflicts" maxWidth="max-w-2xl">
+            <div className="p-3">
+              <Suspense fallback={null}>
+                <ConflictResolver
+                  path={conflictResolvePath}
+                  onSuccess={toast.success}
+                  onError={(msg: string) => toast.error(msg)}
+                  onRefresh={() => { refreshProject(conflictResolvePath); }}
+                />
+              </Suspense>
+            </div>
+          </Modal>
+        )}
+      </Suspense>
+
+      <ToastContainer toasts={toast.toasts} onRemove={toast.removeToast} onPause={toast.pauseToast} onResume={toast.resumeToast} onAction={handleToastAction} undo={undoPrompt} onUndo={undoLast} onUndoDismiss={dismissUndo} />
 
       <Suspense fallback={null}>
         <ShortcutsHelp
@@ -828,6 +979,26 @@ export default function App() {
         <QuickDiffPanel
           open={quickDiffOpen}
           onClose={handleCloseQuickDiff}
+        />
+      </Suspense>
+
+      <Suspense fallback={null}>
+        <TerminalPanel
+          open={terminalPanelOpen}
+          initial={terminalInitial}
+          workspaceLaunch={workspaceLaunch}
+          onClose={handleCloseTerminalPanel}
+        />
+      </Suspense>
+
+      <Suspense fallback={null}>
+        <ScriptPickerDialog
+          open={batchPickerOpen}
+          projectPath={projects[0]?.project.path ?? ""}
+          projectTitle="All projects"
+          targets={projects.map((p) => ({ path: p.project.path, title: p.project.name }))}
+          onRun={handleBatchRun}
+          onClose={() => setBatchPickerOpen(false)}
         />
       </Suspense>
 

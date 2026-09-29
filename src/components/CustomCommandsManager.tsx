@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, memo } from "react";
 import * as api from "../lib/tauri";
-import type { CustomCommand } from "../lib/types";
+import type { CustomCommand, ProjectDetail } from "../lib/types";
 
 interface CustomCommandsManagerProps {
   onError?: (msg: string) => void;
@@ -10,17 +10,23 @@ export const CustomCommandsManager = memo(function CustomCommandsManager({
   onError,
 }: CustomCommandsManagerProps) {
   const [commands, setCommands] = useState<CustomCommand[]>([]);
+  const [projects, setProjects] = useState<ProjectDetail[]>([]);
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState("");
   const [command, setCommand] = useState("");
   const [shortcut, setShortcut] = useState("");
+  const [projectPath, setProjectPath] = useState("");
   const [adding, setAdding] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await api.listCustomCommands();
+      const [data, projectList] = await Promise.all([
+        api.listCustomCommands(),
+        api.listProjects(),
+      ]);
       setCommands(data);
+      setProjects(projectList);
     } catch {
       onError?.("Failed to load custom commands");
     } finally {
@@ -30,6 +36,11 @@ export const CustomCommandsManager = memo(function CustomCommandsManager({
 
   useEffect(() => { load(); }, [load]);
 
+  const projectName = useCallback(
+    (path: string) => projects.find((p) => p.project.path === path)?.project.name ?? path,
+    [projects]
+  );
+
   const handleAdd = useCallback(async () => {
     if (!name.trim() || !command.trim()) return;
     setAdding(true);
@@ -38,6 +49,7 @@ export const CustomCommandsManager = memo(function CustomCommandsManager({
         name.trim(),
         command.trim(),
         shortcut.trim() || undefined,
+        projectPath || null,
       );
       setCommands((prev) => [...prev, cmd]);
       setName("");
@@ -48,7 +60,7 @@ export const CustomCommandsManager = memo(function CustomCommandsManager({
     } finally {
       setAdding(false);
     }
-  }, [name, command, shortcut, onError]);
+  }, [name, command, shortcut, projectPath, onError]);
 
   const handleDelete = useCallback(async (id: string) => {
     try {
@@ -92,6 +104,21 @@ export const CustomCommandsManager = memo(function CustomCommandsManager({
             className="w-full px-2.5 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--surface-2)] text-sm font-mono text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
+        <div className="w-36">
+          <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Project</label>
+          <select
+            value={projectPath}
+            onChange={(e) => setProjectPath(e.target.value)}
+            className="w-full h-8 px-2 rounded-lg border border-[var(--border-color)] bg-[var(--surface-2)] text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="">Global</option>
+            {projects.map((p) => (
+              <option key={p.project.id} value={p.project.path}>
+                {p.project.name}
+              </option>
+            ))}
+          </select>
+        </div>
         <div className="w-24">
           <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Shortcut</label>
           <input
@@ -134,6 +161,9 @@ export const CustomCommandsManager = memo(function CustomCommandsManager({
               {cmd.shortcut && (
                 <span className="text-xs text-gray-400 dark:text-gray-500 shrink-0">{cmd.shortcut}</span>
               )}
+              <span className="text-xs text-gray-400 dark:text-gray-500 shrink-0">
+                {cmd.project_path ? projectName(cmd.project_path) : "Global"}
+              </span>
               <button
                 onClick={() => handleDelete(cmd.id)}
                 className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 transition-all shrink-0"

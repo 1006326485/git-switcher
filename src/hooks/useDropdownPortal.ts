@@ -62,6 +62,24 @@ export function useDropdownPortal({ minWidth = 200, align = "left" }: UseDropdow
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [open, close]);
 
+  // Consume Escape while the dropdown is open, wherever focus is: the search
+  // input only exists for long option lists, so without this an enclosing
+  // Modal closes together with the dropdown and drops the user's input.
+  useEffect(() => {
+    if (!open) return;
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      close();
+      triggerRef.current
+        ?.querySelector<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')
+        ?.focus();
+    };
+    document.addEventListener("keydown", handleEscape, true);
+    return () => document.removeEventListener("keydown", handleEscape, true);
+  }, [open, close]);
+
   // Reset active index when search changes (only while open)
   useEffect(() => {
     if (open) setActiveIndex(-1);
@@ -93,7 +111,11 @@ export function useDropdownPortal({ minWidth = 200, align = "left" }: UseDropdow
           if (activeIndex >= 0) onSelect(activeIndex);
           break;
         case "Escape":
+          // Consume Escape so an enclosing Modal does not close together with
+          // the dropdown (defaultPrevented + stopped propagation).
           e.preventDefault();
+          e.stopPropagation();
+          e.nativeEvent.stopImmediatePropagation();
           close();
           break;
       }

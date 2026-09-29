@@ -18,6 +18,39 @@ fn switches_to_a_branch_created_in_a_temporary_repository() {
 }
 
 #[test]
+fn lists_tags_in_the_branch_picker_and_switches_to_them() {
+    let fixture = GitFixture::new();
+    let path = fixture.path();
+
+    GitService::create_tag(path, "v1.0.0", None, None).unwrap();
+    GitService::create_tag(path, "release/2024-06", None, None).unwrap();
+
+    let repo = fixture.open();
+    let branches = GitService::get_branches(&repo).unwrap();
+
+    let tag = branches
+        .iter()
+        .find(|branch| branch.name == "release/2024-06")
+        .expect("tag is listed in branch picker");
+    assert!(tag.is_tag);
+    assert!(!tag.is_remote);
+
+    GitService::switch_branch(path, "release/2024-06").unwrap();
+
+    let repo = fixture.open();
+    let head = repo.head().unwrap();
+    assert!(!head.is_branch(), "checkout of a tag detaches HEAD");
+    assert_eq!(
+        head.target().unwrap(),
+        repo.revparse_single("refs/tags/release/2024-06")
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id()
+    );
+}
+
+#[test]
 fn reports_an_untracked_file_in_a_temporary_repository() {
     let fixture = GitFixture::new();
     fixture.write_file("notes.txt", "untracked work");

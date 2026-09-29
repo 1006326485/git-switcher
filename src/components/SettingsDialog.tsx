@@ -4,6 +4,7 @@ import { GeneralSettings } from "./GeneralSettings";
 import { LlmSettings } from "./LlmSettings";
 import { BackgroundSettings } from "./BackgroundSettings";
 import { CustomCommandsManager } from "./CustomCommandsManager";
+import { CredentialsSettings } from "./CredentialsSettings";
 import * as api from "../lib/tauri";
 import { parseError } from "../lib/types";
 import { APP_VERSION } from "../lib/appVersion";
@@ -19,7 +20,7 @@ interface SettingsDialogProps {
 }
 
 export const SettingsDialog = memo(function SettingsDialog({ open, onClose, onSuccess, onError, accentColor, onAccentChange }: SettingsDialogProps) {
-  const [tab, setTab] = useState<"general" | "llm" | "background" | "commands" | "data" | "about">("general");
+  const [tab, setTab] = useState<"general" | "llm" | "background" | "credentials" | "commands" | "data" | "about">("general");
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
 
@@ -69,6 +70,7 @@ export const SettingsDialog = memo(function SettingsDialog({ open, onClose, onSu
           { value: "general", label: "General" },
           { value: "llm", label: "AI Review" },
           { value: "background", label: "Background" },
+          { value: "credentials", label: "Credentials" },
           { value: "data", label: "Data" },
           { value: "about", label: "About" },
         ]}
@@ -79,6 +81,7 @@ export const SettingsDialog = memo(function SettingsDialog({ open, onClose, onSu
         {tab === "general" && <GeneralSettings onError={onError} accentColor={accentColor} onAccentChange={onAccentChange} />}
         {tab === "llm" && <LlmSettings onError={onError} />}
         {tab === "background" && <BackgroundSettings onError={onError} />}
+        {tab === "credentials" && <CredentialsSettings onError={onError} />}
         {tab === "commands" && <CustomCommandsManager onError={onError} />}
         {tab === "data" && (
           <div className="space-y-4">

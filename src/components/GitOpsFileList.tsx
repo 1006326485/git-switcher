@@ -1,6 +1,7 @@
 import { memo } from "react";
 import type { GitFileEntry, FileDiffStats } from "../lib/types";
 import type { DiffLine } from "./diffUtils";
+import { ChipButton } from "./ui/ChipButton";
 
 const inlineLineColors: Record<DiffLine["type"], string> = {
   add: "bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200",
@@ -39,22 +40,24 @@ export const GitOpsFileList = memo(function GitOpsFileList({
     <div className="space-y-1">
       <div className="flex items-center gap-2 mb-1">
         <span className="text-xs text-gray-500 dark:text-gray-400">{files.length} file{files.length !== 1 ? "s" : ""}</span>
-        <button
+        <ChipButton
           onClick={onStageAll}
           disabled={isLoading("stage_all")}
-          className="px-2 py-0.5 rounded-lg text-xs font-medium bg-green-100 dark:bg-green-900/20 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800/50 hover:bg-green-200 dark:hover:bg-green-900/40 disabled:opacity-50 transition-colors duration-150 active:scale-[0.98]"
+          tone="green"
+          size="xs"
           aria-label="Stage all files"
         >
           {isLoading("stage_all") ? "Staging..." : "Stage All"}
-        </button>
-        <button
+        </ChipButton>
+        <ChipButton
           onClick={onUnstageAll}
           disabled={isLoading("unstage_all")}
-          className="px-2 py-0.5 rounded-lg text-xs font-medium bg-red-100 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800/50 hover:bg-red-200 dark:hover:bg-red-900/40 disabled:opacity-50 transition-colors duration-150 active:scale-[0.98]"
+          tone="red"
+          size="xs"
           aria-label="Unstage all files"
         >
           {isLoading("unstage_all") ? "Unstaging..." : "Unstage All"}
-        </button>
+        </ChipButton>
       </div>
       <div className="max-h-96 overflow-y-auto" role="list" aria-label="Changed files">
         {files.map((f) => {
@@ -186,7 +189,7 @@ export const GitOpsFileList = memo(function GitOpsFileList({
               {/* Inline diff panel */}
               {isInlineOpen && (
                 <div className="ml-16 mt-1 mb-2 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 overflow-hidden">
-                  <div className="overflow-auto font-mono text-xs leading-5 max-h-[300px]">
+                  <div className="select-text overflow-auto font-mono text-xs leading-5 max-h-[300px]">
                     {isLoadingDiff ? (
                       <div className="flex items-center justify-center py-4 text-gray-400">
                         <span className="animate-spin mr-2">&#x21BB;</span>

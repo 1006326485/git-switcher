@@ -75,6 +75,8 @@ pub struct BranchInfo {
     pub is_remote: bool,
     #[serde(default)]
     pub is_merged: bool,
+    #[serde(default)]
+    pub is_tag: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

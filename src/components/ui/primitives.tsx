@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useId, memo } from "react";
+import { useState, useRef, useEffect, useCallback, useId, memo, isValidElement, cloneElement } from "react";
 import { createPortal } from "react-dom";
 import { CloseIcon } from "./icons";
 
@@ -122,9 +122,28 @@ export const DropdownMenu = memo(function DropdownMenu({
     );
   }, [align]);
 
+  // Whatever the caller rendered with a menuitem-ish role.
+  const menuItems = useCallback(() => {
+    const panel = dropdownRef.current;
+    return panel ? Array.from(panel.querySelectorAll<HTMLElement>('[role^="menuitem"]')) : [];
+  }, []);
+
+  const focusItem = useCallback((items: HTMLElement[], index: number) => {
+    if (items.length === 0) return;
+    items[((index % items.length) + items.length) % items.length].focus();
+  }, []);
+
+  const focusTrigger = useCallback(() => {
+    const trigger = triggerRef.current;
+    (trigger?.querySelector<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    ) ?? trigger)?.focus();
+  }, []);
+
   useEffect(() => {
     if (!open) return;
     updatePos();
+    menuItems()[0]?.focus();
     const handleClick = (e: MouseEvent) => {
       const target = e.target as Node;
       if (
@@ -135,22 +154,59 @@ export const DropdownMenu = memo(function DropdownMenu({
       }
       setOpen(false);
     };
+    // Capture phase: Escape must be consumed before an enclosing Modal's
+    // document listener sees it, or the dialog closes together with the menu.
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        setOpen(false);
+        focusTrigger();
+        return;
+      }
+      const target = e.target as Node;
+      if (
+        !triggerRef.current?.contains(target) &&
+        !dropdownRef.current?.contains(target)
+      ) {
+        return;
+      }
+      const items = menuItems();
+      const current = items.findIndex((el) => el === document.activeElement);
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        focusItem(items, current + 1);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        focusItem(items, current < 0 ? items.length - 1 : current - 1);
+      } else if (e.key === "Home") {
+        e.preventDefault();
+        focusItem(items, 0);
+      } else if (e.key === "End") {
+        e.preventDefault();
+        focusItem(items, items.length - 1);
+      }
     };
     document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleKey);
+    document.addEventListener("keydown", handleKey, true);
     window.addEventListener("scroll", updatePos, true);
     return () => {
       document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleKey);
+      document.removeEventListener("keydown", handleKey, true);
       window.removeEventListener("scroll", updatePos, true);
     };
-  }, [open, updatePos]);
+  }, [open, updatePos, menuItems, focusItem, focusTrigger]);
 
   return (
     <div ref={triggerRef}>
-      <div onClick={() => setOpen(!open)}>{trigger}</div>
+      <div onClick={() => setOpen(!open)}>
+        {isValidElement(trigger)
+          ? cloneElement(trigger as React.ReactElement<{ "aria-haspopup"?: string; "aria-expanded"?: boolean }>, {
+              "aria-haspopup": "menu",
+              "aria-expanded": open,
+            })
+          : trigger}
+      </div>
       {open &&
         createPortal(
           <div
@@ -184,17 +240,22 @@ export const MenuItem = memo(function MenuItem({
   description,
   onClick,
   danger,
+  selected,
 }: {
   icon?: React.ReactNode;
   label: string;
   description?: string;
   onClick: () => void;
   danger?: boolean;
+  // With `selected`, the item becomes a menuitemradio: checked state is
+  // exposed via aria-checked instead of a text checkmark appended to the label.
+  selected?: boolean;
 }) {
   return (
     <button
       type="button"
-      role="menuitem"
+      role={selected === undefined ? "menuitem" : "menuitemradio"}
+      aria-checked={selected}
       onClick={onClick}
       className={`press w-full text-left px-3 py-2 text-sm flex items-center gap-3 transition-all active:scale-[0.99] ${
         danger
@@ -225,6 +286,7 @@ export const Modal = memo(function Modal({
   title,
   subtitle,
   maxWidth = "max-w-md",
+  size = "md",
   children,
 }: {
   open: boolean;
@@ -232,6 +294,7 @@ export const Modal = memo(function Modal({
   title: string;
   subtitle?: string;
   maxWidth?: string;
+  size?: "md" | "sm";
   children: React.ReactNode;
 }) {
   const contentRef = useRef<HTMLDivElement>(null);
@@ -242,8 +305,12 @@ export const Modal = memo(function Modal({
 
   useEffect(() => {
     if (!open) return;
+    // Remember the opener so focus returns to it when the dialog closes.
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCloseRef.current();
+      // A nested layer (dropdown/select) that consumed Escape marks the event
+      // as handled; closing here too would drop the user's in-progress input.
+      if (e.key === "Escape" && !e.defaultPrevented) onCloseRef.current();
       // Focus trap: keep Tab within the modal
       if (e.key === "Tab" && contentRef.current) {
         const focusable = contentRef.current.querySelectorAll<HTMLElement>(
@@ -274,22 +341,25 @@ export const Modal = memo(function Modal({
     return () => {
       cancelAnimationFrame(raf);
       document.removeEventListener("keydown", handleKey);
+      if (opener?.isConnected) opener.focus();
     };
   }, [open]);
 
   if (!open) return null;
 
-  return (
+  // Portal to body: host containers (e.g. project cards) apply hover
+  // translate, which traps fixed descendants as a containing block.
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4" role="dialog" aria-modal="true" aria-labelledby={titleId}>
       <div className={`absolute inset-0 bg-black/50 dark:bg-black/60 backdrop-blur-sm ${scrimAnimation}`} onClick={onClose} />
       <div
         ref={contentRef}
-        className={`relative flex max-h-[calc(100dvh-1.5rem)] w-full max-w-[calc(100vw-1.5rem)] flex-col overflow-y-auto rounded-2xl bg-[var(--surface-1)] shadow-xl sm:max-h-[calc(100dvh-2rem)] sm:max-w-[calc(100vw-2rem)] ${dialogAnimation} ${maxWidth}`}
+        className={`relative flex max-h-[calc(100dvh-1.5rem)] w-full max-w-[calc(100vw-1.5rem)] flex-col overflow-y-auto ${size === "sm" ? "rounded-xl" : "rounded-2xl"} bg-[var(--surface-1)] shadow-xl sm:max-h-[calc(100dvh-2rem)] sm:max-w-[calc(100vw-2rem)] ${dialogAnimation} ${maxWidth}`}
       >
         {/* Header */}
-        <div className="flex items-start justify-between gap-3 border-b border-black/5 px-4 pb-3 pt-4 sm:px-6 sm:pt-5 dark:border-white/5">
+        <div className={`flex items-start justify-between gap-3 border-b border-black/5 dark:border-white/5 ${size === "sm" ? "px-3 pb-2 pt-2.5" : "px-4 pb-3 pt-4 sm:px-6 sm:pt-5"}`}>
           <div className="min-w-0">
-            <h2 id={titleId} className="text-lg font-semibold tracking-tight text-gray-900 dark:text-gray-100">{title}</h2>
+            <h2 id={titleId} className={`${size === "sm" ? "text-sm" : "text-lg"} font-semibold tracking-tight text-gray-900 dark:text-gray-100`}>{title}</h2>
             {subtitle && (
               <p className="truncate text-sm text-gray-500 dark:text-gray-400">{subtitle}</p>
             )}
@@ -297,16 +367,17 @@ export const Modal = memo(function Modal({
           <button
             onClick={onClose}
             aria-label="Close dialog"
-            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            className={`${size === "sm" ? "p-1" : "p-1.5"} rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors`}
           >
-            <CloseIcon size={16} />
+            <CloseIcon size={size === "sm" ? 14 : 16} />
           </button>
         </div>
 
         {/* Body */}
         {children}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 });
 
@@ -316,11 +387,27 @@ export function Tabs<T extends string>({
   tabs,
   active,
   onChange,
+  group,
 }: {
   tabs: { value: T; label: string }[];
   active: T;
   onChange: (v: T) => void;
+  // Id namespace shared with the matching <TabPanel>; defaults to a generated id.
+  group?: string;
 }) {
+  const autoGroup = useId();
+  const groupId = group ?? autoGroup;
+  // Panels render in the calling component. Emit aria-controls only once the
+  // matching <TabPanel> exists so the reference always resolves to an element.
+  const [linkedPanels, setLinkedPanels] = useState<ReadonlySet<string>>(() => new Set());
+  const tabValues = tabs.map((t) => t.value).join("\u0000");
+  useEffect(() => {
+    const next = new Set<string>();
+    for (const value of tabValues.split("\u0000")) {
+      if (document.getElementById(`${groupId}-panel-${value}`)) next.add(value);
+    }
+    setLinkedPanels(next);
+  }, [groupId, tabValues, active]);
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       const idx = tabs.findIndex((t) => t.value === active);
@@ -344,8 +431,10 @@ export function Tabs<T extends string>({
       {tabs.map((tab) => (
         <button
           key={tab.value}
+          id={`${groupId}-tab-${tab.value}`}
           role="tab"
           aria-selected={active === tab.value}
+          aria-controls={linkedPanels.has(tab.value) ? `${groupId}-panel-${tab.value}` : undefined}
           tabIndex={active === tab.value ? 0 : -1}
           onClick={() => onChange(tab.value)}
           className={`shrink-0 whitespace-nowrap px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
@@ -357,6 +446,31 @@ export function Tabs<T extends string>({
           {tab.label}
         </button>
       ))}
+    </div>
+  );
+}
+
+// ── Tab Panel (pairs with <Tabs group=...>) ───────────────────────────────
+// Wrap the panel the calling component renders next to <Tabs>; the ids match
+// the tab's aria-controls/aria-labelledby wiring.
+
+export function TabPanel<T extends string>({
+  group,
+  value,
+  children,
+}: {
+  group: string;
+  value: T;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      role="tabpanel"
+      id={`${group}-panel-${value}`}
+      aria-labelledby={`${group}-tab-${value}`}
+      tabIndex={0}
+    >
+      {children}
     </div>
   );
 }
@@ -429,7 +543,7 @@ export const StatusBadge = memo(function StatusBadge({
   if (variant === "compact") {
     return (
       <span
-        className={`text-xs font-semibold tracking-wide tabular-nums px-1.5 py-0.5 rounded ${c.pill}`}
+        className={`select-none text-xs font-semibold tracking-wide tabular-nums px-1.5 py-0.5 rounded ${c.pill}`}
         title={`${count} ${type}`}
         aria-label={`${count} ${type}`}
       >
@@ -440,7 +554,7 @@ export const StatusBadge = memo(function StatusBadge({
 
   if (variant === "text") {
     return (
-      <span className={`text-sm font-medium ${c.text}`} aria-label={`${count} ${type}`}>
+      <span className={`select-none text-sm font-medium ${c.text}`} aria-label={`${count} ${type}`}>
         {type === "ahead" || type === "behind" ? symbol : count}
       </span>
     );
@@ -449,7 +563,7 @@ export const StatusBadge = memo(function StatusBadge({
   // pill (default)
   return (
     <span
-      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium tracking-wide tabular-nums ${c.pill}`}
+      className={`select-none inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium tracking-wide tabular-nums ${c.pill}`}
       aria-label={`${count} ${type}`}
     >
       {type === "ahead" || type === "behind"
@@ -460,6 +574,29 @@ export const StatusBadge = memo(function StatusBadge({
     </span>
   );
 });
+
+// ── Keyboard Hint Badge ───────────────────────────────────────────────────
+
+export function KbdBadge({
+  label,
+  size = "md",
+  title,
+}: {
+  label: string;
+  size?: "md" | "sm";
+  title?: string;
+}) {
+  return (
+    <kbd
+      title={title}
+      className={`inline-flex items-center justify-center font-medium bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm ${
+        size === "sm" ? "min-w-[18px] h-4 px-1 text-[9px]" : "min-w-[24px] h-6 px-1.5 text-xs"
+      }`}
+    >
+      {label}
+    </kbd>
+  );
+}
 
 // ── Group Dot (unified size across all components) ────────────────────────
 
@@ -548,7 +685,7 @@ export const IconButton = memo(function IconButton({
       disabled={disabled}
       title={title}
       aria-label={title}
-      className={`press p-1.5 rounded-lg text-gray-400 transition-all disabled:opacity-50 active:scale-[0.95] ${hover[hoverColor]}`}
+      className={`press p-1.5 rounded-lg text-gray-500 dark:text-gray-400 transition-all disabled:opacity-50 active:scale-[0.95] ${hover[hoverColor]}`}
     >
       {children}
     </button>

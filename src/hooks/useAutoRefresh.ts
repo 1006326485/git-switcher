@@ -33,6 +33,7 @@ export function useAutoRefresh(
     let timer: ReturnType<typeof setInterval> | null = null;
     let cancelled = false;
     let onVisibility: (() => void) | null = null;
+    let cleanupExtra: (() => void) | null = null;
 
     getSettings()
       .then((s) => {
@@ -41,21 +42,33 @@ export function useAutoRefresh(
           const ms = s.refresh_interval_secs * 1000;
           const startTimer = () => {
             timer = setInterval(() => {
-              if (!document.hidden && busyOpsRef.current === 0) refreshAll();
+              if (!document.hidden && navigator.onLine && busyOpsRef.current === 0) refreshAll();
             }, ms);
           };
-          startTimer();
-          onVisibility = () => {
-            if (document.hidden) {
+          if (navigator.onLine) startTimer();
+          const syncTimer = () => {
+            // Mirror the document.hidden gate: pause while hidden or offline,
+            // resume (and catch up once) when visible and online again.
+            if (document.hidden || !navigator.onLine) {
               if (timer) {
                 clearInterval(timer);
                 timer = null;
               }
-            } else {
-              if (!timer) startTimer();
+            } else if (!timer) {
+              startTimer();
             }
           };
+          onVisibility = syncTimer;
           document.addEventListener("visibilitychange", onVisibility);
+          window.addEventListener("online", syncTimer);
+          window.addEventListener("offline", syncTimer);
+          const onOnline = () => refreshAll();
+          window.addEventListener("online", onOnline);
+          cleanupExtra = () => {
+            window.removeEventListener("online", syncTimer);
+            window.removeEventListener("offline", syncTimer);
+            window.removeEventListener("online", onOnline);
+          };
         }
       })
       .catch((e) => onError(`Failed to load settings: ${e}`));
@@ -65,6 +78,7 @@ export function useAutoRefresh(
       if (timer) clearInterval(timer);
       if (onVisibility)
         document.removeEventListener("visibilitychange", onVisibility);
+      if (cleanupExtra) cleanupExtra();
     };
   }, [refreshAll, onError, settingsVersion]);
 }

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, memo } from "react";
 import { ThemeSettings } from "./ThemeSettings";
 import type { AppSettings, Theme, ViewMode } from "../lib/types";
 import { getSettings, updateSettingsPartial } from "../lib/tauri";
+import { formatHotkey } from "../lib/hotkey";
 
 interface GeneralSettingsProps {
   onError: (msg: string) => void;
@@ -26,13 +27,17 @@ const VIEW_MODE_OPTIONS: { value: ViewMode; label: string }[] = [
 export const GeneralSettings = memo(function GeneralSettings({ onError, accentColor, onAccentChange }: GeneralSettingsProps) {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [saved, setSaved] = useState(false);
+  const [hotkeyDraft, setHotkeyDraft] = useState("");
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingRef = useRef<Promise<void>>(Promise.resolve());
+  const pendingRef = useRef<Promise<boolean>>(Promise.resolve(true));
 
   useEffect(() => {
-    getSettings().then(setSettings).catch((e) => {
+    getSettings().then((s) => {
+      setSettings(s);
+      setHotkeyDraft(s.terminal_hotkey);
+    }).catch((e) => {
       onErrorRef.current(`Failed to load settings: ${e}`);
     });
     return () => {
@@ -40,21 +45,37 @@ export const GeneralSettings = memo(function GeneralSettings({ onError, accentCo
     };
   }, []);
 
-  const update = useCallback(<K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
+  const update = useCallback(<K extends keyof AppSettings>(key: K, value: AppSettings[K]): Promise<boolean> => {
     // Update UI immediately
     setSettings((prev) => (prev ? { ...prev, [key]: value } : prev));
     // Serialize saves to prevent race conditions
-    pendingRef.current = pendingRef.current.then(async () => {
+    const save = pendingRef.current.then(async () => {
       try {
         await updateSettingsPartial({ [key]: value });
         setSaved(true);
         if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
         saveTimerRef.current = setTimeout(() => setSaved(false), 1500);
+        return true;
       } catch (e) {
         onErrorRef.current(`Failed to save settings: ${e}`);
+        return false;
       }
     });
+    pendingRef.current = save;
+    return save;
   }, []);
+
+  const commitHotkey = useCallback(() => {
+    if (!settings) return;
+    const value = hotkeyDraft.trim();
+    if (!value || value === settings.terminal_hotkey) {
+      setHotkeyDraft(settings.terminal_hotkey);
+      return;
+    }
+    void update("terminal_hotkey", value).then((ok) => {
+      if (!ok) setHotkeyDraft(settings.terminal_hotkey);
+    });
+  }, [settings, hotkeyDraft, update]);
 
   if (!settings) {
     return <div className="text-sm text-gray-500 dark:text-gray-400">Loading...</div>;
@@ -182,6 +203,64 @@ export const GeneralSettings = memo(function GeneralSettings({ onError, accentCo
           <span
             className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
               settings.auto_fetch_on_launch ? "translate-x-4" : ""
+            }`}
+          />
+        </button>
+      </div>
+
+      {/* Terminal Hotkey */}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+          Terminal Hotkey
+        </label>
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={hotkeyDraft}
+            onChange={(e) => setHotkeyDraft(e.target.value)}
+            onBlur={commitHotkey}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+            }}
+            placeholder="CmdOrCtrl+Shift+`"
+            aria-label="Terminal hotkey"
+            spellCheck={false}
+            className="flex-1 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400"
+          />
+          <kbd className="inline-flex items-center h-8 px-2 text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-md">
+            {formatHotkey(hotkeyDraft.trim() || "CmdOrCtrl+Shift+`")}
+          </kbd>
+        </div>
+        <p className="text-xs text-gray-400 mt-1">
+          Global shortcut that summons the standalone terminal window. Examples:
+          CmdOrCtrl+Shift+`, Alt+Space.
+        </p>
+      </div>
+
+      {/* Hide Terminal on Blur */}
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+            Hide Terminal on Blur
+          </div>
+          <div className="text-xs text-gray-500 dark:text-gray-400">
+            Dismiss the summoned terminal window when it loses focus
+          </div>
+        </div>
+        <button
+          role="switch"
+          aria-checked={settings.terminal_hide_on_blur}
+          aria-label="Hide terminal on blur"
+          onClick={() => update("terminal_hide_on_blur", !settings.terminal_hide_on_blur)}
+          className={`relative w-10 h-6 rounded-full transition-colors ${
+            settings.terminal_hide_on_blur
+              ? "bg-blue-600"
+              : "bg-gray-300 dark:bg-gray-600"
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
+              settings.terminal_hide_on_blur ? "translate-x-4" : ""
             }`}
           />
         </button>

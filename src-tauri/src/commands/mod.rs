@@ -1,5 +1,6 @@
 pub mod ai_review;
 pub mod background;
+pub mod credentials;
 pub mod custom_commands;
 pub mod events;
 pub mod git;
@@ -9,12 +10,16 @@ pub mod op_log;
 pub mod op_tracker;
 pub mod operation_policy;
 pub mod projects;
+pub mod run_presets;
+pub mod scripts;
 pub mod search;
 pub mod settings;
 pub mod task_workspaces;
+pub mod terminal;
 
 pub use ai_review::*;
 pub use background::*;
+pub use credentials::*;
 pub use custom_commands::*;
 pub use git::*;
 pub use groups::*;
@@ -23,9 +28,12 @@ pub use op_log::*;
 pub use op_tracker::*;
 pub use operation_policy::*;
 pub use projects::*;
+pub use run_presets::*;
+pub use scripts::*;
 pub use search::*;
 pub use settings::*;
 pub use task_workspaces::*;
+pub use terminal::*;
 
 use crate::db::Database;
 use crate::models::{GitProject, Group, ProjectDetail};

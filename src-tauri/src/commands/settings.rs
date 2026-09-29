@@ -97,15 +97,18 @@ pub fn get_settings(store: State<'_, SettingsStore>) -> Result<AppSettings, AppE
 
 #[tauri::command]
 pub fn update_settings(
+    app: tauri::AppHandle,
     new_settings: AppSettings,
     store: State<'_, SettingsStore>,
 ) -> Result<AppSettings, AppError> {
+    apply_hotkey_if_changed(&app, &store, &new_settings)?;
     store.update_all(&new_settings)?;
     Ok(new_settings)
 }
 
 #[tauri::command]
 pub fn update_settings_partial(
+    app: tauri::AppHandle,
     patch: serde_json::Value,
     store: State<'_, SettingsStore>,
 ) -> Result<AppSettings, AppError> {
@@ -120,8 +123,23 @@ pub fn update_settings_partial(
     }
     let new_settings: AppSettings = serde_json::from_value(current_json)
         .map_err(|e| AppError::Config(format!("Failed to deserialize: {}", e)))?;
+    apply_hotkey_if_changed(&app, &store, &new_settings)?;
     store.update_all(&new_settings)?;
     Ok(new_settings)
+}
+
+/// Registers the hotkey before persisting so an invalid or conflicting
+/// shortcut never lands in the stored settings.
+fn apply_hotkey_if_changed(
+    app: &tauri::AppHandle,
+    store: &State<'_, SettingsStore>,
+    new_settings: &AppSettings,
+) -> Result<(), AppError> {
+    let current = store.get_all()?;
+    if current.terminal_hotkey == new_settings.terminal_hotkey {
+        return Ok(());
+    }
+    crate::hotkeys::apply_terminal_hotkey(app, &new_settings.terminal_hotkey)
 }
 
 #[tauri::command]

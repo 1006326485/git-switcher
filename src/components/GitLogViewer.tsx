@@ -31,9 +31,13 @@ export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open
 
   // Interactive rebase state
   const [editingHash, setEditingHash] = useState<string | null>(null);
+  const [editMode, setEditMode] = useState<"reword" | "amend">("reword");
   const [confirmRewordHash, setConfirmRewordHash] = useState<string | null>(null);
+  const [confirmAmend, setConfirmAmend] = useState(false);
   const [editMessage, setEditMessage] = useState("");
   const [confirmDropHash, setConfirmDropHash] = useState<string | null>(null);
+  const [confirmRevertHash, setConfirmRevertHash] = useState<string | null>(null);
+  const [revertConflicts, setRevertConflicts] = useState<string[] | null>(null);
   const [rebaseLoading, setRebaseLoading] = useState(false);
 
   const buildFilters = useCallback((): api.GitLogFilters => {
@@ -80,6 +84,24 @@ export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open
     return () => { cancelled = true; };
   }, [open, path, fetchLogs]);
 
+  // Surface an interrupted revert (e.g. reopened modal) so it can be finished.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const state = await api.gitOperationState(path);
+        if (state === "revert") {
+          const conflicts = await api.gitListConflicts(path);
+          if (!cancelled) setRevertConflicts(conflicts);
+        }
+      } catch {
+        // best-effort probe only
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [open, path]);
+
   const handleApplyFilters = useCallback(() => {
     setLoading(true);
     setError(null);
@@ -122,6 +144,13 @@ export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open
   }, []);
 
   const handleStartReword = useCallback((c: CommitInfo) => {
+    setEditMode("reword");
+    setEditingHash(c.hash);
+    setEditMessage(c.message);
+  }, []);
+
+  const handleStartAmend = useCallback((c: CommitInfo) => {
+    setEditMode("amend");
     setEditingHash(c.hash);
     setEditMessage(c.message);
   }, []);
@@ -154,6 +183,59 @@ export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open
       reload();
       onRefresh?.();
       setConfirmDropHash(null);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setRebaseLoading(false);
+    }
+  }, [path, reload, onRefresh]);
+
+  const handleSaveAmend = useCallback(async () => {
+    if (!editMessage.trim()) return;
+    setRebaseLoading(true);
+    try {
+      await api.gitAmendCommit(path, editMessage.trim());
+      reload();
+      onRefresh?.();
+      setEditingHash(null);
+      setEditMessage("");
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setRebaseLoading(false);
+    }
+  }, [path, editMessage, reload, onRefresh]);
+
+  const handleRevert = useCallback(async (hash: string) => {
+    setConfirmRevertHash(null);
+    setRebaseLoading(true);
+    try {
+      const result = await api.gitRevertCommit(path, hash);
+      if (result.success) {
+        setRevertConflicts(null);
+        reload();
+        onRefresh?.();
+      } else {
+        setRevertConflicts(result.conflicts);
+      }
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setRebaseLoading(false);
+    }
+  }, [path, reload, onRefresh]);
+
+  const handleRevertRecovery = useCallback(async (action: "continue" | "abort") => {
+    setRebaseLoading(true);
+    try {
+      if (action === "continue") {
+        await api.gitRevertContinue(path);
+      } else {
+        await api.gitRevertAbort(path);
+      }
+      setRevertConflicts(null);
+      reload();
+      onRefresh?.();
     } catch (e) {
       setError(String(e));
     } finally {
@@ -255,7 +337,42 @@ export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open
         </div>
       )}
 
-      <div className="max-h-[60vh] overflow-y-auto" role="region" aria-label="Commit history">
+      {revertConflicts !== null && (
+        <div className="px-6 pb-3">
+          <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/40 rounded-lg space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-red-700 dark:text-red-300">
+                Revert in progress — resolve conflicts, then continue or abort
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleRevertRecovery("continue")}
+                  disabled={rebaseLoading}
+                  className="px-3 py-1 rounded text-xs bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 transition-colors"
+                >
+                  Continue
+                </button>
+                <button
+                  onClick={() => handleRevertRecovery("abort")}
+                  disabled={rebaseLoading}
+                  className="px-3 py-1 rounded text-xs bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 transition-colors"
+                >
+                  Abort
+                </button>
+              </div>
+            </div>
+            {revertConflicts.length > 0 && (
+              <ul className="text-xs text-red-600 dark:text-red-400 space-y-0.5 pl-4 list-disc">
+                {revertConflicts.map((f) => (
+                  <li key={f} className="font-mono">{f}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="select-text max-h-[60vh] overflow-y-auto" role="region" aria-label="Commit history">
         {loading ? (
           <div className="flex items-center justify-center h-32 text-gray-500">
             <span className="animate-spin mr-2">&#x21BB;</span> Loading...
@@ -290,14 +407,20 @@ export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open
                             className="w-full px-2.5 py-1.5 rounded-md border border-blue-400 dark:border-blue-500 bg-white dark:bg-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                             autoFocus
                             onKeyDown={(e) => {
-                              if (e.key === "Enter" && !e.shiftKey) setConfirmRewordHash(c.hash);
+                              if (e.key === "Enter" && !e.shiftKey) {
+                                if (editMode === "amend") setConfirmAmend(true);
+                                else setConfirmRewordHash(c.hash);
+                              }
                               if (e.key === "Escape") handleCancelReword();
                             }}
                             disabled={rebaseLoading}
                           />
                           <div className="flex gap-2">
                             <button
-                              onClick={() => setConfirmRewordHash(c.hash)}
+                              onClick={() => {
+                                if (editMode === "amend") setConfirmAmend(true);
+                                else setConfirmRewordHash(c.hash);
+                              }}
                               disabled={rebaseLoading || !editMessage.trim()}
                               className="px-3 py-1 rounded-md text-xs font-medium bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white transition-colors"
                             >
@@ -321,24 +444,42 @@ export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open
                             <span className="font-mono">{c.short_hash}</span>
                             <span>{c.author}</span>
                             <span>{formatDate(c.timestamp)}</span>
-                            {isRewritable(index) && (
-                              <div className="ml-auto flex gap-1">
+                            <div className="ml-auto flex gap-1">
+                              {index === 0 && (
                                 <button
-                                  onClick={() => handleStartReword(c)}
-                                  className="px-2 py-0.5 rounded text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
-                                  title="Reword commit message"
+                                  onClick={() => handleStartAmend(c)}
+                                  className="px-2 py-0.5 rounded text-xs font-medium text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors"
+                                  title="Amend HEAD commit with staged changes or a new message"
                                 >
-                                  Reword
+                                  Amend
                                 </button>
-                                <button
-                                  onClick={() => setConfirmDropHash(c.hash)}
-                                  className="px-2 py-0.5 rounded text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                                  title="Drop this commit"
-                                >
-                                  Drop
-                                </button>
-                              </div>
-                            )}
+                              )}
+                              <button
+                                onClick={() => setConfirmRevertHash(c.hash)}
+                                className="px-2 py-0.5 rounded text-xs font-medium text-teal-600 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-900/20 transition-colors"
+                                title="Revert this commit with a new undoing commit"
+                              >
+                                Revert
+                              </button>
+                              {isRewritable(index) && (
+                                <>
+                                  <button
+                                    onClick={() => handleStartReword(c)}
+                                    className="px-2 py-0.5 rounded text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+                                    title="Reword commit message"
+                                  >
+                                    Reword
+                                  </button>
+                                  <button
+                                    onClick={() => setConfirmDropHash(c.hash)}
+                                    className="px-2 py-0.5 rounded text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                                    title="Drop this commit"
+                                  >
+                                    Drop
+                                  </button>
+                                </>
+                              )}
+                            </div>
                           </div>
                         </>
                       )}
@@ -381,6 +522,27 @@ export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open
             return handleSaveReword(confirmRewordHash);
           }}
           onCancel={() => setConfirmRewordHash(null)}
+        />
+      )}
+      {confirmAmend && (
+        <OperationConfirmDialog
+          open
+          operation="git_amend"
+          targets={[{ path, label: "HEAD" }]}
+          onConfirm={() => {
+            setConfirmAmend(false);
+            return handleSaveAmend();
+          }}
+          onCancel={() => setConfirmAmend(false)}
+        />
+      )}
+      {confirmRevertHash && (
+        <OperationConfirmDialog
+          open
+          operation="git_revert"
+          targets={[{ path, label: confirmRevertHash.slice(0, 7) }]}
+          onConfirm={() => handleRevert(confirmRevertHash)}
+          onCancel={() => setConfirmRevertHash(null)}
         />
       )}
     </>

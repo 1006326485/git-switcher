@@ -22,6 +22,17 @@ fn truncate_str(s: &str, max_bytes: usize) -> &str {
     &s[..end]
 }
 
+/// Truncate a staged diff to `max_bytes` for the prompt.
+/// Uses `truncate_str` so a multi-byte (e.g. Chinese) character boundary
+/// never panics like `String::truncate` would.
+fn truncate_diff_text(diff_text: &str, max_bytes: usize) -> String {
+    if diff_text.len() > max_bytes {
+        format!("{}\n... (truncated)", truncate_str(diff_text, max_bytes))
+    } else {
+        diff_text.to_string()
+    }
+}
+
 /// Paths that should never be sent to the LLM.
 fn is_excluded_path(path: &str) -> bool {
     static EXCLUDED: &[&str] = &[
@@ -353,30 +364,36 @@ impl LlmService {
             ));
         }
 
-        // Get staged diff via git diff --cached
-        let diff_output = std::process::Command::new("git")
-            .args(["diff", "--cached", "--stat"])
-            .current_dir(path)
-            .output()?;
+        // Gather the staged diff on the blocking pool: `git diff` is a
+        // synchronous child process and must not stall a tokio worker thread.
+        let path = path.to_string();
+        let (diff_stat, diff_text) = tokio::task::spawn_blocking(move || {
+            // Staged change summary via git diff --cached --stat
+            let diff_output = std::process::Command::new("git")
+                .args(["diff", "--cached", "--stat"])
+                .current_dir(&path)
+                .output()?;
 
-        let diff_stat = String::from_utf8_lossy(&diff_output.stdout);
-        if diff_stat.trim().is_empty() {
-            return Err(AppError::Other(
-                "No staged changes found. Stage files first.".to_string(),
-            ));
-        }
+            let diff_stat = String::from_utf8_lossy(&diff_output.stdout).into_owned();
+            if diff_stat.trim().is_empty() {
+                return Err(AppError::Other(
+                    "No staged changes found. Stage files first.".to_string(),
+                ));
+            }
 
-        // Get full staged diff (truncated)
-        let full_diff_output = std::process::Command::new("git")
-            .args(["diff", "--cached"])
-            .current_dir(path)
-            .output()?;
+            // Full staged diff
+            let full_diff_output = std::process::Command::new("git")
+                .args(["diff", "--cached"])
+                .current_dir(&path)
+                .output()?;
 
-        let mut diff_text = String::from_utf8_lossy(&full_diff_output.stdout).into_owned();
-        if diff_text.len() > 4000 {
-            diff_text.truncate(4000);
-            diff_text.push_str("\n... (truncated)");
-        }
+            let diff_text = String::from_utf8_lossy(&full_diff_output.stdout).into_owned();
+            Ok((diff_stat, diff_text))
+        })
+        .await
+        .map_err(|e| AppError::Other(format!("Task failed: {}", e)))??;
+
+        let diff_text = truncate_diff_text(&diff_text, 4000);
 
         let prompt = format!(
             r#"You are an expert developer. Generate a concise, conventional commit message for the following staged changes.
@@ -696,5 +713,42 @@ One paragraph overall assessment of this diff.
         }
 
         Ok(full_text)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{truncate_diff_text, truncate_str};
+
+    /// Regression: `String::truncate(4000)` panicked on a non UTF-8 boundary;
+    /// Chinese diffs hit this easily. The truncation path must stay UTF-8 safe.
+    #[test]
+    fn truncate_diff_text_is_utf8_safe_on_multibyte_content() {
+        // Each Chinese character is 3 bytes, so byte 4000 lands mid-character.
+        let diff = "中文多字节内容变更".repeat(1000);
+        assert!(diff.len() > 4000);
+
+        let truncated = truncate_diff_text(&diff, 4000);
+        assert!(truncated.len() < diff.len());
+        assert!(diff.starts_with(truncated.trim_end_matches("\n... (truncated)")));
+        // The cut landed on a character boundary: content is valid UTF-8 by type,
+        // and its length must be a multiple of the 3-byte char width here.
+        let body = truncated.strip_suffix("\n... (truncated)").unwrap();
+        assert_eq!(body.len() % 3, 0);
+        assert!(body.len() <= 4000);
+    }
+
+    #[test]
+    fn truncate_str_rounds_down_to_char_boundary() {
+        assert_eq!(truncate_str("中文", 1), "");
+        assert_eq!(truncate_str("中文", 3), "中");
+        assert_eq!(truncate_str("中文", 4), "中");
+        assert_eq!(truncate_str("abc", 3), "abc");
+        assert_eq!(truncate_str("abc", 5), "abc");
+    }
+
+    #[test]
+    fn truncate_diff_text_keeps_short_diffs_unchanged() {
+        assert_eq!(truncate_diff_text("小改动", 4000), "小改动");
     }
 }

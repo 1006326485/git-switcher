@@ -95,7 +95,7 @@ export const NotificationPanel = memo(function NotificationPanel({
         </div>
 
         {/* List */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="select-text flex-1 overflow-y-auto">
           {loading && (
             <div className="flex items-center justify-center py-6">
               <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-500 border-t-transparent" />
@@ -136,27 +136,5 @@ export const NotificationPanel = memo(function NotificationPanel({
 });
 
 // ── Unread Count Hook ─────────────────────────────────────────────────
-
-export function useUnreadCount(intervalMs = 30000): number {
-  const [count, setCount] = useState(0);
-
-  useEffect(() => {
-    let active = true;
-    const poll = async () => {
-      try {
-        const c = await api.getUnreadCount();
-        if (active) setCount(c);
-      } catch {
-        // ignore
-      }
-    };
-    poll();
-    const id = setInterval(poll, intervalMs);
-    return () => {
-      active = false;
-      clearInterval(id);
-    };
-  }, [intervalMs]);
-
-  return count;
-}
+// (removed: useUnreadCount duplicated Header's NotificationBell polling and
+//  had zero callers in the codebase)

@@ -474,6 +474,18 @@ const ActionButtons = memo(function ActionButtons({
 
   return (
     <>
+      {row.recent && (
+        <button
+          onClick={row.handleRunRecentCommand}
+          aria-label={`Run ${row.recent.command}`}
+          title={`Run ${row.recent.command}`}
+          className="p-1.5 rounded-lg text-gray-400 opacity-50 hover:opacity-100 transition-all duration-150 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 active:scale-[0.95]"
+        >
+          <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M4.25 2.43a.75.75 0 011.12-.65l7.75 5.57a.75.75 0 010 1.3l-7.75 5.57a.75.75 0 01-1.12-.65V2.43z" />
+          </svg>
+        </button>
+      )}
       {onFetch && (
         <button
           onClick={handleFetch}
@@ -574,6 +586,9 @@ const ActionButtons = memo(function ActionButtons({
         onOpenTagManager={row.handleOpenTagMgr}
         onOpenLogViewer={row.handleOpenLog}
         onOpenAiReview={row.handleOpenAiReview}
+        onOpenBuiltInTerminal={row.handleOpenBuiltInTerminal}
+        onRunProjectScript={row.handleRunProjectScript}
+        title={project.name}
         onColorChange={handleColorChange}
         onEditDescription={row.handleEditDescription}
         notes={project.notes}
@@ -655,7 +670,7 @@ function ErrorBanner({ error }: { error: string | null }) {
   if (!error) return null;
   return (
     <div className="px-4 pb-2">
-      <div className="px-3 py-2 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-xs text-red-700 dark:text-red-300">
+      <div className="select-text px-3 py-2 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-xs text-red-700 dark:text-red-300">
         {error}
       </div>
     </div>

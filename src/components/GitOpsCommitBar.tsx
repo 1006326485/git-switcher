@@ -132,7 +132,7 @@ export const GitOpsCommitBar = memo(function GitOpsCommitBar({
               {loadingDiff ? "Loading..." : "Refresh"}
             </button>
           </div>
-          <pre className="p-3 text-xs font-mono max-h-48 overflow-y-auto whitespace-pre-wrap break-all text-gray-800 dark:text-gray-200">
+          <pre className="select-text p-3 text-xs font-mono max-h-48 overflow-y-auto whitespace-pre-wrap break-all text-gray-800 dark:text-gray-200">
             {stagedDiff === null ? (
               <span className="text-gray-400 italic">Loading...</span>
             ) : stagedDiff.length === 0 ? (

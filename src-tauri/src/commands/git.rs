@@ -679,6 +679,225 @@ pub async fn git_drop_commit(
     result
 }
 
+/// Shared plumbing for simple single-repo git operations: op events,
+/// spawn_blocking and a notification on completion or failure.
+async fn run_tracked_op<F>(
+    op: &str,
+    label: &str,
+    path: &str,
+    app: &AppHandle,
+    notifications: &NotificationStore,
+    f: F,
+) -> Result<String, AppError>
+where
+    F: FnOnce(&str) -> Result<String, AppError> + Send + 'static,
+{
+    let op_id = next_op_id();
+    emit_op_start(app, op_id, op, path);
+    let path_clone = path.to_string();
+    let app_clone = app.clone();
+
+    let result = tokio::task::spawn_blocking(move || f(&path_clone))
+        .await
+        .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?;
+
+    match &result {
+        Ok(msg) => {
+            emit_op_done(&app_clone, op_id, op, path);
+            emit_notification(notifications, path, "info", msg.clone());
+        }
+        Err(e) => {
+            emit_op_error(&app_clone, op_id, op, path, &e.to_string());
+            emit_notification(
+                notifications,
+                path,
+                "error",
+                format!("{} failed: {}", label, e),
+            );
+        }
+    }
+    result
+}
+
+#[tauri::command]
+pub async fn git_revert_commit(
+    path: String,
+    commit_hash: String,
+    app: AppHandle,
+    notifications: State<'_, NotificationStore>,
+) -> Result<MergeResult, AppError> {
+    let op_id = next_op_id();
+    emit_op_start(&app, op_id, "revert", &path);
+
+    let path_clone = path.clone();
+    let hash_clone = commit_hash.clone();
+    let app_clone = app.clone();
+
+    let result = tokio::task::spawn_blocking(move || -> Result<MergeResult, AppError> {
+        let _canonical = validate_repo_path(&path_clone)?;
+        GitService::revert_commit(&path_clone, &hash_clone)
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?;
+
+    match &result {
+        Ok(r) if r.success => {
+            emit_op_done(&app_clone, op_id, "revert", &path);
+            emit_notification(
+                &notifications,
+                &path,
+                "info",
+                format!("Reverted {}", &commit_hash[..7.min(commit_hash.len())]),
+            );
+        }
+        Ok(r) => {
+            emit_op_done(&app_clone, op_id, "revert", &path);
+            emit_notification(&notifications, &path, "info", r.message.clone());
+        }
+        Err(e) => {
+            emit_op_error(&app_clone, op_id, "revert", &path, &e.to_string());
+            emit_notification(
+                &notifications,
+                &path,
+                "error",
+                format!("Revert failed: {}", e),
+            );
+        }
+    }
+    result
+}
+
+#[tauri::command]
+pub async fn git_amend_commit(
+    path: String,
+    message: Option<String>,
+    app: AppHandle,
+    notifications: State<'_, NotificationStore>,
+) -> Result<String, AppError> {
+    run_tracked_op(
+        "amend_commit",
+        "Amend",
+        &path,
+        &app,
+        &notifications,
+        move |p| GitService::amend_commit(p, message.as_deref()),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn git_operation_state(path: String) -> Result<String, AppError> {
+    tokio::task::spawn_blocking(move || GitService::operation_state(&path))
+        .await
+        .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
+}
+
+#[tauri::command]
+pub async fn git_rebase_continue(
+    path: String,
+    app: AppHandle,
+    notifications: State<'_, NotificationStore>,
+) -> Result<String, AppError> {
+    run_tracked_op(
+        "rebase_continue",
+        "Rebase continue",
+        &path,
+        &app,
+        &notifications,
+        GitService::continue_rebase,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn git_rebase_skip(
+    path: String,
+    app: AppHandle,
+    notifications: State<'_, NotificationStore>,
+) -> Result<String, AppError> {
+    run_tracked_op(
+        "rebase_skip",
+        "Rebase skip",
+        &path,
+        &app,
+        &notifications,
+        GitService::skip_rebase,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn git_rebase_abort(
+    path: String,
+    app: AppHandle,
+    notifications: State<'_, NotificationStore>,
+) -> Result<String, AppError> {
+    run_tracked_op(
+        "rebase_abort",
+        "Rebase abort",
+        &path,
+        &app,
+        &notifications,
+        GitService::abort_rebase,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn git_revert_continue(
+    path: String,
+    app: AppHandle,
+    notifications: State<'_, NotificationStore>,
+) -> Result<String, AppError> {
+    run_tracked_op(
+        "revert_continue",
+        "Revert continue",
+        &path,
+        &app,
+        &notifications,
+        GitService::continue_revert,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn git_revert_abort(
+    path: String,
+    app: AppHandle,
+    notifications: State<'_, NotificationStore>,
+) -> Result<String, AppError> {
+    run_tracked_op(
+        "revert_abort",
+        "Revert abort",
+        &path,
+        &app,
+        &notifications,
+        GitService::abort_revert,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn git_delete_remote_branch(
+    path: String,
+    remote: String,
+    branch: String,
+    app: AppHandle,
+    notifications: State<'_, NotificationStore>,
+) -> Result<String, AppError> {
+    let remote_clone = remote.clone();
+    let branch_clone = branch.clone();
+    run_tracked_op(
+        "delete_remote_branch",
+        "Remote branch deletion",
+        &path,
+        &app,
+        &notifications,
+        move |p| GitService::delete_remote_branch(p, &remote_clone, &branch_clone),
+    )
+    .await
+}
+
 #[tauri::command]
 pub async fn git_reset(
     path: String,
@@ -726,6 +945,7 @@ pub async fn git_reset(
 pub async fn git_push(
     path: String,
     branch: Option<String>,
+    force_with_lease: Option<bool>,
     app: AppHandle,
     active_ops: State<'_, ActiveOps>,
     notifications: State<'_, NotificationStore>,
@@ -737,10 +957,11 @@ pub async fn git_push(
 
     let path_clone = path.clone();
     let app_clone = app.clone();
+    let force = force_with_lease.unwrap_or(false);
 
     let result = tokio::task::spawn_blocking(move || -> Result<String, AppError> {
         let _canonical = validate_repo_path(&path_clone)?;
-        GitService::push(&path_clone, branch.as_deref(), Some(cancel_flag))
+        GitService::push(&path_clone, branch.as_deref(), force, Some(cancel_flag))
     })
     .await
     .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?;
@@ -1273,7 +1494,7 @@ pub async fn sync_project(
             let msg = GitService::pull(&path_clone, Some(cancel_flag))?;
             Ok(format!("Fetched and pulled: {}", msg))
         } else if status.ahead > 0 {
-            let msg = GitService::push(&path_clone, None, Some(cancel_flag))?;
+            let msg = GitService::push(&path_clone, None, false, Some(cancel_flag))?;
             Ok(format!("Fetched and pushed: {}", msg))
         } else {
             Ok("Fetched: already up to date".to_string())
@@ -2082,25 +2303,20 @@ pub async fn create_archive(
 
         let ref_to_use = ref_name.unwrap_or_else(|| "HEAD".to_string());
 
-        let output = std::process::Command::new("git")
-            .arg("-C")
-            .arg(&path)
-            .arg("archive")
-            .arg("--format")
-            .arg(&format)
-            .arg("--output")
-            .arg(&output_path)
-            .arg(&ref_to_use)
-            .output()
-            .map_err(|e| AppError::Git(format!("Failed to run git archive: {}", e)))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(AppError::Git(format!(
-                "git archive failed: {}",
-                stderr.trim()
-            )));
-        }
+        // Route through the shared git runner: anti-hang env, timeout, contextual errors.
+        GitService::run_cli(
+            &path,
+            &[
+                "archive",
+                "--format",
+                &format,
+                "--output",
+                &output_path,
+                &ref_to_use,
+            ],
+            300,
+            "git archive",
+        )?;
 
         Ok(output_path)
     })

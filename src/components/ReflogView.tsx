@@ -82,7 +82,7 @@ export const ReflogView = memo(function ReflogView({ path, onRefresh, onSuccess,
   }
 
   return (
-    <ul className="divide-y divide-gray-100 dark:divide-gray-700/50 list-none m-0 p-0 max-h-48 overflow-y-auto">
+    <ul className="select-text divide-y divide-gray-100 dark:divide-gray-700/50 list-none m-0 p-0 max-h-48 overflow-y-auto">
       {entries.map((entry) => (
         <li key={`${entry.hash}-${entry.timestamp}`}>
           <button

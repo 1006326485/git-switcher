@@ -9,6 +9,7 @@ interface ConfirmDialogProps {
   confirmColor?: "red" | "green" | "blue";
   onConfirm: () => void | Promise<void>;
   onCancel: () => void;
+  size?: "md" | "sm";
   /** localStorage key to skip this dialog when set */
   skipKey?: string;
 }
@@ -27,6 +28,7 @@ export const ConfirmDialog = memo(function ConfirmDialog({
   confirmColor = "red",
   onConfirm,
   onCancel,
+  size = "md",
   skipKey,
 }: ConfirmDialogProps) {
   const [loading, setLoading] = useState(false);
@@ -53,9 +55,9 @@ export const ConfirmDialog = memo(function ConfirmDialog({
   }, [onConfirm, dontAsk, skipKey]);
 
   return (
-    <Modal open={open} onClose={onCancel} title={title} maxWidth="max-w-sm">
-      <div className="px-6 py-5">
-        <div className="text-sm text-gray-600 dark:text-gray-400 mb-6">{message}</div>
+    <Modal open={open} onClose={onCancel} title={title} maxWidth={size === "sm" ? "max-w-xs" : "max-w-sm"} size={size}>
+      <div className={size === "sm" ? "px-4 py-3" : "px-6 py-5"}>
+        <div className={`text-gray-600 dark:text-gray-400 ${size === "sm" ? "text-xs mb-3" : "text-sm mb-6"}`}>{message}</div>
         {skipKey && (
           <label className="flex items-center gap-2 mb-4 text-sm text-gray-500 dark:text-gray-400 cursor-pointer">
             <input
@@ -67,18 +69,18 @@ export const ConfirmDialog = memo(function ConfirmDialog({
             Don't ask again
           </label>
         )}
-        <div className="flex justify-end gap-3">
+        <div className={`flex justify-end ${size === "sm" ? "gap-2" : "gap-3"}`}>
           <button
             onClick={onCancel}
             disabled={loading}
-            className="px-4 py-2 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 bg-[var(--surface-2)] border border-[var(--border-color)] hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors duration-150 disabled:opacity-50 active:scale-[0.98]"
+            className={`${size === "sm" ? "px-2.5 py-1 text-xs rounded-md" : "px-4 py-2 text-sm rounded-lg"} font-medium text-gray-700 dark:text-gray-300 bg-[var(--surface-2)] border border-[var(--border-color)] hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors duration-150 disabled:opacity-50 active:scale-[0.98]`}
           >
             Cancel
           </button>
           <button
             onClick={handleConfirm}
             disabled={loading}
-            className={`px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors duration-150 disabled:opacity-50 active:scale-[0.98] ${colorStyles[confirmColor]}`}
+            className={`${size === "sm" ? "px-2.5 py-1 text-xs rounded-md" : "px-4 py-2 text-sm rounded-lg"} font-medium text-white transition-colors duration-150 disabled:opacity-50 active:scale-[0.98] ${colorStyles[confirmColor]}`}
           >
             {loading ? "Working..." : confirmLabel}
           </button>

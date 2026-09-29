@@ -1,5 +1,5 @@
 import { memo, useState, useMemo } from "react";
-import { Modal } from "./ui/primitives";
+import { Modal, KbdBadge } from "./ui/primitives";
 
 interface Shortcut {
   keys: string[];
@@ -12,6 +12,15 @@ interface ShortcutCategory {
 }
 
 const SHORTCUTS: ShortcutCategory[] = [
+  {
+    name: "Global",
+    shortcuts: [
+      {
+        keys: ["\u2318", "\u21e7", "`"],
+        description: "Summon / hide the terminal window (configurable in Settings)",
+      },
+    ],
+  },
   {
     name: "General",
     shortcuts: [
@@ -51,15 +60,18 @@ const SHORTCUTS: ShortcutCategory[] = [
       { keys: ["\u2318", "5"], description: "Dashboard view" },
     ],
   },
+  {
+    name: "Terminal",
+    shortcuts: [
+      { keys: ["\u2325", "\u2191", "\u2193"], description: "Switch project group in terminal" },
+      { keys: ["\u2325", "\u2190", "\u2192"], description: "Switch terminal tab" },
+      { keys: ["\u2325", "1", "\u2026", "9"], description: "Jump to terminal by index" },
+      { keys: ["\u2318", "1", "\u2026", "9"], description: "Jump to terminal in current project" },
+      { keys: ["Middle click"], description: "Close terminal tab" },
+    ],
+  },
 ];
 
-function KbdBadge({ label }: { label: string }) {
-  return (
-    <kbd className="inline-flex items-center justify-center min-w-[24px] h-6 px-1.5 text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm">
-      {label}
-    </kbd>
-  );
-}
 
 interface ShortcutsHelpProps {
   open: boolean;

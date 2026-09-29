@@ -82,6 +82,12 @@ pub struct AppSettings {
     pub llm: LlmConfig,
     #[serde(default = "default_true")]
     pub auto_fetch_on_launch: bool,
+    /// Global hotkey that summons the standalone terminal window.
+    #[serde(default = "default_terminal_hotkey")]
+    pub terminal_hotkey: String,
+    /// Hide the summoned terminal window as soon as it loses focus.
+    #[serde(default)]
+    pub terminal_hide_on_blur: bool,
 }
 
 impl Default for AppSettings {
@@ -93,14 +99,63 @@ impl Default for AppSettings {
             view_mode: ViewMode::Card,
             llm: LlmConfig::default(),
             auto_fetch_on_launch: true,
+            terminal_hotkey: default_terminal_hotkey(),
+            terminal_hide_on_blur: false,
         }
     }
+}
+
+pub fn default_terminal_hotkey() -> String {
+    "CmdOrCtrl+Shift+`".to_string()
 }
 
 fn default_true() -> bool {
     true
 }
 
+/// A stored credential for one remote of one project (or global when
+/// `project_path` is empty). Used to authenticate private-repository network
+/// operations without interactive prompts.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitCredential {
+    pub id: String,
+    /// Empty string means the credential applies to every project.
+    pub project_path: String,
+    /// Remote URL, e.g. "https://github.com/acme/web.git".
+    pub remote_url: String,
+    pub username: String,
+    /// Token or password. Stored in the local database this phase; migrate to
+    /// the OS keychain later (see .ai/reports/git-credentials.md).
+    pub secret: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 fn default_refresh_interval() -> u32 {
     30
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_terminal_fields_deserialize_to_defaults() {
+        let settings: AppSettings = serde_json::from_str(r#"{"theme":"dark"}"#).unwrap();
+        assert_eq!(settings.terminal_hotkey, default_terminal_hotkey());
+        assert!(!settings.terminal_hide_on_blur);
+    }
+
+    #[test]
+    fn terminal_hotkey_round_trips() {
+        let settings = AppSettings {
+            terminal_hotkey: "Alt+Space".to_string(),
+            terminal_hide_on_blur: true,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&settings).unwrap();
+        let back: AppSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.terminal_hotkey, "Alt+Space");
+        assert!(back.terminal_hide_on_blur);
+    }
 }

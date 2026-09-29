@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, memo } from "react";
+import { createPortal } from "react-dom";
 import * as api from "../lib/tauri";
 import type { FileCommitEntry } from "../lib/types";
 import { parseError } from "../lib/types";
@@ -43,7 +44,7 @@ export const FileHistoryView = memo(function FileHistoryView({
 
   useEffect(() => { load(); }, [load]);
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
       <div
         className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-lg w-full mx-4 max-h-[70vh] flex flex-col"
@@ -57,7 +58,7 @@ export const FileHistoryView = memo(function FileHistoryView({
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 text-lg" aria-label="Close">✕</button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4">
+        <div className="select-text flex-1 overflow-y-auto p-4">
           {loading && (
             <div className="flex items-center justify-center py-8">
               <div className="animate-spin rounded-full h-6 w-6 border-2 border-blue-500 border-t-transparent" />
@@ -102,7 +103,8 @@ export const FileHistoryView = memo(function FileHistoryView({
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 });
 export default FileHistoryView;

@@ -1,6 +1,8 @@
 import { memo, useState, useEffect, useRef } from "react";
 import type { Toast as ToastType } from "../hooks/useToast";
+import type { UndoPrompt } from "../hooks/useOperationHistory";
 import { ErrorRecoveryBanner } from "./ErrorRecoveryBanner";
+import { OperationUndoCard } from "./OperationHistory";
 import { toastAnimation, toastExitAnimation } from "./ui/primitives";
 
 interface ToastContainerProps {
@@ -9,6 +11,10 @@ interface ToastContainerProps {
   onPause?: (id: string) => void;
   onResume?: (id: string) => void;
   onAction?: (actionType: string, path?: string) => void;
+  /** Undo prompt for the last destructive git operation, rendered above the stack. */
+  undo?: UndoPrompt | null;
+  onUndo?: () => void;
+  onUndoDismiss?: () => void;
 }
 
 const DURATION = 3000;
@@ -87,7 +93,7 @@ function ToastItem({
       role={toast.type === "error" ? "alert" : undefined}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
-      className={`pointer-events-auto relative flex flex-col px-4 py-3 rounded-xl border shadow-lg dark:ring-1 dark:ring-white/10 text-sm font-medium overflow-hidden ${
+      className={`select-text pointer-events-auto relative flex flex-col px-4 py-3 rounded-xl border shadow-lg dark:ring-1 dark:ring-white/10 text-sm font-medium overflow-hidden ${
         toast.exiting ? toastExitAnimation : toastAnimation
       } ${typeStyles[toast.type]}`}
     >
@@ -154,11 +160,14 @@ function ToastItem({
   );
 }
 
-export const ToastContainer = memo(function ToastContainer({ toasts, onRemove, onPause, onResume, onAction }: ToastContainerProps) {
-  if (toasts.length === 0) return null;
+export const ToastContainer = memo(function ToastContainer({ toasts, onRemove, onPause, onResume, onAction, undo, onUndo, onUndoDismiss }: ToastContainerProps) {
+  if (toasts.length === 0 && !undo) return null;
 
   return (
     <div className="pointer-events-none fixed inset-x-3 bottom-3 z-[100] flex max-w-sm flex-col gap-2 sm:inset-x-auto sm:bottom-4 sm:right-4" role="status" aria-live="polite" aria-atomic="true">
+      {undo && onUndo && onUndoDismiss && (
+        <OperationUndoCard prompt={undo} onUndo={onUndo} onDismiss={onUndoDismiss} />
+      )}
       {toasts.map((toast) => (
         <ToastItem
           key={toast.id}

@@ -7,7 +7,10 @@ use crate::services::LlmService;
 use crate::AppError;
 
 /// Validate config is enabled and branches have diffs. Returns the diff if valid.
-fn validate_review(
+///
+/// The git diff extraction runs on the blocking pool: this fn is awaited from
+/// async command handlers and must not stall a tokio worker thread.
+async fn validate_review(
     store: &SettingsStore,
     path: &str,
     base_branch: &str,
@@ -21,7 +24,14 @@ fn validate_review(
         ));
     }
 
-    let diff = LlmService::get_branch_diff(path, base_branch, head_branch)?;
+    let path = path.to_string();
+    let base_branch = base_branch.to_string();
+    let head_branch = head_branch.to_string();
+    let diff = tokio::task::spawn_blocking(move || {
+        LlmService::get_branch_diff(&path, &base_branch, &head_branch)
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("Task failed: {}", e)))??;
 
     if diff.files.is_empty() {
         return Err(AppError::Other(
@@ -53,7 +63,7 @@ pub async fn ai_review(
     store: State<'_, SettingsStore>,
     db: State<'_, Database>,
 ) -> Result<ReviewResult, AppError> {
-    let (config, diff) = validate_review(&store, &path, &base_branch, &head_branch)?;
+    let (config, diff) = validate_review(&store, &path, &base_branch, &head_branch).await?;
     let result = LlmService::review_diff(&diff, &config).await?;
 
     // Save to DB (best effort, don't fail the review if save fails)
@@ -99,7 +109,7 @@ pub async fn ai_review_streaming(
     db: State<'_, Database>,
     app: AppHandle,
 ) -> Result<ReviewResult, AppError> {
-    let (config, diff) = validate_review(&store, &path, &base_branch, &head_branch)?;
+    let (config, diff) = validate_review(&store, &path, &base_branch, &head_branch).await?;
     let result = LlmService::review_diff_streaming(&diff, &config, &app).await?;
 
     // Save to DB (best effort, don't fail the review if save fails)

@@ -207,7 +207,7 @@ export const StashManager = memo(function StashManager({
             No stashes
           </div>
         ) : (
-          <div className="space-y-2 max-h-96 overflow-y-auto">
+          <div className="select-text space-y-2 max-h-96 overflow-y-auto">
             {stashList.map((s) => (
               <div key={s.index} className="rounded-lg bg-[var(--surface-2)] border border-[var(--border-color)] hover:border-gray-300 dark:hover:border-gray-600 transition-colors">
                 <div className="flex items-center gap-2 px-3 py-2">

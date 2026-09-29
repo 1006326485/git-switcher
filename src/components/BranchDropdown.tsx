@@ -34,8 +34,9 @@ export const BranchDropdown = memo(function BranchDropdown({
     const filtered = branches.filter((b) =>
       b.name.toLowerCase().includes(search.toLowerCase())
     );
-    const local = filtered.filter((b) => !b.is_remote);
+    const local = filtered.filter((b) => !b.is_remote && !b.is_tag);
     const remote = filtered.filter((b) => b.is_remote);
+    const tags = filtered.filter((b) => b.is_tag);
     const items: { type: "header" | "branch"; label?: string; branch?: BranchInfo }[] = [];
     if (local.length > 0) {
       items.push({ type: "header", label: "Local" });
@@ -44,6 +45,10 @@ export const BranchDropdown = memo(function BranchDropdown({
     if (remote.length > 0) {
       items.push({ type: "header", label: "Remote" });
       for (const b of remote) items.push({ type: "branch", branch: b });
+    }
+    if (tags.length > 0) {
+      items.push({ type: "header", label: "Tags" });
+      for (const b of tags) items.push({ type: "branch", branch: b });
     }
     return items;
   }, [branches, search]);
@@ -226,7 +231,7 @@ export const BranchDropdown = memo(function BranchDropdown({
                     )}
                     <span
                       className={`font-mono truncate flex-1 ${
-                        b.is_remote
+                        b.is_remote || b.is_tag
                           ? "text-gray-500 dark:text-gray-400"
                           : ""
                       }`}

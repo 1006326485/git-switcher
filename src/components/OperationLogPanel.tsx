@@ -137,7 +137,7 @@ export const OperationLogPanel = memo(function OperationLogPanel({
         </div>
 
         {/* List */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="select-text flex-1 overflow-y-auto">
           {loading && (
             <div className="flex items-center justify-center py-8">
               <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-500 border-t-transparent" />

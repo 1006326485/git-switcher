@@ -27,6 +27,7 @@ pub trait GitBackend {
     fn push(
         path: &str,
         branch: Option<&str>,
+        force_with_lease: bool,
         cancel_flag: Option<Arc<AtomicBool>>,
     ) -> Result<String, AppError>;
     fn pull(path: &str, cancel_flag: Option<Arc<AtomicBool>>) -> Result<String, AppError>;

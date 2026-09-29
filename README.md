@@ -54,6 +54,7 @@ If you work on multiple Git repositories every day — switching between project
 - **Smart Batch Operations** — Pull only behind projects, push only ahead projects, or sync all repositories with intelligent conflict detection
 - **Per-Project Quick Actions** — Fetch, pull, or push individual projects with one click from the project card
 - **System Tray Integration** — App runs in the system tray with background monitoring. Automatic silent fetch to keep repositories up to date
+- **Summonable Terminal Window** — Hit `CmdOrCtrl+Shift+\`` (configurable) anywhere to summon a standalone terminal window, then dismiss it with the same hotkey; sessions keep running while hidden and summoning leaves the main window exactly where it was. Terminals are shared live across the main window and the summoned window, and new tabs can target any project via the built-in project picker. Navigate sessions with `\u2325\u2191\u2193` / `\u2325\u2190\u2192` / `\u23251`–`\u23259`
 - **Quick Filter & Sort** — Filter projects by status (changed, behind, ahead, stale) with one-click chips. Sort by name, last modified, changes, or branch
 - **Project Color Labels** — Organize projects with 8 color options. Color stripes on project cards for quick visual identification
 - **Enhanced Command Palette** — Search projects by name, alias, path, or branch. Quick filters: "behind", "changes", "stale". Jump to any project instantly

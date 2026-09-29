@@ -130,7 +130,7 @@ export const ProjectTable = memo(function ProjectTable({ projects, focusedIndex 
               </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">
+          <tbody className="select-text divide-y divide-gray-100 dark:divide-gray-700/50">
             {sorted.map((detail, index) => (
               <TableRow key={detail.project.id} detail={detail} projectIndex={index} isFocused={focusedIndex === index} />
             ))}

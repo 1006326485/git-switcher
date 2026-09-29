@@ -4,9 +4,9 @@ use rusqlite::{params, Connection};
 use std::path::PathBuf;
 
 use crate::models::{
-    CustomCommand, GitProject, Group, OperationLogEntry, ReviewResult, TaskExecutionState,
-    TaskStrategy, TaskWorkspace, TaskWorkspaceEntry, TaskWorkspaceEntryDetail,
-    TaskWorkspaceOutcome, TaskWorkspaceStatus,
+    CustomCommand, GitCredential, GitProject, Group, OperationLogEntry, ReviewResult, RunPreset,
+    RunPresetItem, TaskExecutionState, TaskStrategy, TaskWorkspace, TaskWorkspaceEntry,
+    TaskWorkspaceEntryDetail, TaskWorkspaceOutcome, TaskWorkspaceStatus,
 };
 use crate::AppError;
 
@@ -31,22 +31,25 @@ impl Database {
         std::fs::create_dir_all(app_data_dir)?;
 
         let db_path = app_data_dir.join("git-switcher.db");
-        let manager = SqliteConnectionManager::file(&db_path);
+        // PRAGMAs are per-connection state, so they must run in `with_init` on every
+        // connection the pool creates (max_size 5): `foreign_keys` keeps ON DELETE
+        // CASCADE enforced and `busy_timeout` keeps concurrent writes from failing
+        // with "database is locked". `journal_mode = WAL` is a persistent database
+        // property but stays here to preserve the previous initialization order.
+        let manager = SqliteConnectionManager::file(&db_path).with_init(|conn| {
+            conn.execute_batch(
+                "PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;",
+            )
+        });
         let pool = Pool::builder()
             .max_size(5)
             .build(manager)
             .map_err(|e| AppError::Database(format!("Failed to create pool: {}", e)))?;
 
-        // Configure pragmas on a connection
         {
             let conn = pool
                 .get()
                 .map_err(|e| AppError::Database(format!("Failed to get connection: {}", e)))?;
-            conn.execute_batch(
-                "PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;",
-            )
-            .map_err(|e| AppError::Database(format!("Failed to set PRAGMA: {}", e)))?;
-
             Self::run_migrations(&conn)?;
         }
 
@@ -243,6 +246,7 @@ impl Database {
                 name            TEXT NOT NULL,
                 command         TEXT NOT NULL,
                 shortcut        TEXT,
+                project_path    TEXT,
                 sort_order      INTEGER NOT NULL DEFAULT 0,
                 created_at      TEXT NOT NULL DEFAULT (datetime('now'))
             );",
@@ -250,6 +254,30 @@ impl Database {
         .map_err(|e| {
             AppError::Database(format!("Failed to create custom_commands table: {}", e))
         })?;
+
+        // Step 4b migration: project binding (ALTER TABLE silently fails if column exists)
+        let result = conn.execute(
+            "ALTER TABLE custom_commands ADD COLUMN project_path TEXT",
+            [],
+        );
+        if let Err(e) = result {
+            let msg = e.to_string();
+            if !msg.contains("duplicate column") {
+                log::warn!("migration warning: {}", msg);
+            }
+        }
+
+        // Step 4c: Run presets (saved multi-terminal workspaces)
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS run_presets (
+                id          TEXT PRIMARY KEY,
+                name        TEXT NOT NULL,
+                items_json  TEXT NOT NULL DEFAULT '[]',
+                sort_order  INTEGER NOT NULL DEFAULT 0,
+                created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+            );",
+        )
+        .map_err(|e| AppError::Database(format!("Failed to create run_presets table: {}", e)))?;
 
         // Step 4: Operation log (audit trail for all Git operations)
         conn.execute_batch(
@@ -271,6 +299,27 @@ impl Database {
                 ON operation_log(project_path);",
         )
         .map_err(|e| AppError::Database(format!("Failed to create operation_log table: {}", e)))?;
+
+        // Step 4e: Git credentials (per-remote, optionally scoped to one project).
+        // Stored locally this phase; UI discloses the risk and a later version
+        // should migrate secrets to the OS keychain.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS git_credentials (
+                id              TEXT PRIMARY KEY,
+                project_path    TEXT NOT NULL DEFAULT '',
+                remote_url      TEXT NOT NULL,
+                username        TEXT NOT NULL,
+                secret          TEXT NOT NULL,
+                created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_git_credentials_remote
+                ON git_credentials(remote_url);",
+        )
+        .map_err(|e| {
+            AppError::Database(format!("Failed to create git_credentials table: {}", e))
+        })?;
 
         Ok(())
     }
@@ -1023,13 +1072,14 @@ impl Database {
         name: &str,
         command: &str,
         shortcut: Option<&str>,
+        project_path: Option<&str>,
         sort_order: i32,
     ) -> Result<(), AppError> {
         self.with_conn(|conn| {
             conn.execute(
-                "INSERT INTO custom_commands (id, name, command, shortcut, sort_order)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![id, name, command, shortcut, sort_order],
+                "INSERT INTO custom_commands (id, name, command, shortcut, project_path, sort_order)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![id, name, command, shortcut, project_path, sort_order],
             )
             .map_err(|e| AppError::Database(format!("Failed to insert custom command: {}", e)))?;
             Ok(())
@@ -1040,7 +1090,7 @@ impl Database {
         self.with_conn(|conn| {
             let mut stmt = conn
                 .prepare(
-                    "SELECT id, name, command, shortcut, sort_order, created_at
+                    "SELECT id, name, command, shortcut, project_path, sort_order, created_at
                      FROM custom_commands ORDER BY sort_order, name",
                 )
                 .map_err(|e| AppError::Database(format!("Failed to prepare query: {}", e)))?;
@@ -1051,8 +1101,9 @@ impl Database {
                         name: row.get(1)?,
                         command: row.get(2)?,
                         shortcut: row.get(3)?,
-                        sort_order: row.get(4)?,
-                        created_at: row.get(5)?,
+                        project_path: row.get(4)?,
+                        sort_order: row.get(5)?,
+                        created_at: row.get(6)?,
                     })
                 })
                 .map_err(|e| {
@@ -1078,6 +1129,67 @@ impl Database {
                     "Custom command not found: {}",
                     id
                 )));
+            }
+            Ok(())
+        })
+    }
+
+    // ── Run Presets ───────────────────────────────────────────────────────────
+
+    pub fn insert_run_preset(
+        &self,
+        id: &str,
+        name: &str,
+        items_json: &str,
+        sort_order: i32,
+    ) -> Result<(), AppError> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO run_presets (id, name, items_json, sort_order) VALUES (?1, ?2, ?3, ?4)",
+                params![id, name, items_json, sort_order],
+            )
+            .map_err(|e| AppError::Database(format!("Failed to insert run preset: {}", e)))?;
+            Ok(())
+        })
+    }
+
+    pub fn get_all_run_presets(&self) -> Result<Vec<RunPreset>, AppError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, name, items_json, sort_order, created_at
+                     FROM run_presets ORDER BY sort_order, name",
+                )
+                .map_err(|e| AppError::Database(format!("Failed to prepare query: {}", e)))?;
+            let rows = stmt
+                .query_map([], |row| {
+                    let items_json: String = row.get(2)?;
+                    let items: Vec<RunPresetItem> =
+                        serde_json::from_str(&items_json).unwrap_or_default();
+                    Ok(RunPreset {
+                        id: row.get(0)?,
+                        name: row.get(1)?,
+                        items,
+                        sort_order: row.get(3)?,
+                        created_at: row.get(4)?,
+                    })
+                })
+                .map_err(|e| AppError::Database(format!("Failed to query run presets: {}", e)))?;
+            let mut presets = Vec::new();
+            for row in rows {
+                presets.push(row.map_err(|e| AppError::Database(e.to_string()))?);
+            }
+            Ok(presets)
+        })
+    }
+
+    pub fn delete_run_preset(&self, id: &str) -> Result<(), AppError> {
+        self.with_conn(|conn| {
+            let affected = conn
+                .execute("DELETE FROM run_presets WHERE id = ?1", params![id])
+                .map_err(|e| AppError::Database(format!("Failed to delete run preset: {}", e)))?;
+            if affected == 0 {
+                return Err(AppError::NotFound(format!("Run preset not found: {}", id)));
             }
             Ok(())
         })
@@ -1133,5 +1245,143 @@ impl Database {
             }
             Ok(entries)
         })
+    }
+
+    // ── Git Credentials ─────────────────────────────────────────────────────
+
+    pub fn upsert_git_credential(
+        &self,
+        id: &str,
+        project_path: &str,
+        remote_url: &str,
+        username: &str,
+        secret: &str,
+    ) -> Result<(), AppError> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO git_credentials (id, project_path, remote_url, username, secret)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(id) DO UPDATE SET
+                    project_path = excluded.project_path,
+                    remote_url   = excluded.remote_url,
+                    username     = excluded.username,
+                    secret       = excluded.secret,
+                    updated_at   = datetime('now')",
+                params![id, project_path, remote_url, username, secret],
+            )
+            .map_err(|e| AppError::Database(format!("Failed to save git credential: {}", e)))?;
+            Ok(())
+        })
+    }
+
+    pub fn get_git_credentials(&self) -> Result<Vec<GitCredential>, AppError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, project_path, remote_url, username, secret, created_at, updated_at
+                     FROM git_credentials ORDER BY project_path, remote_url",
+                )
+                .map_err(|e| {
+                    AppError::Database(format!("Failed to prepare credential query: {}", e))
+                })?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok(GitCredential {
+                        id: row.get(0)?,
+                        project_path: row.get(1)?,
+                        remote_url: row.get(2)?,
+                        username: row.get(3)?,
+                        secret: row.get(4)?,
+                        created_at: row.get(5)?,
+                        updated_at: row.get(6)?,
+                    })
+                })
+                .map_err(|e| {
+                    AppError::Database(format!("Failed to query git credentials: {}", e))
+                })?;
+            let mut creds = Vec::new();
+            for row in rows {
+                creds.push(row.map_err(|e| AppError::Database(e.to_string()))?);
+            }
+            Ok(creds)
+        })
+    }
+
+    pub fn delete_git_credential(&self, id: &str) -> Result<(), AppError> {
+        self.with_conn(|conn| {
+            let affected = conn
+                .execute("DELETE FROM git_credentials WHERE id = ?1", params![id])
+                .map_err(|e| {
+                    AppError::Database(format!("Failed to delete git credential: {}", e))
+                })?;
+            if affected == 0 {
+                return Err(AppError::NotFound(format!(
+                    "Git credential not found: {}",
+                    id
+                )));
+            }
+            Ok(())
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Database;
+
+    #[test]
+    fn pooled_connections_all_enable_foreign_keys_and_busy_timeout() {
+        let dir = tempfile::tempdir().expect("create temporary directory");
+        let db = Database::new(&dir.path().to_path_buf()).expect("create database");
+
+        // Hold several connections at once so the pool really creates more than one.
+        let mut held = Vec::new();
+        for _ in 0..4 {
+            held.push(db.pool.get().expect("get pooled connection"));
+        }
+
+        for conn in &held {
+            let foreign_keys: i64 = conn
+                .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+                .expect("read foreign_keys pragma");
+            assert_eq!(
+                foreign_keys, 1,
+                "foreign_keys must be ON on every connection"
+            );
+
+            let busy_timeout: i64 = conn
+                .query_row("PRAGMA busy_timeout", [], |row| row.get(0))
+                .expect("read busy_timeout pragma");
+            assert_eq!(
+                busy_timeout, 5000,
+                "busy_timeout must apply on every connection"
+            );
+        }
+    }
+
+    #[test]
+    fn foreign_keys_are_enforced_on_every_pooled_connection() {
+        let dir = tempfile::tempdir().expect("create temporary directory");
+        let db = Database::new(&dir.path().to_path_buf()).expect("create database");
+
+        let mut held = Vec::new();
+        for _ in 0..2 {
+            held.push(db.pool.get().expect("get pooled connection"));
+        }
+
+        for conn in &held {
+            // Without per-connection PRAGMA foreign_keys=ON this insert succeeds and
+            // leaves an orphaned task entry behind.
+            let orphan_insert = conn.execute(
+                "INSERT INTO task_workspace_entries
+                     (id, workspace_id, project_id, sort_order, strategy, created_at, updated_at)
+                 VALUES ('orphan', 'missing-workspace', 'missing-project', 0, 'retain_current', '2024-01-01', '2024-01-01')",
+                [],
+            );
+            assert!(
+                orphan_insert.is_err(),
+                "foreign key violation must be rejected on every pooled connection"
+            );
+        }
     }
 }

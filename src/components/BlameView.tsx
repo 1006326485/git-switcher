@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, memo, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import * as api from "../lib/tauri";
 import type { BlameLine } from "../lib/types";
@@ -101,7 +102,7 @@ export const BlameView = memo(function BlameView({ path, filePath, onClose }: Bl
     );
   };
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
       <div
         className="bg-[var(--surface-1)] rounded-xl shadow-xl w-[90vw] max-w-5xl h-[80vh] flex flex-col overflow-hidden"
@@ -130,7 +131,7 @@ export const BlameView = memo(function BlameView({ path, filePath, onClose }: Bl
         </div>
 
         {/* Content */}
-        <div ref={scrollRef} className="flex-1 overflow-auto font-mono text-xs leading-5">
+        <div ref={scrollRef} className="select-text flex-1 overflow-auto font-mono text-xs leading-5">
           {loading ? (
             <div className="flex items-center justify-center h-full text-gray-400">Loading blame...</div>
           ) : error ? (
@@ -152,7 +153,8 @@ export const BlameView = memo(function BlameView({ path, filePath, onClose }: Bl
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 });
 export default BlameView;

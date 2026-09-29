@@ -1,6 +1,7 @@
 pub mod commands;
 pub mod db;
 pub mod error;
+pub mod hotkeys;
 pub mod models;
 pub mod services;
 
@@ -19,7 +20,7 @@ use services::BackgroundService;
 use std::sync::Arc;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder};
-use tauri::{Emitter, Listener, Manager};
+use tauri::{Emitter, Listener, Manager, RunEvent};
 
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
@@ -34,18 +35,30 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let bg_service = BackgroundService::new(300);
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        hotkeys::toggle_terminal_window(app);
+                    }
+                })
+                .build(),
+        )
         .manage(database.clone())
         .manage(settings_store)
         .manage(ActiveOps::default())
         .manage(bg_service)
         .manage(commands::NotificationStore::new())
+        .manage(commands::TerminalManager::default())
         .setup(move |app| {
             // ── Tray menu ─────────────────────────────────────────────────
             let show_item = MenuItemBuilder::with_id("show", "Show Window")
+                .build(app)?;
+            let terminal_item = MenuItemBuilder::with_id("terminal", "Summon Terminal")
                 .build(app)?;
             let refresh_item = MenuItemBuilder::with_id("refresh", "Refresh All")
                 .build(app)?;
@@ -54,6 +67,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
             let menu = MenuBuilder::new(app)
                 .item(&show_item)
+                .item(&terminal_item)
                 .item(&refresh_item)
                 .separator()
                 .item(&quit_item)
@@ -72,7 +86,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     } = event
                     {
                         let app = tray.app_handle();
-                        if let Some(window) = app.get_webview_window("main") {
+                        if let Some(window) = app.get_webview_window(hotkeys::MAIN_WINDOW_LABEL) {
                             if window.is_visible().unwrap_or(false) {
                                 let _ = window.hide();
                             } else {
@@ -90,13 +104,14 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let id = event.id().as_ref();
                 match id {
                     "show" => {
-                        if let Some(window) = app_handle.get_webview_window("main") {
+                        if let Some(window) = app_handle.get_webview_window(hotkeys::MAIN_WINDOW_LABEL) {
                             let _ = window.show();
                             let _ = window.set_focus();
                         }
                     }
+                    "terminal" => hotkeys::toggle_terminal_window(&app_handle),
                     "refresh" => {
-                        if let Some(window) = app_handle.get_webview_window("main") {
+                        if let Some(window) = app_handle.get_webview_window(hotkeys::MAIN_WINDOW_LABEL) {
                             let _ = window.show();
                             let _ = window.set_focus();
                         }
@@ -110,7 +125,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             });
 
             // ── Hide to tray instead of closing ──────────────────────────
-            if let Some(window) = app.get_webview_window("main") {
+            if let Some(window) = app.get_webview_window(hotkeys::MAIN_WINDOW_LABEL) {
                 let window_clone = window.clone();
                 let app_for_close = app.handle().clone();
                 window.on_window_event(move |event| {
@@ -122,11 +137,34 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 });
             }
 
+            // ── Terminal window: close hides, sessions survive ────────────
+            if let Some(window) = app.get_webview_window(hotkeys::TERMINAL_WINDOW_LABEL) {
+                let window_clone = window.clone();
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        hotkeys::dismiss_terminal_window(&window_clone);
+                    }
+                });
+            }
+
+            // ── Global hotkey for summoning the terminal window ───────────
+            {
+                let store = app.state::<SettingsStore>();
+                let hotkey = store
+                    .get_all()
+                    .map(|s| s.terminal_hotkey)
+                    .unwrap_or_else(|_| models::settings::default_terminal_hotkey());
+                if let Err(e) = hotkeys::apply_terminal_hotkey(app.handle(), &hotkey) {
+                    log::warn!("terminal hotkey '{}' unavailable: {}", hotkey, e);
+                }
+            }
+
             // ── Drag & drop import ──────────────────────────────────────
             {
                 let app_handle = app.handle().clone();
                 let db = database.clone();
-                if let Some(window) = app.get_webview_window("main") {
+                if let Some(window) = app.get_webview_window(hotkeys::MAIN_WINDOW_LABEL) {
                     window.on_window_event(move |event| {
                         if let tauri::WindowEvent::DragDrop(drag_event) = event {
                             match drag_event {
@@ -291,6 +329,15 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::git_rebase,
             commands::git_reword_commit,
             commands::git_drop_commit,
+            commands::git_revert_commit,
+            commands::git_amend_commit,
+            commands::git_operation_state,
+            commands::git_rebase_continue,
+            commands::git_rebase_skip,
+            commands::git_rebase_abort,
+            commands::git_revert_continue,
+            commands::git_revert_abort,
+            commands::git_delete_remote_branch,
             commands::git_reset,
             commands::git_squash_commits,
             // Notifications
@@ -416,7 +463,29 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::create_custom_command,
             commands::list_custom_commands,
             commands::delete_custom_command,
+
+            commands::get_git_credentials,
+            commands::upsert_git_credential,
+            commands::delete_git_credential,
+            // Project Scripts
+            commands::list_project_scripts,
+            // Run Presets
+            commands::create_run_preset,
+            commands::list_run_presets,
+            commands::delete_run_preset,
+            // Terminal
+            commands::terminal_open,
+            commands::terminal_list,
+            commands::terminal_write,
+            commands::terminal_resize,
+            commands::terminal_close,
+            commands::terminal_window_dismiss,
         ])
-        .run(tauri::generate_context!())?;
+        .build(tauri::generate_context!())?;
+    app.run(|app, event| {
+        if let RunEvent::Exit = event {
+            app.state::<commands::TerminalManager>().kill_all();
+        }
+    });
     Ok(())
 }

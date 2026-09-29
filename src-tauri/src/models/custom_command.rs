@@ -6,6 +6,7 @@ pub struct CustomCommand {
     pub name: String,
     pub command: String,
     pub shortcut: Option<String>,
+    pub project_path: Option<String>,
     pub sort_order: i32,
     pub created_at: String,
 }

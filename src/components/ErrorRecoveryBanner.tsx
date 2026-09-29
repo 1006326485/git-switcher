@@ -14,6 +14,7 @@ const actionIcons: Record<string, string> = {
   stash: "📦",
   checkout: "⭐",
   abort_merge: "❌",
+  resolve_conflicts: "🔧",
   fetch: "🔄",
   discard: "↺",
   commit: "✔",
@@ -44,7 +45,7 @@ export const ErrorRecoveryBanner = memo(function ErrorRecoveryBanner({
     <div
       onMouseEnter={() => setIsPaused(true)}
       onMouseLeave={() => setIsPaused(false)}
-      className="flex items-start gap-3 px-4 py-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50"
+      className="select-text flex items-start gap-3 px-4 py-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50"
       role="alert"
     >
       <span className="text-amber-500 text-base mt-0.5 shrink-0" aria-hidden="true">&#x26A0;</span>

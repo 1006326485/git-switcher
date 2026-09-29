@@ -30,6 +30,7 @@ export interface BranchInfo {
   is_current: boolean;
   is_remote: boolean;
   is_merged: boolean;
+  is_tag: boolean;
 }
 
 export interface GitStatus {
@@ -80,6 +81,10 @@ export interface AppSettings {
   view_mode: ViewMode;
   llm: LlmConfig;
   auto_fetch_on_launch: boolean;
+  /** Global hotkey that summons the standalone terminal window. */
+  terminal_hotkey: string;
+  /** Hide the summoned terminal window as soon as it loses focus. */
+  terminal_hide_on_blur: boolean;
 }
 
 export interface CommitInfo {
@@ -114,6 +119,16 @@ export interface MergeResult {
   message: string;
   conflicts: string[];
 }
+
+/** Coarse repository state reported by git_operation_state. */
+export type GitOperationState =
+  | "clean"
+  | "merge"
+  | "rebase"
+  | "cherry_pick"
+  | "revert"
+  | "bisect"
+  | "am";
 
 // ── AI Code Review types ──────────────────────────────────────────────
 
@@ -200,6 +215,19 @@ export interface ReflogEntry {
   timestamp: number;
 }
 
+export interface GitCredential {
+  id: string;
+  /** Empty string means the credential applies to every project. */
+  project_path: string;
+  /** Remote URL, e.g. "https://github.com/acme/web.git". */
+  remote_url: string;
+  username: string;
+  /** Token or password. Stored in the local database this phase; migrate to the OS keychain later. */
+  secret: string;
+  created_at: string;
+  updated_at: string;
+}
+
 
 
 export interface GitNotification {
@@ -216,6 +244,7 @@ export interface CustomCommand {
   name: string;
   command: string;
   shortcut: string | null;
+  project_path: string | null;
   sort_order: number;
   created_at: string;
 }
@@ -392,7 +421,7 @@ export interface ErrorSuggestion {
   title: string;
   description: string;
   action_label: string;
-  action_type: "pull" | "stash" | "checkout" | "abort_merge" | "fetch" | "discard" | "commit";
+  action_type: "pull" | "stash" | "checkout" | "abort_merge" | "fetch" | "discard" | "commit" | "resolve_conflicts";
 }
 
 /**
@@ -446,6 +475,12 @@ export function getSuggestions(error: unknown, operation?: string): ErrorSuggest
 
   if (msg.includes("merge conflict") || msg.includes("conflict") && msg.includes("merge")) {
     return [
+      {
+        title: "Merge conflict detected",
+        description: "Resolve conflicts file by file (ours/theirs/both per hunk), then commit.",
+        action_label: "Resolve conflicts",
+        action_type: "resolve_conflicts",
+      },
       {
         title: "Merge conflict detected",
         description: "Manually resolve conflicts in the listed files, then commit.",
@@ -611,3 +646,129 @@ export interface TaskWorkspacePlan {
 export type TaskExecutionState = "pending" | "running" | "succeeded" | "failed" | "skipped";
 export interface TaskWorkspaceOutcome { id: string; workspace_id: string; entry_id: string; state: TaskExecutionState; message: string; start_branch: string | null; start_head: string | null; result_branch: string | null; worktree_path: string | null; created_at: string; }
 export interface TaskWorkspaceExecution { workspace_id: string; executed_at: string; outcomes: TaskWorkspaceOutcome[]; }
+
+export interface ProjectScript {
+  name: string;
+  command: string;
+}
+
+export interface RunPresetItem {
+  cwd: string;
+  projectTitle: string;
+  title: string;
+  command?: string;
+}
+
+export interface RunPreset {
+  id: string;
+  name: string;
+  items: RunPresetItem[];
+  sort_order: number;
+  created_at: string;
+}
+
+// ── Undo / operation history ────────────────────────────────────────────
+
+/** Git operations that move HEAD or rewrite history, and are therefore undoable. */
+export type DestructiveOpKind =
+  | "checkout"
+  | "reset"
+  | "merge"
+  | "rebase"
+  | "cherry_pick"
+  | "squash"
+  | "reword"
+  | "drop"
+  | "revert"
+  | "amend";
+
+/** Repo state captured right before a destructive operation runs (git rev-parse equivalent). */
+export interface PreOpSnapshot {
+  head: string | null;
+  branch: string | null;
+}
+
+export interface DestructiveOpRecord {
+  id: number;
+  kind: DestructiveOpKind;
+  path: string;
+  pre: PreOpSnapshot;
+  at: number;
+}
+
+/** How to restore the pre-op state — or that only manual recovery is safe. */
+export type UndoPlan =
+  | { kind: "reset_hard"; target: string }
+  | { kind: "checkout_branch"; branch: string }
+  | { kind: "manual" };
+
+// ── Error aggregation (batch/network failures) ──────────────────────────
+
+export type ErrorReporter = (
+  message: string,
+  retry?: () => void | Promise<void>,
+  rawError?: unknown,
+  path?: string
+) => void;
+
+/** True when the message points at a connectivity problem rather than a repo problem. */
+export function isNetworkError(error: unknown): boolean {
+  const msg = parseError(error).toLowerCase();
+  return /network|unreachable|connection|econnrefused|etimedout|timed out|dns|socket|offline|failed to fetch|could not resolve|no route to host|connection reset|connection refused|operation in progress/.test(
+    msg
+  );
+}
+
+/** Fetch failures that just mean "nothing to fetch" and should not alarm the user. */
+export function isBenignFetchFailure(message: string): boolean {
+  const m = message.toLowerCase();
+  return (
+    m.includes("no remote") ||
+    /remote .* does not exist/.test(m) ||
+    m.includes("does not appear to be a git repository")
+  );
+}
+
+/**
+ * Wrap an error reporter so bursts of identical errors (one per repository
+ * during batch work) collapse into a single aggregated toast instead of one
+ * toast per repository. While offline every failure is merged into one
+ * message, since the cause is shared.
+ */
+export function createErrorAggregator(show: ErrorReporter, windowMs = 600): ErrorReporter {
+  let buffer: { message: string; retry?: () => void | Promise<void>; rawError?: unknown; path?: string }[] = [];
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  const flush = () => {
+    timer = null;
+    const entries = buffer;
+    buffer = [];
+    if (entries.length === 0) return;
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      show(`Offline: ${entries.length} operation(s) failed — ${entries[0].message}`);
+      return;
+    }
+    const groups = new Map<
+      string,
+      { entry: (typeof entries)[number]; count: number }
+    >();
+    for (const e of entries) {
+      const g = groups.get(e.message);
+      if (g) g.count++;
+      else groups.set(e.message, { entry: e, count: 1 });
+    }
+    for (const [message, g] of groups) {
+      show(
+        g.count > 1 ? `${message} (×${g.count})` : message,
+        g.entry.retry,
+        g.entry.rawError,
+        g.entry.path
+      );
+    }
+  };
+
+  return (message, retry, rawError, path) => {
+    buffer.push({ message, retry, rawError, path });
+    if (timer === null) timer = setTimeout(flush, windowMs);
+  };
+}

@@ -6,6 +6,7 @@ interface HoverTooltipProps {
   visible: boolean;
   children: React.ReactNode;
   offset?: number;
+  showDelay?: number;
 }
 
 const ARROW_SIZE = 6;
@@ -26,8 +27,44 @@ export const HoverTooltip = memo(function HoverTooltip({
   visible,
   children,
   offset = 8,
+  showDelay = 500,
 }: HoverTooltipProps) {
   const tooltipRef = useRef<HTMLDivElement>(null);
+  const [shown, setShown] = useState(false);
+
+  useEffect(() => {
+    if (!visible) {
+      setShown(false);
+      return;
+    }
+    let timer = 0;
+    const start = () => {
+      if (timer) return;
+      timer = window.setTimeout(() => {
+        timer = 0;
+        setShown(true);
+      }, showDelay);
+    };
+    const cancel = () => {
+      if (timer) {
+        window.clearTimeout(timer);
+        timer = 0;
+      }
+      setShown(false);
+    };
+    start();
+    // 弹窗等覆盖锚点时不会触发 mouseleave，靠指针位置判断 hover 是否仍有效
+    const anchor = anchorRef.current;
+    const onPointerMove = () => {
+      if (anchor?.matches(":hover")) start();
+      else cancel();
+    };
+    document.addEventListener("pointermove", onPointerMove, true);
+    return () => {
+      if (timer) window.clearTimeout(timer);
+      document.removeEventListener("pointermove", onPointerMove, true);
+    };
+  }, [visible, showDelay, anchorRef]);
   const [pos, setPos] = useState<{ top: number; left: number; placement: "top" | "bottom" }>({
     top: 0,
     left: 0,
@@ -57,7 +94,7 @@ export const HoverTooltip = memo(function HoverTooltip({
   }, [anchorRef, offset]);
 
   useEffect(() => {
-    if (!visible) return;
+    if (!shown) return;
     updatePosition();
     window.addEventListener("scroll", updatePosition, true);
     window.addEventListener("resize", updatePosition);
@@ -65,9 +102,9 @@ export const HoverTooltip = memo(function HoverTooltip({
       window.removeEventListener("scroll", updatePosition, true);
       window.removeEventListener("resize", updatePosition);
     };
-  }, [visible, updatePosition]);
+  }, [shown, updatePosition]);
 
-  if (!visible) return null;
+  if (!shown) return null;
 
   const arrowStyle: React.CSSProperties =
     pos.placement === "top"
@@ -80,7 +117,7 @@ export const HoverTooltip = memo(function HoverTooltip({
       role="tooltip"
       style={{
         position: "fixed",
-        zIndex: 9999,
+        zIndex: 30,
         pointerEvents: "none",
         top: pos.top,
         left: pos.left,
@@ -96,9 +133,9 @@ export const HoverTooltip = memo(function HoverTooltip({
           lineHeight: 1.5,
           maxWidth: 280,
           backgroundColor: "var(--tooltip-bg, #1f2937)",
-          color: "#f3f4f6",
+          color: "var(--tooltip-fg, #f3f4f6)",
           boxShadow: "0 4px 12px rgba(0,0,0,0.25)",
-          border: "1px solid rgba(255,255,255,0.08)",
+          border: "1px solid var(--tooltip-muted, rgba(255,255,255,0.08))",
         }}
       >
         <div style={arrowStyle} />

@@ -116,7 +116,7 @@ export const QuickDiffPanel = memo(function QuickDiffPanel({
         )}
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto min-h-0">
+        <div className="select-text flex-1 overflow-y-auto min-h-0">
           {loading && (
             <div className="flex items-center justify-center py-12">
               <svg className="animate-spin h-5 w-5 text-gray-400 mr-2" viewBox="0 0 24 24">

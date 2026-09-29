@@ -1,7 +1,9 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
 import type { Command } from "../components/CommandPalette";
-import type { ProjectDetail, Theme, ViewMode } from "../lib/types";
+import type { ProjectDetail, Theme, ViewMode, ProjectScript, RunPresetItem } from "../lib/types";
 import type { RecentProject } from "./useRecentProjects";
+import * as api from "../lib/tauri";
+import { buildRunEntries, type RunEntry } from "../lib/runCommands";
 
 export interface ProjectMatch {
   detail: ProjectDetail;
@@ -23,6 +25,12 @@ interface Actions {
   onThemeChange: (theme: Theme) => void;
   onViewModeChange: (mode: ViewMode) => void;
   currentTheme: Theme;
+  onRunProjectScript: (
+    path: string,
+    title: string,
+    script: { name: string; command: string }
+  ) => void;
+  onLaunchWorkspace: (items: RunPresetItem[]) => void;
 }
 
 const QUICK_TAGS = [
@@ -30,6 +38,8 @@ const QUICK_TAGS = [
   { label: "changes", description: "Projects with modifications" },
   { label: "stale", description: "Inactive for 30+ days" },
 ];
+
+const scriptCache = new Map<string, ProjectScript[]>();
 
 function getProjectStatusColor(p: ProjectDetail): "green" | "yellow" | "red" {
   const s = p.status;
@@ -75,7 +85,45 @@ export function useCommandPalette(
 ) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [runEntries, setRunEntries] = useState<RunEntry[]>([]);
   const toggle = useCallback(() => setOpen((o) => !o), []);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    Promise.all([
+      api.listCustomCommands(),
+      api.listRunPresets(),
+      Promise.all(
+        projects.map(async (p) => {
+          const path = p.project.path;
+          if (!scriptCache.has(path)) {
+            scriptCache.set(path, await api.listProjectScripts(path));
+          }
+          return { path, name: p.project.name, scripts: scriptCache.get(path) ?? [] };
+        })
+      ),
+    ])
+      .then(([saved, presets, projectInputs]) => {
+        if (cancelled) return;
+        const workspaceEntries: RunEntry[] = presets.map((p) => ({
+          id: `workspace-${p.id}`,
+          label: p.name,
+          description: `Workspace · ${p.items.length} terminals`,
+          name: p.name,
+          command: "",
+          projectPath: null,
+          workspaceItems: p.items,
+        }));
+        setRunEntries([...buildRunEntries(saved, projectInputs), ...workspaceEntries]);
+      })
+      .catch(() => {
+        if (!cancelled) setRunEntries([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, projects]);
 
   // Global Cmd+K shortcut
   useEffect(() => {
@@ -247,8 +295,48 @@ export function useCommandPalette(
         category: "App",
         action: actions.onSettings,
       },
+
+      // Run (saved commands and project scripts)
+      ...runEntries.map((entry): Command => {
+        if (entry.workspaceItems) {
+          const items = entry.workspaceItems;
+          return {
+            id: entry.id,
+            label: entry.label,
+            category: "Run",
+            description: entry.description,
+            action: () => actions.onLaunchWorkspace(items),
+          };
+        }
+        const script = { name: entry.name, command: entry.command };
+        if (entry.projectPath) {
+          const title =
+            projects.find((p) => p.project.path === entry.projectPath)?.project.name ??
+            entry.projectPath;
+          return {
+            id: entry.id,
+            label: entry.label,
+            category: "Run",
+            description: entry.description,
+            action: () => actions.onRunProjectScript(entry.projectPath!, title, script),
+          };
+        }
+        return {
+          id: entry.id,
+          label: entry.label,
+          category: "Run",
+          description: entry.description,
+          action: () => {},
+          _needsProject: true,
+          _projectAction: (projectPath: string) => {
+            const title =
+              projects.find((p) => p.project.path === projectPath)?.project.name ?? projectPath;
+            actions.onRunProjectScript(projectPath, title, script);
+          },
+        };
+      }),
     ],
-    [actions]
+    [actions, runEntries, projects]
   );
 
   const matchedProjects: ProjectMatch[] = useMemo(() => {

@@ -77,11 +77,29 @@ fn policy(operation: &str) -> Result<OperationPolicy, AppError> {
             "This writes the patch changes into the repository working tree and may create conflicts.",
             "Apply patch",
         ),
-        "git_rebase" | "git_squash_commits" | "git_drop_commit" | "git_reword_commit" => (
+        "git_rebase" | "git_squash_commits" | "git_drop_commit" | "git_reword_commit" | "git_amend" => (
             OperationRisk::HistoryRewrite,
             "Rewrite history",
             "This rewrites commit history and should not be used on shared commits without coordination.",
             "Rewrite history",
+        ),
+        "git_revert" => (
+            OperationRisk::HistoryRewrite,
+            "Revert commit",
+            "This creates a new commit that undoes the selected commit's changes.",
+            "Revert commit",
+        ),
+        "git_push_force" => (
+            OperationRisk::HistoryRewrite,
+            "Force push",
+            "This rewrites the remote branch with --force-with-lease. Commits that exist only on the remote are discarded unless they match the remote-tracking ref.",
+            "Force push",
+        ),
+        "git_delete_remote_branch" => (
+            OperationRisk::Destructive,
+            "Delete remote branch",
+            "This permanently deletes the selected branch on the remote.",
+            "Delete remote branch",
         ),
         "git_cherry_pick" | "git_cherry_pick_range" => (
             OperationRisk::HistoryRewrite,

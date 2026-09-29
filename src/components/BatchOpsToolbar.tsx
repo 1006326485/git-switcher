@@ -10,6 +10,7 @@ interface BatchOpsToolbarProps {
   onPullBehind: () => void;
   onPushAhead: () => void;
   onSyncAll: () => void;
+  onRunCommand: () => void;
   behindCount: number;
   aheadCount: number;
 }
@@ -28,7 +29,7 @@ function ProgressBadge({ progress }: { progress: BatchProgress }) {
   );
 }
 
-export const BatchOpsToolbar = memo(function BatchOpsToolbar({ batchLoading, batchProgress, onFetchAll, onPullAll, onPushAll, onPullBehind, onPushAhead, onSyncAll, behindCount, aheadCount }: BatchOpsToolbarProps) {
+export const BatchOpsToolbar = memo(function BatchOpsToolbar({ batchLoading, batchProgress, onFetchAll, onPullAll, onPushAll, onPullBehind, onPushAhead, onSyncAll, onRunCommand, behindCount, aheadCount }: BatchOpsToolbarProps) {
   return (
     <div className="space-y-0.5">
       <button
@@ -175,6 +176,24 @@ export const BatchOpsToolbar = memo(function BatchOpsToolbar({ batchLoading, bat
           <div className="text-xs text-gray-400 dark:text-gray-500">Fetch + Pull all projects</div>
         </div>
         {batchLoading === "sync" && <ProgressBadge progress={batchProgress} />}
+      </button>
+
+      <div className="border-t border-gray-100 dark:border-gray-700 my-1" />
+
+      <button
+        onClick={onRunCommand}
+        disabled={!!batchLoading}
+        className="w-full text-left px-3 py-2 text-sm flex items-center gap-3 transition-colors duration-150 hover:bg-[var(--surface-2)] text-gray-700 dark:text-gray-300 disabled:opacity-50 active:scale-[0.98]"
+      >
+        <span className="shrink-0 w-5 h-5 flex items-center justify-center text-gray-400 dark:text-gray-500">
+          <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M4.25 2.43a.75.75 0 011.12-.65l7.75 5.57a.75.75 0 010 1.3l-7.75 5.57a.75.75 0 01-1.12-.65V2.43z" />
+          </svg>
+        </span>
+        <div className="flex-1 min-w-0">
+          <div className="text-gray-900 dark:text-gray-100">Run Command…</div>
+          <div className="text-xs text-gray-400 dark:text-gray-500">Run a script across all projects</div>
+        </div>
       </button>
     </div>
   );
