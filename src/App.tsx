@@ -33,11 +33,11 @@ import { useCommandPalette } from "./hooks/useCommandPalette";
 import { useRecentProjects } from "./hooks/useRecentProjects";
 import { useGitOpTracker } from "./hooks/useGitOpTracker";
 import { useOperationHistory } from "./hooks/useOperationHistory";
-import type { ProjectDetail, ViewMode, SortOption, RunPresetItem } from "./lib/types";
+import type { ViewMode, SortOption, RunPresetItem } from "./lib/types";
 import { parseError, isBenignFetchFailure, createErrorAggregator } from "./lib/types";
 import { setRecentCommand } from "./lib/recentCommands";
 import type { DashboardFilter } from "./components/DashboardView";
-import { listProjectsInGroup, gitFetch, gitPull, gitPush, gitStash, getSettings, onDragDropEnter, onDragDropLeave, onDragDropResult, logOperation } from "./lib/tauri";
+import { gitFetch, gitPull, gitPush, gitStash, getSettings, onDragDropEnter, onDragDropLeave, onDragDropResult, logOperation } from "./lib/tauri";
 import { Modal, scrimAnimation } from "./components/ui/primitives";
 import { useScrollEdge } from "./hooks/useScrollEdge";
 
@@ -69,7 +69,6 @@ export default function App() {
   const [showSidebar, setShowSidebar] = useState(() => localStorage.getItem("showSidebar") === "true");
   const [activeGroup, setActiveGroup] = useState<string | null>(() => localStorage.getItem("activeGroup"));
   const [sortBy, setSortBy] = useState<SortOption>("custom");
-  const [groupProjects, setGroupProjects] = useState<ProjectDetail[]>([]);
   const [exportImportOpen, setExportImportOpen] = useState(false);
   const [bulkImportOpen, setBulkImportOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -125,7 +124,6 @@ export default function App() {
   const {
     projects,
     loading,
-    projectsVersion,
     addProject,
     removeProject,
     importWorkspace,
@@ -290,25 +288,16 @@ export default function App() {
     return { all: projects.length, changed, behind, ahead, stale };
   }, [projects]);
 
-  // Load group projects when active group changes
-  useEffect(() => {
-    let cancelled = false;
-    if (activeGroup) {
-      listProjectsInGroup(activeGroup).then((data) => {
-        if (!cancelled) setGroupProjects(data);
-      }).catch((e) => {
-        if (!cancelled) toastRef.current.error(`Failed to load group projects: ${e}`);
-      });
-    } else {
-      setGroupProjects([]);
-    }
-    return () => { cancelled = true; };
-  }, [activeGroup, projectsVersion]);
+  // Pure client-side filter: refetching would redo git branch/status walks per project.
+  const groupProjects = useMemo(
+    () => (activeGroup ? projects.filter((p) => p.project.group_id === activeGroup) : projects),
+    [projects, activeGroup]
+  );
 
   // Filter projects by active filter, search query, and group
   const filteredProjects = useMemo(() => {
     const staleThreshold = Date.now() - 30 * 24 * 60 * 60 * 1000;
-    let source = activeGroup ? groupProjects : projects;
+    let source = groupProjects;
 
     if (activeFilter === "changed") {
       source = source.filter((p) => p.status.modified + p.status.staged + p.status.untracked > 0);
@@ -329,7 +318,7 @@ export default function App() {
         p.project.path.toLowerCase().includes(q) ||
         p.current_branch.toLowerCase().includes(q)
     );
-  }, [projects, groupProjects, activeGroup, activeFilter, searchQuery]);
+  }, [groupProjects, activeFilter, searchQuery]);
 
   const collator = useMemo(() => new Intl.Collator(undefined, { sensitivity: "base", numeric: true }), []);
 

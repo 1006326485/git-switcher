@@ -553,10 +553,6 @@ export async function assignToGroup(projectId: string, groupId: string): Promise
   return invoke("assign_to_group", { projectId, groupId });
 }
 
-export async function listProjectsInGroup(groupId: string): Promise<ProjectDetail[]> {
-  return invoke("list_projects_in_group", { groupId });
-}
-
 export async function updateGroup(group: Group): Promise<Group> {
   return invoke("update_group", { group });
 }
