@@ -17,6 +17,11 @@ impl GitFixture {
             Repository::init(&repository_path).expect("initialize temporary repository");
         let signature = Signature::now("Git Switcher Test", "tests@git-switcher.local")
             .expect("create test signature");
+        let mut config = repository.config().expect("open config");
+        config
+            .set_str("core.autocrlf", "false")
+            .expect("pin core.autocrlf off");
+
         let tree_id = repository
             .index()
             .expect("open index")
@@ -164,4 +169,22 @@ pub fn log_messages(fixture: &GitFixture) -> Vec<String> {
             commit.message().unwrap_or("").trim_end().to_string()
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GitFixture;
+
+    #[test]
+    fn fixture_repos_pin_core_autocrlf_off() {
+        let fixture = GitFixture::new();
+        let config = fixture.open().config().expect("repo config");
+        let autocrlf = config
+            .get_bool("core.autocrlf")
+            .expect("core.autocrlf pinned in fixture repo");
+        assert!(
+            !autocrlf,
+            "fixture repos must not inherit line-ending conversion"
+        );
+    }
 }
