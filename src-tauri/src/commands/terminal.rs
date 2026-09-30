@@ -43,6 +43,9 @@ impl TerminalSession {
             .map_err(|e| AppError::Other(format!("failed to open pty: {}", e)))?;
         let mut cmd = CommandBuilder::new_default_prog();
         cmd.cwd(resolve_cwd(cwd));
+        if std::env::var_os("TERM").is_none() {
+            cmd.env("TERM", "xterm-256color");
+        }
         let child = pair
             .slave
             .spawn_command(cmd)
