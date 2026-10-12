@@ -14,7 +14,7 @@
   <img src="https://img.shields.io/badge/React_19-TypeScript-61DAFB?logo=react&logoColor=white" alt="React 19" />
   <img src="https://img.shields.io/badge/Vite_8-FF6B35?logo=vite&logoColor=white" alt="Vite 8" />
   <img src="https://img.shields.io/badge/Tailwind_CSS_4-38BDF8?logo=tailwindcss&logoColor=white" alt="Tailwind CSS 4" />
-  <img src="https://img.shields.io/badge/v1.4.0-blue?style=flat-square" alt="Version" />
+  <img src="https://img.shields.io/badge/v1.5.0-blue?style=flat-square" alt="Version" />
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License" />
 </p>
 
@@ -95,6 +95,7 @@ If you work on multiple Git repositories every day — switching between project
 - **Enhanced Blame View** — Color-coded authorship, compact mode toggle, and virtualized scrolling for large files
 - **Code Splitting** — Lazy-loaded modal components for faster initial load time
 - **README Preview** — Hover over projects to see the first 500 characters of their README
+- **Multi-Language UI** — Switch between English and 简体中文 in Settings → General; the choice also applies to the system-tray menu and OS notifications
 
 ### Tech Stack
 
@@ -108,6 +109,17 @@ If you work on multiple Git repositories every day — switching between project
 | LLM Integration | OpenAI-compatible API (configurable endpoint) |
 | System Tray | Tauri 2 Tray API (native) |
 | Background Service | Tokio async runtime |
+| Internationalization | react-i18next (frontend) + built-in Rust locale table shared from `locales/` |
+
+### Localization
+
+The UI ships in **English** and **简体中文**. Pick one in **Settings → General** (the switch is persisted and applies instantly, with no restart). The tray menu, tray tooltip, and OS notifications follow the same language — the Rust backend reads the same `locales/en.json` and `locales/zh-CN.json` that the frontend bundles.
+
+The default follows the OS locale when nothing has been chosen yet.
+
+- **Language** — `locales/en.json` and `locales/zh-CN.json` are the single source of truth, consumed by the frontend at build time and embedded into the Rust binary with `include_str!`.
+- **Fallback** — a missing key always falls back to English; key text is never shown in the UI.
+- **Adding a language** — add `locales/<locale>.json`, register it in `src/lib/i18n.ts`, then run `npm run i18n:check`, which enforces identical key sets across all locales.
 
 ### Getting Started
 
@@ -241,6 +253,7 @@ MIT
 - **增强 Blame 视图** —— 按作者颜色编码、紧凑模式切换、大文件虚拟化滚动
 - **代码分割** —— 弹窗组件懒加载，加快初始加载速度
 - **README 预览** —— 悬停项目即可查看 README 的前 500 个字符
+- **多语言界面** —— 在「设置 → 通用」中切换 English / 简体中文；系统托盘菜单与系统通知会同步切换
 
 ### 技术栈
 
@@ -254,6 +267,17 @@ MIT
 | LLM 集成 | 兼容 OpenAI 的 API（可配置端点） |
 | 系统托盘 | Tauri 2 Tray API（原生） |
 | 后台服务 | Tokio 异步运行时 |
+| 国际化 | react-i18next（前端）+ 与前端共享 `locales/` 的 Rust 内置语言表 |
+
+### 本地化
+
+界面提供 **English** 与 **简体中文** 两种语言。在 **设置 → 通用** 中切换，切换即时生效、无需重启，并会持久化保存。托盘菜单、托盘提示与系统通知跟随同一语言 —— Rust 后端读取的正是前端打包的同一批 `locales/en.json` 与 `locales/zh-CN.json`。
+
+尚未做选择时默认跟随操作系统语言。
+
+- **语言文件** —— `locales/en.json` 与 `locales/zh-CN.json` 是唯一的文案来源，前端在构建时打包，Rust 通过 `include_str!` 内嵌到二进制中。
+- **兜底** —— 缺失的 key 一律回退到英文，界面上永远不会出现 key 原文。
+- **新增语言** —— 增加 `locales/<locale>.json`，在 `src/lib/i18n.ts` 中注册，然后运行 `npm run i18n:check`，该脚本强制要求所有语言文件的 key 集合完全一致。
 
 ### 快速开始
 

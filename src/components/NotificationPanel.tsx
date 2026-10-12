@@ -1,14 +1,16 @@
 import { useState, useEffect, useCallback, memo } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import * as api from "../lib/tauri";
 import type { GitNotification } from "../lib/types";
 
-function formatRelativeTime(timestamp: number): string {
+function formatRelativeTime(t: TFunction, timestamp: number): string {
   const now = Date.now() / 1000;
   const diff = now - timestamp;
-  if (diff < 60) return "just now";
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
+  if (diff < 60) return t("notif.justNow");
+  if (diff < 3600) return t("notif.mAgo", { count: Math.floor(diff / 60) });
+  if (diff < 86400) return t("notif.hAgo", { count: Math.floor(diff / 3600) });
+  if (diff < 604800) return t("notif.dAgo", { count: Math.floor(diff / 86400) });
   return new Date(timestamp * 1000).toLocaleDateString();
 }
 
@@ -32,6 +34,7 @@ export const NotificationPanel = memo(function NotificationPanel({
   open,
   onClose,
 }: NotificationPanelProps) {
+  const { t } = useTranslation();
   const [notifications, setNotifications] = useState<GitNotification[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -77,19 +80,19 @@ export const NotificationPanel = memo(function NotificationPanel({
       >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-2 border-b border-[var(--border-color)]">
-          <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200">Notifications</h3>
+          <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200">{t("notif.title")}</h3>
           <div className="flex items-center gap-2">
             <button
               onClick={handleMarkAllRead}
               className="text-xs text-blue-500 hover:text-blue-600"
             >
-              Mark all read
+              {t("notif.markAllRead")}
             </button>
             <button
               onClick={handleClearAll}
               className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
             >
-              Clear
+              {t("notif.clear")}
             </button>
           </div>
         </div>
@@ -103,7 +106,7 @@ export const NotificationPanel = memo(function NotificationPanel({
           )}
 
           {!loading && notifications.length === 0 && (
-            <p className="text-sm text-gray-400 text-center py-6">No notifications</p>
+            <p className="text-sm text-gray-400 text-center py-6">{t("notif.empty")}</p>
           )}
 
           {!loading && notifications.map((n) => (
@@ -125,7 +128,7 @@ export const NotificationPanel = memo(function NotificationPanel({
                 {!n.read && (
                   <span className="w-2 h-2 rounded-full bg-blue-500" />
                 )}
-                <span className="text-xs text-gray-400">{formatRelativeTime(n.timestamp)}</span>
+                <span className="text-xs text-gray-400">{formatRelativeTime(t, n.timestamp)}</span>
               </div>
             </div>
           ))}

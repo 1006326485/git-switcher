@@ -12,6 +12,7 @@ vi.mock("../lib/tauri", () => ({
 
 const settings: AppSettings = {
   theme: "system",
+  language: "system",
   auto_refresh: true,
   refresh_interval_secs: 30,
   view_mode: "card",
@@ -27,6 +28,14 @@ const settings: AppSettings = {
   auto_fetch_on_launch: true,
   terminal_hotkey: "CmdOrCtrl+Shift+`",
   terminal_hide_on_blur: false,
+  tray: {
+    git_actions: true,
+    recent_projects: true,
+    quick_launch: true,
+    recent_limit: 5,
+    pinned_commands: [],
+    notifications: true,
+  },
 };
 
 beforeEach(() => {

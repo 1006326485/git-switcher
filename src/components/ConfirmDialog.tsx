@@ -1,4 +1,5 @@
 import { memo, useState, useCallback, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { Modal } from "./ui/primitives";
 
 interface ConfirmDialogProps {
@@ -24,13 +25,14 @@ export const ConfirmDialog = memo(function ConfirmDialog({
   open,
   title,
   message,
-  confirmLabel = "Confirm",
+  confirmLabel,
   confirmColor = "red",
   onConfirm,
   onCancel,
   size = "md",
   skipKey,
 }: ConfirmDialogProps) {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [dontAsk, setDontAsk] = useState(false);
 
@@ -55,7 +57,7 @@ export const ConfirmDialog = memo(function ConfirmDialog({
   }, [onConfirm, dontAsk, skipKey]);
 
   return (
-    <Modal open={open} onClose={onCancel} title={title} maxWidth={size === "sm" ? "max-w-xs" : "max-w-sm"} size={size}>
+    <Modal open={open} onClose={onCancel} title={title} width="sm" compact={size === "sm"}>
       <div className={size === "sm" ? "px-4 py-3" : "px-6 py-5"}>
         <div className={`text-gray-600 dark:text-gray-400 ${size === "sm" ? "text-xs mb-3" : "text-sm mb-6"}`}>{message}</div>
         {skipKey && (
@@ -66,7 +68,7 @@ export const ConfirmDialog = memo(function ConfirmDialog({
               onChange={(e) => setDontAsk(e.target.checked)}
               className="rounded border-gray-300 dark:border-gray-600"
             />
-            Don't ask again
+            {t("ui.confirm.dontAskAgain")}
           </label>
         )}
         <div className={`flex justify-end ${size === "sm" ? "gap-2" : "gap-3"}`}>
@@ -75,14 +77,14 @@ export const ConfirmDialog = memo(function ConfirmDialog({
             disabled={loading}
             className={`${size === "sm" ? "px-2.5 py-1 text-xs rounded-md" : "px-4 py-2 text-sm rounded-lg"} font-medium text-gray-700 dark:text-gray-300 bg-[var(--surface-2)] border border-[var(--border-color)] hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors duration-150 disabled:opacity-50 active:scale-[0.98]`}
           >
-            Cancel
+            {t("common.cancel")}
           </button>
           <button
             onClick={handleConfirm}
             disabled={loading}
             className={`${size === "sm" ? "px-2.5 py-1 text-xs rounded-md" : "px-4 py-2 text-sm rounded-lg"} font-medium text-white transition-colors duration-150 disabled:opacity-50 active:scale-[0.98] ${colorStyles[confirmColor]}`}
           >
-            {loading ? "Working..." : confirmLabel}
+            {loading ? t("common.working") : (confirmLabel ?? t("common.confirm"))}
           </button>
         </div>
       </div>

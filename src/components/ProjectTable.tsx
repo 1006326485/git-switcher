@@ -6,6 +6,7 @@ import { GitOpsPanel } from "./GitOpsPanel";
 import { ProjectRowShell } from "./ProjectRowShell";
 import { useProjectActions } from "../context/ProjectContext";
 import { useVirtualList } from "../hooks/useVirtualList";
+import { useTranslation } from "react-i18next";
 
 interface ProjectTableProps {
   projects: ProjectDetail[];
@@ -68,6 +69,7 @@ const SortableHeader = memo(function SortableHeader({
 });
 
 export const ProjectTable = memo(function ProjectTable({ projects, focusedIndex }: ProjectTableProps) {
+  const { t } = useTranslation();
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
@@ -112,21 +114,21 @@ export const ProjectTable = memo(function ProjectTable({ projects, focusedIndex 
   if (!enabled) {
     return (
       <div className="overflow-x-auto rounded-xl border border-[var(--border-color)] bg-[var(--surface-1)] [-webkit-overflow-scrolling:touch]">
-        <table className="min-w-[900px] w-full" aria-label="Git projects">
+        <table className="min-w-[900px] w-full" aria-label={t("table.ariaLabel")}>
           <thead className="bg-[var(--surface-2)] border-b border-[var(--border-color)]">
             <tr>
-              <SortableHeader label="Name" sortKey="name" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
-              <SortableHeader label="Branch" sortKey="branch" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
-              <SortableHeader label="Modified" sortKey="modified" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
-              <SortableHeader label="Staged" sortKey="staged" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
-              <SortableHeader label="Untracked" sortKey="untracked" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
-              <SortableHeader label="Ahead" sortKey="ahead" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
-              <SortableHeader label="Behind" sortKey="behind" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
+              <SortableHeader label={t("table.name")} sortKey="name" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
+              <SortableHeader label={t("table.branch")} sortKey="branch" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
+              <SortableHeader label={t("table.modified")} sortKey="modified" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
+              <SortableHeader label={t("table.staged")} sortKey="staged" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
+              <SortableHeader label={t("table.untracked")} sortKey="untracked" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
+              <SortableHeader label={t("table.ahead")} sortKey="ahead" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
+              <SortableHeader label={t("table.behind")} sortKey="behind" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
               <th scope="col" className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">
-                Stash
+                {t("table.stash")}
               </th>
               <th scope="col" className="px-3 py-2.5 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase w-24">
-                Actions
+                {t("table.actions")}
               </th>
             </tr>
           </thead>
@@ -148,15 +150,15 @@ export const ProjectTable = memo(function ProjectTable({ projects, focusedIndex 
       <div className="min-w-[1056px]">
       {/* Table header */}
       <div className="grid grid-cols-[minmax(200px,1fr)_180px_100px_100px_100px_100px_100px_80px_96px] bg-[var(--surface-2)] border-b border-[var(--border-color)]">
-        <SortableHeaderDiv label="Name" sortKey="name" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
-        <SortableHeaderDiv label="Branch" sortKey="branch" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
-        <SortableHeaderDiv label="Modified" sortKey="modified" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
-        <SortableHeaderDiv label="Staged" sortKey="staged" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
-        <SortableHeaderDiv label="Untracked" sortKey="untracked" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
-        <SortableHeaderDiv label="Ahead" sortKey="ahead" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
-        <SortableHeaderDiv label="Behind" sortKey="behind" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
-        <div className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Stash</div>
-        <div className="px-3 py-2.5 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Actions</div>
+        <SortableHeaderDiv label={t("table.name")} sortKey="name" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
+        <SortableHeaderDiv label={t("table.branch")} sortKey="branch" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
+        <SortableHeaderDiv label={t("table.modified")} sortKey="modified" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
+        <SortableHeaderDiv label={t("table.staged")} sortKey="staged" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
+        <SortableHeaderDiv label={t("table.untracked")} sortKey="untracked" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
+        <SortableHeaderDiv label={t("table.ahead")} sortKey="ahead" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
+        <SortableHeaderDiv label={t("table.behind")} sortKey="behind" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
+        <div className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{t("table.stash")}</div>
+        <div className="px-3 py-2.5 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{t("table.actions")}</div>
       </div>
       {/* Virtualized rows */}
       <div className="divide-y divide-gray-100 dark:divide-gray-700/50" style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
@@ -223,12 +225,13 @@ const SortableHeaderDiv = memo(function SortableHeaderDiv({
 // ── Native table row (for small lists) ───────────────────────────────────
 
 const TableRow = memo(function TableRow({ detail, projectIndex, isFocused }: { detail: ProjectDetail; projectIndex?: number; isFocused?: boolean }) {
+  const { t } = useTranslation();
   const { onSuccess, onError, onInfo } = useProjectActions();
   const { project, group } = detail;
 
   return (
     <ProjectRowShell detail={detail}>
-      {({ detail: d, row, actionButtons, errorBanner, activeOpIndicator }) => {
+      {({ detail: d, row, actionButtons, errorBanner, activeOpIndicator, onRowContextMenu, onRowKeyDown }) => {
         const { current_branch, branches, status } = d;
 
         const StatusOrDash = ({ type, count }: { type: "modified" | "staged" | "untracked" | "ahead" | "behind"; count: number }) =>
@@ -236,7 +239,7 @@ const TableRow = memo(function TableRow({ detail, projectIndex, isFocused }: { d
 
         return (
           <>
-            <tr data-project-id={project.id} data-project-index={projectIndex} role="row" aria-label={`${project.alias || project.name}, branch ${current_branch}`} className={`hover:bg-[var(--surface-2)] transition-colors duration-150 border-l-[3px] ${colorBorderClass(project.color) || "border-l-transparent"} ${isFocused ? "ring-2 ring-inset ring-blue-500 dark:ring-blue-400" : ""}`}>
+            <tr tabIndex={-1} data-project-id={project.id} data-project-index={projectIndex} onContextMenu={onRowContextMenu} onKeyDown={onRowKeyDown} role="row" aria-label={t("table.rowAria", { name: project.alias || project.name, branch: current_branch })} className={`hover:bg-[var(--surface-2)] transition-colors duration-150 border-l-[3px] ${colorBorderClass(project.color) || "border-l-transparent"} ${isFocused ? "ring-2 ring-inset ring-blue-500 dark:ring-blue-400" : ""}`}>
               <td className="px-3 py-2">
                 <div className="flex items-center gap-1.5">
                   {status.behind > 0 ? (
@@ -315,19 +318,20 @@ const TableRow = memo(function TableRow({ detail, projectIndex, isFocused }: { d
 // ── Div-based grid row (for virtualized lists) ───────────────────────────
 
 const TableRowGrid = memo(function TableRowGrid({ detail, projectIndex, isFocused }: { detail: ProjectDetail; projectIndex?: number; isFocused?: boolean }) {
+  const { t } = useTranslation();
   const { onSuccess, onError, onInfo } = useProjectActions();
   const { project, group } = detail;
 
   return (
     <ProjectRowShell detail={detail}>
-      {({ detail: d, row, actionButtons, errorBanner, activeOpIndicator }) => {
+      {({ detail: d, row, actionButtons, errorBanner, activeOpIndicator, onRowContextMenu, onRowKeyDown }) => {
         const { current_branch, branches, status } = d;
 
         const StatusOrDash = ({ type, count }: { type: "modified" | "staged" | "untracked" | "ahead" | "behind"; count: number }) =>
           count > 0 ? <StatusBadge type={type} count={count} variant="text" /> : <span className="text-gray-300 dark:text-gray-600">—</span>;
 
         return (
-          <div data-project-id={project.id} data-project-index={projectIndex} role="article" aria-label={`${project.alias || project.name}, branch ${current_branch}`} className={`hover:bg-[var(--surface-2)] transition-colors duration-150 border-l-[3px] ${colorBorderClass(project.color) || "border-l-transparent"} ${isFocused ? "ring-2 ring-inset ring-blue-500 dark:ring-blue-400" : ""}`}>
+          <div tabIndex={-1} data-project-id={project.id} data-project-index={projectIndex} onContextMenu={onRowContextMenu} onKeyDown={onRowKeyDown} role="article" aria-label={t("table.rowAria", { name: project.alias || project.name, branch: current_branch })} className={`hover:bg-[var(--surface-2)] transition-colors duration-150 border-l-[3px] ${colorBorderClass(project.color) || "border-l-transparent"} ${isFocused ? "ring-2 ring-inset ring-blue-500 dark:ring-blue-400" : ""}`}>
             <div className="grid grid-cols-[minmax(200px,1fr)_180px_100px_100px_100px_100px_100px_80px_96px] items-center">
               <div className="px-3 py-2">
                 <div className="flex items-center gap-1.5">

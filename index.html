@@ -16,6 +16,21 @@
         if (new URLSearchParams(location.search).get("window") === "terminal") {
           document.documentElement.classList.add("terminal-window");
         }
+        // Resolve the interface language before first paint too: <html lang> must
+        // never be wrong, and translated text must never flash another locale.
+        // Mirrors resolveInitialLanguage() in src/lib/i18n.ts; the language list
+        // and the storage key are checked by scripts/check-i18n.mjs.
+        var language = localStorage.getItem("git-switcher-language");
+        if (language !== "en" && language !== "zh-CN") {
+          var tags = navigator.languages || [navigator.language || ""];
+          language = "en";
+          for (var i = 0; i < tags.length; i++) {
+            var tag = String(tags[i]).toLowerCase();
+            if (tag === "zh" || tag.indexOf("zh-") === 0) { language = "zh-CN"; break; }
+            if (tag === "en" || tag.indexOf("en-") === 0) { language = "en"; break; }
+          }
+        }
+        document.documentElement.lang = language;
       })();
     </script>
   </head>

@@ -1,6 +1,6 @@
 {
   "name": "git-switcher",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,8 +10,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "version:check": "node scripts/check-versions.mjs",
+    "i18n:check": "node scripts/check-i18n.mjs",
     "check:rust": "cargo fmt --manifest-path src-tauri/Cargo.toml --check && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml",
-    "build": "npm run version:check && npm run typecheck && vite build",
+    "build": "npm run version:check && npm run i18n:check && npm run typecheck && vite build",
     "check": "npm test && npm run build && npm run check:rust",
     "preview": "vite preview",
     "tauri": "tauri"
@@ -27,8 +28,10 @@
     "@tauri-apps/plugin-shell": "^2.3.5",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
+    "i18next": "^26.4.2",
     "react": "^19.2.6",
-    "react-dom": "^19.2.6"
+    "react-dom": "^19.2.6",
+    "react-i18next": "^17.0.16"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.0",

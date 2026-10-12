@@ -1,4 +1,6 @@
 import { memo, useState, useEffect, useCallback } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import type { ProjectStats } from "../lib/types";
 import { getProjectStats } from "../lib/tauri";
 
@@ -6,23 +8,21 @@ interface ProjectStatsPanelProps {
   path: string;
 }
 
-const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
-
-function formatRelativeTime(timestamp: number): string {
-  if (!timestamp) return "never";
+function formatRelativeTime(t: TFunction, timestamp: number): string {
+  if (!timestamp) return t("stats.never");
   const diffMs = Date.now() - timestamp * 1000;
   const diffSec = Math.floor(diffMs / 1000);
-  if (diffSec < 60) return "just now";
+  if (diffSec < 60) return t("stats.justNow");
   const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return rtf.format(-diffMin, "minute");
+  if (diffMin < 60) return t("stats.minute", { count: diffMin });
   const diffHrs = Math.floor(diffMin / 60);
-  if (diffHrs < 24) return rtf.format(-diffHrs, "hour");
+  if (diffHrs < 24) return t("stats.hour", { count: diffHrs });
   const diffDays = Math.floor(diffHrs / 24);
-  if (diffDays < 30) return rtf.format(-diffDays, "day");
+  if (diffDays < 30) return t("stats.day", { count: diffDays });
   const diffMonths = Math.floor(diffDays / 30);
-  if (diffMonths < 12) return rtf.format(-diffMonths, "month");
+  if (diffMonths < 12) return t("stats.month", { count: diffMonths });
   const diffYears = Math.floor(diffMonths / 12);
-  return rtf.format(-diffYears, "year");
+  return t("stats.year", { count: diffYears });
 }
 
 function ActivityBar({ value, max }: { value: number; max: number }) {
@@ -38,6 +38,7 @@ function ActivityBar({ value, max }: { value: number; max: number }) {
 }
 
 export const ProjectStatsPanel = memo(function ProjectStatsPanel({ path }: ProjectStatsPanelProps) {
+  const { t } = useTranslation();
   const [stats, setStats] = useState<ProjectStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,9 +72,7 @@ export const ProjectStatsPanel = memo(function ProjectStatsPanel({ path }: Proje
 
   if (error) {
     return (
-      <div className="text-xs text-red-500 dark:text-red-400">
-        Failed to load stats
-      </div>
+      <div className="text-xs text-red-500 dark:text-red-400">{t("stats.failed")}</div>
     );
   }
 
@@ -85,19 +84,19 @@ export const ProjectStatsPanel = memo(function ProjectStatsPanel({ path }: Proje
     <div className="space-y-2 text-xs">
       <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
         <div className="flex items-center justify-between">
-          <span className="text-gray-500 dark:text-gray-400">Commits</span>
+          <span className="text-gray-500 dark:text-gray-400">{t("stats.commits")}</span>
           <span className="font-medium text-gray-800 dark:text-gray-200">{stats.total_commits.toLocaleString()}</span>
         </div>
         <div className="flex items-center justify-between">
-          <span className="text-gray-500 dark:text-gray-400">Contributors</span>
+          <span className="text-gray-500 dark:text-gray-400">{t("stats.contributors")}</span>
           <span className="font-medium text-gray-800 dark:text-gray-200">{stats.contributors.length}</span>
         </div>
         <div className="flex items-center justify-between">
-          <span className="text-gray-500 dark:text-gray-400">Branches</span>
+          <span className="text-gray-500 dark:text-gray-400">{t("stats.branches")}</span>
           <span className="font-medium text-gray-800 dark:text-gray-200">{stats.branch_count}</span>
         </div>
         <div className="flex items-center justify-between">
-          <span className="text-gray-500 dark:text-gray-400">Tags</span>
+          <span className="text-gray-500 dark:text-gray-400">{t("stats.tags")}</span>
           <span className="font-medium text-gray-800 dark:text-gray-200">{stats.tag_count}</span>
         </div>
       </div>
@@ -118,8 +117,8 @@ export const ProjectStatsPanel = memo(function ProjectStatsPanel({ path }: Proje
 
       {/* Last commit */}
       <div className="flex items-center justify-between pt-0.5">
-        <span className="text-gray-500 dark:text-gray-400">Last commit</span>
-        <span className="font-medium text-gray-800 dark:text-gray-200">{formatRelativeTime(stats.last_commit_date)}</span>
+        <span className="text-gray-500 dark:text-gray-400">{t("stats.lastCommit")}</span>
+        <span className="font-medium text-gray-800 dark:text-gray-200">{formatRelativeTime(t, stats.last_commit_date)}</span>
       </div>
     </div>
   );

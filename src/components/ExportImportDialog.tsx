@@ -1,4 +1,5 @@
 import { useState, useCallback, memo } from "react";
+import { useTranslation } from "react-i18next";
 import * as api from "../lib/tauri";
 import { parseError } from "../lib/types";
 import { Modal, Tabs } from "./ui/primitives";
@@ -22,6 +23,7 @@ export const ExportImportDialog = memo(function ExportImportDialog({
   onImportDone,
   activeGroup,
 }: ExportImportDialogProps) {
+  const { t } = useTranslation();
   const [tab, setTab] = useState<"export" | "import">("export");
   const [loading, setLoading] = useState(false);
   const [importJson, setImportJson] = useState("");
@@ -33,15 +35,15 @@ export const ExportImportDialog = memo(function ExportImportDialog({
       try {
         await navigator.clipboard.writeText(json);
       } catch {
-        throw new Error("Clipboard access denied — check browser permissions");
+        throw new Error(t("exportImport.clipboardDenied"));
       }
-      onSuccess("Project list copied to clipboard");
+      onSuccess(t("exportImport.copied"));
     } catch (e) {
       onError(parseError(e));
     } finally {
       setLoading(false);
     }
-  }, [onSuccess, onError]);
+  }, [onSuccess, onError, t]);
 
   const handleExportToFile = useCallback(async () => {
     setLoading(true);
@@ -53,14 +55,14 @@ export const ExportImportDialog = memo(function ExportImportDialog({
       });
       if (filePath) {
         await writeTextFile(filePath, json);
-        onSuccess(`Exported to ${filePath}`);
+        onSuccess(t("exportImport.exportedTo", { path: filePath }));
       }
     } catch (e) {
       onError(parseError(e));
     } finally {
       setLoading(false);
     }
-  }, [onSuccess, onError]);
+  }, [onSuccess, onError, t]);
 
   const handleImportJson = useCallback(async () => {
     if (!importJson.trim()) return;
@@ -68,11 +70,12 @@ export const ExportImportDialog = memo(function ExportImportDialog({
     try {
       const groupId = activeGroup || (await api.listGroups())[0]?.id;
       if (!groupId) {
-        onError("No groups exist — please create a group first");
+        onError(t("exportImport.noGroups"));
         return;
       }
       const results = await api.importProjects(importJson, groupId);
-      onSuccess(`Imported ${results.length} project(s)`);
+      api.rebuildTrayMenu().catch(() => {});
+      onSuccess(t("exportImport.imported", { count: results.length }));
       setImportJson("");
       onImportDone();
       onClose();
@@ -89,7 +92,7 @@ export const ExportImportDialog = memo(function ExportImportDialog({
     } finally {
       setLoading(false);
     }
-  }, [importJson, activeGroup, onSuccess, onError, onImportDone, onClose]);
+  }, [importJson, activeGroup, onSuccess, onError, onImportDone, onClose, t]);
 
   const handleImportFromFile = useCallback(async () => {
     setLoading(true);
@@ -101,21 +104,21 @@ export const ExportImportDialog = memo(function ExportImportDialog({
       if (filePath) {
         const json = await readTextFile(filePath as string);
         setImportJson(json);
-        onSuccess("File loaded — click Import to proceed");
+        onSuccess(t("exportImport.fileLoaded"));
       }
     } catch (e) {
       onError(parseError(e));
     } finally {
       setLoading(false);
     }
-  }, [onSuccess, onError]);
+  }, [onSuccess, onError, t]);
 
   return (
-    <Modal open={open} onClose={onClose} title="Export / Import Projects" maxWidth="max-w-lg">
+    <Modal open={open} onClose={onClose} title={t("exportImport.title")} width="lg">
       <Tabs
         tabs={[
-          { value: "export", label: "Export" },
-          { value: "import", label: "Import" },
+          { value: "export", label: t("exportImport.tabExport") },
+          { value: "import", label: t("exportImport.tabImport") },
         ]}
         active={tab}
         onChange={setTab}
@@ -125,21 +128,21 @@ export const ExportImportDialog = memo(function ExportImportDialog({
         {tab === "export" && (
           <div className="space-y-4">
             <p className="text-sm text-gray-600 dark:text-gray-400">
-              Export your project list as JSON. This will copy the data to your clipboard.
+              {t("exportImport.exportDesc")}
             </p>
             <button
               onClick={handleExport}
               disabled={loading}
               className="w-full px-4 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium text-sm transition-colors"
             >
-              {loading ? "Exporting..." : "Export to Clipboard"}
+              {loading ? t("exportImport.exporting") : t("exportImport.exportClipboard")}
             </button>
             <button
               onClick={handleExportToFile}
               disabled={loading}
               className="w-full px-4 py-2.5 rounded-lg bg-gray-600 hover:bg-gray-700 disabled:bg-gray-400 text-white font-medium text-sm transition-colors"
             >
-              {loading ? "Exporting..." : "Save to File"}
+              {loading ? t("exportImport.exporting") : t("exportImport.saveFile")}
             </button>
           </div>
         )}
@@ -147,20 +150,20 @@ export const ExportImportDialog = memo(function ExportImportDialog({
         {tab === "import" && (
           <div className="space-y-4">
             <p className="text-sm text-gray-600 dark:text-gray-400">
-              Paste exported JSON below to import projects. Existing projects are skipped.
+              {t("exportImport.importDesc")}
             </p>
             <button
               onClick={handleImportFromFile}
               disabled={loading}
               className="w-full px-4 py-2.5 rounded-lg bg-gray-600 hover:bg-gray-700 disabled:bg-gray-400 text-white font-medium text-sm transition-colors"
             >
-              {loading ? "Loading..." : "Load from File"}
+              {loading ? t("exportImport.loading") : t("exportImport.loadFile")}
             </button>
             <textarea
               value={importJson}
               onChange={(e) => setImportJson(e.target.value)}
               placeholder='[{"id":"...","name":"...","path":"/path/to/repo",...}]'
-              aria-label="Import JSON"
+              aria-label={t("exportImport.jsonAria")}
               rows={8}
               className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400 resize-none"
             />
@@ -169,7 +172,7 @@ export const ExportImportDialog = memo(function ExportImportDialog({
               disabled={!importJson.trim() || loading}
               className="w-full px-4 py-2.5 rounded-lg bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-medium text-sm transition-colors"
             >
-              {loading ? "Importing..." : "Import Projects"}
+              {loading ? t("exportImport.importing") : t("exportImport.importBtn")}
             </button>
           </div>
         )}

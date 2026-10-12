@@ -30,3 +30,9 @@ npm-debug.log*
 .claude
 # Agent session artifacts
 .pi/
+
+# Preview / agent session artifacts
+.chrome-tmp2/
+preview-shots/
+*-preview.html
+.ai/

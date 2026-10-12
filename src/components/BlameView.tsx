@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, memo, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import * as api from "../lib/tauri";
 import type { BlameLine } from "../lib/types";
 import { parseError } from "../lib/types";
@@ -14,15 +16,15 @@ interface BlameViewProps {
 const ROW_HEIGHT = 20;
 const VIRTUALIZE_THRESHOLD = 200;
 
-function timeAgo(ts: number): string {
+function timeAgo(t: TFunction, ts: number): string {
   const now = Date.now() / 1000;
   const diff = now - ts;
-  if (diff < 60) return "just now";
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  if (diff < 86400 * 30) return `${Math.floor(diff / 86400)}d ago`;
-  if (diff < 86400 * 365) return `${Math.floor(diff / (86400 * 30))}mo ago`;
-  return `${Math.floor(diff / (86400 * 365))}y ago`;
+  if (diff < 60) return t("blame.justNow");
+  if (diff < 3600) return t("blame.mAgo", { count: Math.floor(diff / 60) });
+  if (diff < 86400) return t("blame.hAgo", { count: Math.floor(diff / 3600) });
+  if (diff < 86400 * 30) return t("blame.dAgo", { count: Math.floor(diff / 86400) });
+  if (diff < 86400 * 365) return t("blame.moAgo", { count: Math.floor(diff / (86400 * 30)) });
+  return t("blame.yAgo", { count: Math.floor(diff / (86400 * 365)) });
 }
 
 function timeColorClass(ts: number): string {
@@ -34,6 +36,7 @@ function timeColorClass(ts: number): string {
 }
 
 export const BlameView = memo(function BlameView({ path, filePath, onClose }: BlameViewProps) {
+  const { t } = useTranslation();
   const [lines, setLines] = useState<BlameLine[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -92,7 +95,7 @@ export const BlameView = memo(function BlameView({ path, filePath, onClose }: Bl
           {isGroupStart ? blame.author : ""}
         </td>
         <td className="w-[72px] text-right px-2 text-[11px] text-gray-400 dark:text-gray-500 border-r border-gray-200 dark:border-gray-700 tabular-nums shrink-0">
-          {isGroupStart ? timeAgo(blame.timestamp) : ""}
+          {isGroupStart ? timeAgo(t, blame.timestamp) : ""}
         </td>
         <td className="w-12 text-right pr-2 pl-2 select-none text-gray-400 dark:text-gray-500 border-r border-gray-200 dark:border-gray-700 tabular-nums">
           {blame.line}
@@ -111,18 +114,18 @@ export const BlameView = memo(function BlameView({ path, filePath, onClose }: Bl
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-2 border-b border-[var(--border-color)] bg-[var(--surface-2)]">
           <div className="flex items-center gap-2 min-w-0">
-            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Blame</span>
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{t("blame.title")}</span>
             <span className="font-mono text-sm text-gray-700 dark:text-gray-300 truncate">{filePath}</span>
             {lines.length > 0 && (
               <span className="text-xs text-gray-400 dark:text-gray-500 shrink-0">
-                {lines.length} lines
+                {t("blame.lines", { count: lines.length })}
               </span>
             )}
           </div>
           <button
             onClick={onClose}
             className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400"
-            aria-label="Close blame view"
+            aria-label={t("blame.close")}
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
               <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
@@ -133,11 +136,11 @@ export const BlameView = memo(function BlameView({ path, filePath, onClose }: Bl
         {/* Content */}
         <div ref={scrollRef} className="select-text flex-1 overflow-auto font-mono text-xs leading-5">
           {loading ? (
-            <div className="flex items-center justify-center h-full text-gray-400">Loading blame...</div>
+            <div className="flex items-center justify-center h-full text-gray-400">{t("blame.loading")}</div>
           ) : error ? (
             <div className="flex items-center justify-center h-full text-red-500">{error}</div>
           ) : lines.length === 0 ? (
-            <div className="flex items-center justify-center h-full text-gray-400">No blame data</div>
+            <div className="flex items-center justify-center h-full text-gray-400">{t("blame.empty")}</div>
           ) : useVirtual ? (
             <table className="w-full border-collapse" style={{ height: virtualizer.getTotalSize() }}>
               <tbody>

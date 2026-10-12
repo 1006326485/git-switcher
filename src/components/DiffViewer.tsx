@@ -4,6 +4,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import * as api from "../lib/tauri";
 import { parseError, type GitFileEntry, type FileDiffStats } from "../lib/types";
 import { parseDiff, parseDiffSideBySide, computeDiffStats, type DiffLine, type DiffHunkPair, type DiffSummary } from "./diffUtils";
+import { useTranslation } from "react-i18next";
 import { getLanguage, getLanguageLabel, highlightLine } from "../lib/syntaxHighlight";
 import { getOrComputeHighlight } from "../lib/highlightCache";
 
@@ -270,6 +271,7 @@ const FILE_STATUS_ICONS: Record<GitFileEntry["status"], { icon: string; color: s
 };
 
 export const DiffViewer = memo(function DiffViewer({ path, filePath, onClose, staged, files }: DiffViewerProps) {
+  const { t } = useTranslation();
   const [raw, setRaw] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -309,8 +311,8 @@ export const DiffViewer = memo(function DiffViewer({ path, filePath, onClose, st
   }, [flashCopied]);
 
   const copyCurrentDiff = useCallback(() => {
-    if (raw) copyText(raw, "Diff copied!");
-  }, [raw, copyText]);
+    if (raw) copyText(raw, t("diff.diffCopied"));
+  }, [raw, copyText, t]);
 
   // Cleanup copy timer
   useEffect(() => () => { if (copyTimerRef.current) clearTimeout(copyTimerRef.current); }, []);
@@ -435,17 +437,17 @@ export const DiffViewer = memo(function DiffViewer({ path, filePath, onClose, st
         changed.push(line.content.slice(1));
       }
     }
-    if (changed.length) copyText(changed.join("\n"), "Changes copied!");
-  }, [lines, copyText]);
+    if (changed.length) copyText(changed.join("\n"), t("diff.changesCopied"));
+  }, [lines, copyText, t]);
 
   const copyFileDiff = useCallback(
     async (fp: string) => {
       try {
         const diff = await api.getFileDiff(path, fp, staged);
-        if (diff) copyText(diff, `${fp.split("/").pop()} diff copied!`);
+        if (diff) copyText(diff, t("diff.fileDiffCopied", { file: fp.split("/").pop() ?? fp }));
       } catch { /* ignore */ }
     },
-    [path, staged, copyText],
+    [path, staged, copyText, t],
   );
 
   /** Starting row indices for each change hunk (for N/P navigation) */
@@ -706,6 +708,12 @@ export const DiffViewer = memo(function DiffViewer({ path, filePath, onClose, st
           e.preventDefault();
           onClose();
           break;
+        case "w":
+          if (e.metaKey || e.ctrlKey) {
+            e.preventDefault();
+            onClose();
+          }
+          break;
       }
     };
     document.addEventListener("keydown", handleKeyDown);
@@ -783,19 +791,19 @@ export const DiffViewer = memo(function DiffViewer({ path, filePath, onClose, st
             )}
             {lines.length > 0 && (
               <span className="text-xs text-gray-400 dark:text-gray-500 shrink-0">
-                {lines.length} lines
+                {t("diff.linesCount", { count: lines.length })}
               </span>
             )}
             <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 shrink-0">
-              {viewMode === "split" ? "Split" : "Unified"}
+              {viewMode === "split" ? t("diff.viewSplit") : t("diff.viewUnified")}
             </span>
             {hunkStarts.length > 0 && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 shrink-0 tabular-nums" title="Current hunk / total hunks">
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 shrink-0 tabular-nums" title={t("diff.hunkTitle")}>
                 {currentHunkIdx + 1}/{hunkStarts.length}
               </span>
             )}
             <span className="hidden lg:inline text-[10px] text-gray-400 dark:text-gray-500 shrink-0 ml-2">
-              {multiFile ? "J/K: files  N/P: hunks  F: tree  S: view  Esc: close" : "N/P: hunks  S: view  Esc: close"}
+              {multiFile ? t("diff.hintsMulti") : t("diff.hintsSingle")}
             </span>
           </div>
           <div className="flex items-center gap-1">
@@ -804,7 +812,7 @@ export const DiffViewer = memo(function DiffViewer({ path, filePath, onClose, st
               <button
                 onClick={() => setShowFileTree((v) => !v)}
                 className={`p-1 rounded ${showFileTree ? "bg-gray-300 dark:bg-gray-600" : "hover:bg-gray-200 dark:hover:bg-gray-700"} text-gray-500 dark:text-gray-400`}
-                title="Toggle file tree"
+                title={t("diff.toggleFileTree")}
               >
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                   <path d="M2 3.5A.5.5 0 012.5 3h3a.5.5 0 010 1h-3A.5.5 0 012 3.5zm0 3A.5.5 0 012.5 6h5a.5.5 0 010 1h-5A.5.5 0 012 6.5zm0 3A.5.5 0 012.5 9h3a.5.5 0 010 1h-3A.5.5 0 012 9.5zm7-6a.5.5 0 01.5-.5h3a.5.5 0 010 1h-3A.5.5 0 019 3.5zm0 6a.5.5 0 01.5-.5h3a.5.5 0 010 1h-3A.5.5 0 019 9.5zm0 3a.5.5 0 01.5-.5h3a.5.5 0 010 1h-3a.5.5 0 01-.5-.5z" />
@@ -815,7 +823,7 @@ export const DiffViewer = memo(function DiffViewer({ path, filePath, onClose, st
             <button
               onClick={() => setViewMode("unified")}
               className={`p-1 rounded ${viewMode === "unified" ? "bg-gray-300 dark:bg-gray-600" : "hover:bg-gray-200 dark:hover:bg-gray-700"} text-gray-500 dark:text-gray-400`}
-              title="Unified view"
+              title={t("diff.unifiedView")}
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                 <rect x="2" y="3" width="12" height="2" rx="0.5" />
@@ -826,7 +834,7 @@ export const DiffViewer = memo(function DiffViewer({ path, filePath, onClose, st
             <button
               onClick={() => setViewMode("split")}
               className={`p-1 rounded ${viewMode === "split" ? "bg-gray-300 dark:bg-gray-600" : "hover:bg-gray-200 dark:hover:bg-gray-700"} text-gray-500 dark:text-gray-400`}
-              title="Split view"
+              title={t("diff.splitView")}
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                 <rect x="1" y="3" width="6" height="2" rx="0.5" />
@@ -841,7 +849,7 @@ export const DiffViewer = memo(function DiffViewer({ path, filePath, onClose, st
             <button
               onClick={openSearch}
               className={`p-1 rounded ${searchOpen ? "bg-gray-300 dark:bg-gray-600" : "hover:bg-gray-200 dark:hover:bg-gray-700"} text-gray-500 dark:text-gray-400`}
-              title="Search diff (Cmd+F)"
+              title={t("diff.searchDiff")}
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M11.742 10.344a6.5 6.5 0 10-1.397 1.398h-.001l3.85 3.85a1 1 0 001.415-1.414l-3.85-3.85zm-5.242.156a5 5 0 110-10 5 5 0 010 10z" />
@@ -853,7 +861,7 @@ export const DiffViewer = memo(function DiffViewer({ path, filePath, onClose, st
               onClick={copyCurrentDiff}
               disabled={!raw}
               className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 disabled:opacity-30"
-              title="Copy diff"
+              title={t("diff.copyDiff")}
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z" />
@@ -864,7 +872,7 @@ export const DiffViewer = memo(function DiffViewer({ path, filePath, onClose, st
               onClick={copyChanges}
               disabled={lines.filter((l) => l.type === "add" || l.type === "del").length === 0}
               className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 disabled:opacity-30"
-              title="Copy changed lines only"
+              title={t("diff.copyChangedLines")}
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M8 2a.75.75 0 01.75.75v4.5h4.5a.75.75 0 010 1.5h-4.5v4.5a.75.75 0 01-1.5 0v-4.5h-4.5a.75.75 0 010-1.5h4.5v-4.5A.75.75 0 018 2z" />
@@ -877,7 +885,7 @@ export const DiffViewer = memo(function DiffViewer({ path, filePath, onClose, st
             <button
               onClick={onClose}
               className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400"
-              aria-label="Close diff viewer"
+              aria-label={t("diff.closeViewer")}
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
@@ -898,12 +906,12 @@ export const DiffViewer = memo(function DiffViewer({ path, filePath, onClose, st
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               onKeyDown={handleSearchKeyDown}
-              placeholder="Search diff content..."
+              placeholder={t("diff.searchPlaceholder")}
               className="flex-1 min-w-0 text-xs bg-transparent border-none outline-none text-gray-700 dark:text-gray-300 placeholder-gray-400"
             />
             {searchQuery && (
               <span className="text-[11px] text-gray-400 dark:text-gray-500 tabular-nums shrink-0">
-                {totalMatches > 0 ? `${currentMatch + 1} / ${totalMatches}` : "No results"}
+                {totalMatches > 0 ? `${currentMatch + 1} / ${totalMatches}` : t("diff.noResults")}
               </span>
             )}
             <button onClick={() => navigateMatch(-1)} disabled={totalMatches === 0} className="p-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-30 text-gray-500">
@@ -923,7 +931,7 @@ export const DiffViewer = memo(function DiffViewer({ path, filePath, onClose, st
         {/* Diff stats summary bar */}
         {multiFile && diffSummary && (
           <div className="flex items-center gap-3 px-4 py-1.5 border-b border-[var(--border-color)] bg-[var(--surface-2)] text-xs text-gray-600 dark:text-gray-400">
-            <span className="font-medium">{diffSummary.totalFiles} files changed</span>
+            <span className="font-medium">{t("diff.filesChanged", { count: diffSummary.totalFiles })}</span>
             <span className="text-green-600 dark:text-green-400 font-mono tabular-nums">+{diffSummary.totalAdditions}</span>
             <span className="text-red-600 dark:text-red-400 font-mono tabular-nums">-{diffSummary.totalDeletions}</span>
             <div className="flex-1 h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden flex">
@@ -1000,7 +1008,7 @@ export const DiffViewer = memo(function DiffViewer({ path, filePath, onClose, st
                     <button
                       onClick={(e) => { e.stopPropagation(); copyFileDiff(item.path); }}
                       className="shrink-0 p-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-400 dark:text-gray-500 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
-                      title={`Copy ${fileName} diff`}
+                      title={t("diff.copyFileDiff", { file: fileName })}
                     >
                       <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
                         <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z" />
@@ -1016,18 +1024,18 @@ export const DiffViewer = memo(function DiffViewer({ path, filePath, onClose, st
           {/* Diff content */}
           <div className="select-text flex-1 flex flex-col overflow-hidden min-w-0">
             {loading ? (
-              <div className="flex-1 flex items-center justify-center text-gray-400">Loading diff...</div>
+              <div className="flex-1 flex items-center justify-center text-gray-400">{t("diff.loading")}</div>
             ) : error ? (
               <div className="flex-1 flex items-center justify-center text-red-500">{error}</div>
             ) : lines.length === 0 ? (
-              <div className="flex-1 flex items-center justify-center text-gray-400">No changes</div>
+              <div className="flex-1 flex items-center justify-center text-gray-400">{t("diff.noChanges")}</div>
             ) : viewMode === "split" ? (
               /* Split view */
               <div className="flex-1 flex overflow-hidden">
                 <div className="flex-1 flex flex-col overflow-hidden">
                   <div className="flex font-mono text-xs bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-                    <div className="flex-1 px-2 py-1 text-center text-gray-500 dark:text-gray-400 font-semibold border-r border-gray-300 dark:border-gray-600">Old</div>
-                    <div className="flex-1 px-2 py-1 text-center text-gray-500 dark:text-gray-400 font-semibold">New</div>
+                    <div className="flex-1 px-2 py-1 text-center text-gray-500 dark:text-gray-400 font-semibold border-r border-gray-300 dark:border-gray-600">{t("diff.old")}</div>
+                    <div className="flex-1 px-2 py-1 text-center text-gray-500 dark:text-gray-400 font-semibold">{t("diff.new")}</div>
                   </div>
                   <div className="flex-1 flex overflow-hidden relative">
                     {/* Left side (Old) */}

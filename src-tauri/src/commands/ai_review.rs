@@ -19,9 +19,10 @@ async fn validate_review(
     let config = store.get_llm_config_with_key()?;
 
     if !config.enabled {
-        return Err(AppError::Llm(
-            "AI review is not enabled. Go to Settings to configure LLM.".to_string(),
-        ));
+        return Err(AppError::Llm(crate::i18n::tl(
+            "backend.ai.reviewNotEnabled",
+            &[],
+        )));
     }
 
     let path = path.to_string();
@@ -34,9 +35,7 @@ async fn validate_review(
     .map_err(|e| AppError::Other(format!("Task failed: {}", e)))??;
 
     if diff.files.is_empty() {
-        return Err(AppError::Other(
-            "No differences found between branches.".to_string(),
-        ));
+        return Err(AppError::Other(crate::i18n::tl("backend.ai.noDiff", &[])));
     }
 
     Ok((config, diff))
@@ -92,9 +91,7 @@ pub async fn generate_commit_msg(
     let config = store.get_llm_config_with_key()?;
 
     if !config.enabled {
-        return Err(AppError::Llm(
-            "AI is not enabled. Go to Settings to configure LLM.".to_string(),
-        ));
+        return Err(AppError::Llm(crate::i18n::tl("backend.ai.notEnabled", &[])));
     }
 
     LlmService::generate_commit_message(&path, &config).await

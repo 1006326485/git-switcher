@@ -1,7 +1,7 @@
 use std::str::FromStr;
 use std::sync::Mutex;
 
-use tauri::{AppHandle, Manager, WebviewWindow};
+use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 
 use crate::AppError;
@@ -13,6 +13,25 @@ pub const MAIN_WINDOW_LABEL: &str = "main";
 /// focus straight back instead of the main window taking over the screen.
 static PREVIOUS_APP_PID: Mutex<Option<i32>> = Mutex::new(None);
 
+/// Routes the global terminal hotkey: while the main window is focused, it
+/// toggles the in-window terminal panel instead of summoning the standalone
+/// window, so the shortcut never yanks focus away from the app you're in.
+pub fn handle_terminal_hotkey(app: &AppHandle) {
+    let main_focused = app
+        .get_webview_window(MAIN_WINDOW_LABEL)
+        .and_then(|w| w.is_focused().ok())
+        .unwrap_or(false);
+    log::info!(
+        "[debug] handle_terminal_hotkey called, main_focused={}",
+        main_focused
+    );
+    if main_focused {
+        let _ = app.emit("toggle-builtin-terminal", ());
+        return;
+    }
+    toggle_terminal_window(app);
+}
+
 /// Shows the standalone terminal window when hidden, hides it when focused,
 /// and just focuses it when visible in the background — summon and go.
 pub fn toggle_terminal_window(app: &AppHandle) {
@@ -20,16 +39,45 @@ pub fn toggle_terminal_window(app: &AppHandle) {
         return;
     };
     let visible = window.is_visible().unwrap_or(false);
+    log::info!(
+        "[debug] toggle_terminal_window: visible={} focused={:?}",
+        visible,
+        window.is_focused()
+    );
     if visible && window.is_focused().unwrap_or(false) {
         dismiss_terminal_window(&window);
         return;
     }
+    remember_previous_app();
+    log::info!("[debug] toggle_terminal_window: about to show+focus terminal window");
+    summon_terminal_window(app, &window, visible);
+}
+
+/// Shows or focuses the standalone terminal window and never hides it — tray
+/// quick-launch hands the user a running terminal, not a toggle.
+pub fn show_terminal_window(app: &AppHandle) {
+    let Some(window) = app.get_webview_window(TERMINAL_WINDOW_LABEL) else {
+        return;
+    };
+    if window.is_visible().unwrap_or(false) && window.is_focused().unwrap_or(false) {
+        return;
+    }
+    remember_previous_app();
+    let visible = window.is_visible().unwrap_or(false);
+    summon_terminal_window(app, &window, visible);
+}
+
+/// Remembers the frontmost app so a later dismiss can hand focus back to it.
+fn remember_previous_app() {
     if let Ok(mut pid) = PREVIOUS_APP_PID.lock() {
         *pid = platform::frontmost_other_app();
     }
-    // Summoning activates the app, which orders every visible window of it
-    // front — the main UI must not wake with the terminal, so undo its move.
-    let restore = platform::capture_main_restore(app, &window);
+}
+
+/// Summoning activates the app, which orders every visible window of it
+/// front — the main UI must not wake with the terminal, so undo its move.
+fn summon_terminal_window(app: &AppHandle, window: &WebviewWindow, visible: bool) {
+    let restore = platform::capture_main_restore(app, window);
     if !visible {
         let _ = window.unminimize();
     }
@@ -39,16 +87,32 @@ pub fn toggle_terminal_window(app: &AppHandle) {
 }
 
 /// Hides the terminal window and hands focus back to the app the summon
-/// interrupted. Hiding the key window makes AppKit order the main window to
-/// the front — capture its slot first and snap it back right away, so it
-/// never flashes over whatever it was behind.
+/// interrupted. `orderOut:` (what `hide()` calls) only removes the window
+/// from the screen and, if it was key, hands key status to the next window
+/// in this app — it never orders another window to the front. So the only
+/// thing to steer here is *where that key status goes*: to the interrupted
+/// app if there was one, so it never lands on the main window at all.
 pub fn dismiss_terminal_window(window: &WebviewWindow) {
-    let app = window.app_handle();
     let previous = PREVIOUS_APP_PID.lock().ok().and_then(|mut pid| pid.take());
-    let restore = platform::capture_main_restore(app, window);
-    let _ = window.hide();
-    platform::apply_main_restore(app, restore);
     platform::focus_previous_app(previous);
+    let _ = window.hide();
+}
+
+/// Hides the standalone terminal window if visible, without touching focus
+/// hand-off — used when the main window itself regains focus (e.g. via the
+/// app switcher) and should take over from the standalone window.
+pub fn hide_terminal_window_if_visible(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(TERMINAL_WINDOW_LABEL) {
+        let visible = window.is_visible().unwrap_or(false);
+        log::info!(
+            "[debug] hide_terminal_window_if_visible called, terminal visible={}",
+            visible
+        );
+        if visible {
+            let hide_result = window.hide();
+            log::info!("[debug] terminal window.hide() result={:?}", hide_result);
+        }
+    }
 }
 
 /// Registers `hotkey` as the single global shortcut (replacing any previous

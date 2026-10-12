@@ -4,6 +4,7 @@ import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import * as api from "../lib/tauri";
+import { resyncTerminalViewport } from "../lib/terminalViewport";
 import {
   applySessions,
   nextActiveInProject,
@@ -25,6 +26,15 @@ const PENDING_CHUNK_LIMIT = 500;
 interface TerminalView {
   term: Terminal;
   fitAddon: FitAddon;
+}
+
+/**
+ * The single write path from a view to its shared pty session. Both `term.onData`
+ * (typing) and the canvas menu's Paste go through here so injected input is
+ * indistinguishable from keystrokes at the backend.
+ */
+function writeToPty(id: string, data: string) {
+  api.terminalWrite(id, data).catch(() => {});
 }
 
 function base64ToBytes(b64: string): Uint8Array {
@@ -92,6 +102,12 @@ export function useTerminal() {
       setTabs((prev) => applySessions(prev, event.payload));
     });
 
+    // A tray quick-launch brings its newest session to the front.
+    const unlistenFocus = listen<{ id: string }>("terminal-focus-session", (event) => {
+      const id = event.payload.id;
+      setTabs((prev) => (prev.sessions.some((s) => s.id === id) ? setActive(prev, id) : prev));
+    });
+
     api
       .terminalList()
       .then((list) => setTabs((prev) => applySessions(prev, list)))
@@ -100,6 +116,7 @@ export function useTerminal() {
     return () => {
       unlistenData.then((fn) => fn()).catch(() => {});
       unlistenSessions.then((fn) => fn()).catch(() => {});
+      unlistenFocus.then((fn) => fn()).catch(() => {});
     };
   }, []);
 
@@ -236,9 +253,7 @@ export function useTerminal() {
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     term.open(container);
-    term.onData((data) => {
-      api.terminalWrite(id, data).catch(() => {});
-    });
+    term.onData((data) => writeToPty(id, data));
     viewsRef.current.set(id, { term, fitAddon });
     const pending = pendingRef.current.get(id);
     if (pending) {
@@ -253,17 +268,43 @@ export function useTerminal() {
   }, [disposeView]);
 
   // The pty size follows the focused window so two windows sharing a session
-  // don't fight over rows/cols on every layout pass.
+  // don't fight over rows/cols on every layout pass. Every caller is "this
+  // session is becoming visible", so this is also where the viewport is
+  // re-aligned after the container was display:none (see the module comment on
+  // `resyncTerminalViewport`).
   const fitTerminal = useCallback((id: string) => {
     const view = viewsRef.current.get(id);
     if (!view) return;
     view.fitAddon.fit();
+    resyncTerminalViewport(view.term);
     if (!document.hasFocus()) return;
     api.terminalResize(id, view.term.cols, view.term.rows).catch(() => {});
   }, []);
 
   const focusTerminal = useCallback((id: string) => {
     viewsRef.current.get(id)?.term.focus();
+  }, []);
+
+  // Canvas-menu handles: read/edit the xterm instance for a session. Each is a
+  // no-op when the id has no local view (e.g. a stale menu after the session
+  // closed), mirroring `fitTerminal`/`focusTerminal`.
+  const getSelection = useCallback((id: string) => {
+    return viewsRef.current.get(id)?.term.getSelection() ?? "";
+  }, []);
+
+  const selectAll = useCallback((id: string) => {
+    viewsRef.current.get(id)?.term.selectAll();
+  }, []);
+
+  // `clear`, not `reset`: the scrollback is wiped but the shell session and its
+  // state (cwd, running process) are untouched.
+  const clearScreen = useCallback((id: string) => {
+    viewsRef.current.get(id)?.term.clear();
+  }, []);
+
+  const sendInput = useCallback((id: string, data: string) => {
+    if (!viewsRef.current.has(id)) return;
+    writeToPty(id, data);
   }, []);
 
   const setTerminalDark = useCallback((dark: boolean) => {
@@ -287,6 +328,7 @@ export function useTerminal() {
     sessions: tabs.sessions,
     activeId: tabs.activeId,
     activeProject: tabs.activeProject,
+    activeByProject: tabs.activeByProject,
     openTerminal,
     closeTerminal,
     restartTerminal,
@@ -301,6 +343,10 @@ export function useTerminal() {
     detachTerminal,
     fitTerminal,
     focusTerminal,
+    getSelection,
+    selectAll,
+    clearScreen,
+    sendInput,
     setTerminalDark,
   };
 }

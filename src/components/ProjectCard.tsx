@@ -1,4 +1,5 @@
 import { memo, useRef, useState, useEffect, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import type { ProjectDetail } from "../lib/types";
 import { PROJECT_COLORS } from "../lib/types";
 import { StatusBadge, GroupDot } from "./ui/primitives";
@@ -17,9 +18,23 @@ interface ProjectCardProps {
   sortable?: boolean;
   projectIndex?: number;
   isFocused?: boolean;
+  /**
+   * Controlled GitOps open state (ProjectGrid owns it so it can re-flow the
+   * row: the expanded card takes its whole row and pushes siblings down).
+   */
+  gitOpsOpen?: boolean;
+  /**
+   * True while the panel is folding shut, i.e. the card still spans its whole
+   * row for one animation cycle. Keeps the collapsed-card layout from snapping
+   * back before the body has finished collapsing.
+   */
+  gitOpsClosing?: boolean;
+  /** Toggle handler paired with `gitOpsOpen`. */
+  onToggleGitOps?: () => void;
 }
 
-export const ProjectCard = memo(function ProjectCard({ detail, sortable, projectIndex, isFocused }: ProjectCardProps) {
+export const ProjectCard = memo(function ProjectCard({ detail, sortable, projectIndex, isFocused, gitOpsOpen, gitOpsClosing, onToggleGitOps }: ProjectCardProps) {
+  const { t } = useTranslation();
   const { onSuccess, onError, onInfo } = useProjectActions();
   const nameRef = useRef<HTMLHeadingElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -58,7 +73,7 @@ export const ProjectCard = memo(function ProjectCard({ detail, sortable, project
 
   return (
     <ProjectRowShell detail={detail}>
-      {({ detail: d, row, actionButtons, errorBanner, activeOpIndicator }) => {
+      {({ detail: d, row, actionButtons, errorBanner, activeOpIndicator, onRowContextMenu, onRowKeyDown }) => {
         const { project, current_branch, branches, status, group } = d;
         const totalChanges = status.modified + status.staged + status.untracked;
         const branchCount = branches.filter((b) => !b.is_tag).length;
@@ -76,8 +91,16 @@ export const ProjectCard = memo(function ProjectCard({ detail, sortable, project
             data-dragging={isDragging ? "" : undefined}
             onMouseEnter={() => setHovering(true)}
             onMouseLeave={() => setHovering(false)}
+            onContextMenu={onRowContextMenu}
+            onKeyDown={onRowKeyDown}
+            tabIndex={-1}
             role="article"
-            aria-label={`${project.alias || project.name}, branch ${current_branch}${totalChanges > 0 ? `, ${totalChanges} changes` : ""}${status.behind > 0 ? `, ${status.behind} behind` : ""}${status.ahead > 0 ? `, ${status.ahead} ahead` : ""}`}
+            aria-label={[
+              t("card.rowAriaBase", { name: project.alias || project.name, branch: current_branch }),
+              totalChanges > 0 ? t("card.rowAriaChanges", { count: totalChanges }) : "",
+              status.behind > 0 ? t("card.rowAriaBehind", { count: status.behind }) : "",
+              status.ahead > 0 ? t("card.rowAriaAhead", { count: status.ahead }) : "",
+            ].join("")}
             className={`press bg-[var(--surface-1)] rounded-xl border border-[var(--border-color)] shadow-sm dark:shadow-none dark:ring-1 dark:ring-white/5 hover:shadow-md dark:hover:ring-white/10 hover:-translate-y-px transition-all active:scale-[0.995] relative overflow-hidden ${isDragging ? "z-50 shadow-lg dark:ring-2 dark:ring-[var(--accent)]/30 ring-2 ring-[var(--accent)]/20" : ""} ${isFocused ? "ring-2 ring-blue-500 dark:ring-blue-400" : ""}`}
           >
             {/* Color stripe */}
@@ -99,7 +122,7 @@ export const ProjectCard = memo(function ProjectCard({ detail, sortable, project
                 {sortable && (
                   <button
                     className="mt-0.5 shrink-0 cursor-grab active:cursor-grabbing text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-                    title="Drag to reorder"
+                    title={t("card.dragAria")}
                     {...attributes}
                     {...listeners}
                   >
@@ -122,7 +145,7 @@ export const ProjectCard = memo(function ProjectCard({ detail, sortable, project
                   </div>
                   <button
                     className="text-xs text-gray-500 dark:text-gray-400 hover:text-[var(--accent)] dark:hover:text-blue-400 truncate mt-0.5 transition-colors duration-150 flex items-center gap-1 group/path"
-                    title={`Open in file manager: ${project.path}`}
+                    title={t("card.openPathAria", { path: project.path })}
                     onClick={async () => {
                       try {
                         const { open } = await import("@tauri-apps/plugin-shell");
@@ -143,11 +166,6 @@ export const ProjectCard = memo(function ProjectCard({ detail, sortable, project
                     editTrigger={row.descEditTrigger}
                     onError={(msg) => onError(msg)}
                   />
-                  {readmePreview && (
-                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1 line-clamp-2 leading-relaxed">
-                      {readmePreview}
-                    </p>
-                  )}
                 </div>
               </div>
               <div className="flex items-center gap-0.5 shrink-0">
@@ -155,8 +173,9 @@ export const ProjectCard = memo(function ProjectCard({ detail, sortable, project
               </div>
             </div>
 
-            {/* Branch selector */}
-            <div className="px-4 py-2 flex items-center gap-2">
+            {/* Branch selector — capped once the card spans the whole row so
+                the dropdown doesn't stretch across the grid width. */}
+            <div className={`px-4 py-2 flex items-center gap-2${gitOpsOpen || gitOpsClosing ? " md:max-w-md" : ""}`}>
               <div className="flex-1 min-w-0">
                 <BranchDropdown
                   currentBranch={current_branch}
@@ -176,7 +195,7 @@ export const ProjectCard = memo(function ProjectCard({ detail, sortable, project
             {/* Status bar */}
             <div className="px-4 pb-2 flex items-center gap-2 flex-wrap">
               {totalChanges === 0 && !hasUpstream && detail.stash_count === 0 && (
-                <span className="text-xs text-gray-400 dark:text-gray-500">Clean</span>
+                <span aria-hidden="true" className="text-xs text-gray-400 dark:text-gray-500">{t("card.clean")}</span>
               )}
               <StatusBadge type="modified" count={status.modified} variant="pill" />
               <StatusBadge type="staged" count={status.staged} variant="pill" />
@@ -186,13 +205,18 @@ export const ProjectCard = memo(function ProjectCard({ detail, sortable, project
               <StatusBadge type="stash" count={detail.stash_count} variant="pill" />
             </div>
 
-            {/* Git Operations Panel */}
+            {/* Git Operations — trigger and body both live inside this card,
+                so an expanded card is still one card (one border, one
+                background) rather than a separate row below it. */}
             <GitOpsPanel
               path={project.path}
               onRefresh={row.handleGitRefresh}
               onSuccess={onSuccess}
               onError={onError}
               onInfo={onInfo}
+              open={gitOpsOpen}
+              onToggle={onToggleGitOps}
+              columns
             />
 
             {/* Commit Preview */}
@@ -209,10 +233,13 @@ export const ProjectCard = memo(function ProjectCard({ detail, sortable, project
               {project.description && (
                 <div style={{ marginBottom: 6, color: "#d1d5db" }}>{project.description}</div>
               )}
+              {readmePreview && (
+                <div className="line-clamp-3" style={{ marginBottom: 6, color: "#9ca3af" }}>{readmePreview}</div>
+              )}
               <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
                 <span style={{ color: "#9ca3af", wordBreak: "break-all" }}>{project.path}</span>
                 <span style={{ color: "#9ca3af" }}>
-                  {branchCount} branch{branchCount !== 1 ? "es" : ""}
+                  {t("card.branchCount", { count: branchCount })}
                 </span>
               </div>
             </HoverTooltip>

@@ -12,9 +12,42 @@ export interface TerminalTabsState {
   sessions: TerminalSessionState[];
   activeId: string | null;
   activeProject: string | null;
+  activeByProject: Record<string, string>;
 }
 
-export const EMPTY_TABS: TerminalTabsState = { sessions: [], activeId: null, activeProject: null };
+export const EMPTY_TABS: TerminalTabsState = {
+  sessions: [],
+  activeId: null,
+  activeProject: null,
+  activeByProject: {},
+};
+
+function pruneActiveByProject(
+  activeByProject: Record<string, string>,
+  sessions: TerminalSessionState[]
+): Record<string, string> {
+  const byId = new Map(sessions.map((s) => [s.id, s]));
+  const pruned: Record<string, string> = {};
+  for (const [projectKey, id] of Object.entries(activeByProject)) {
+    const session = byId.get(id);
+    if (session && session.projectKey === projectKey) pruned[projectKey] = id;
+  }
+  return pruned;
+}
+
+export function preferredSessionOfProject(
+  state: TerminalTabsState,
+  projectKey: string
+): TerminalSessionState | null {
+  const group = sessionsOfProject(state, projectKey);
+  if (group.length === 0) return null;
+  const remembered = state.activeByProject[projectKey];
+  if (remembered != null) {
+    const match = group.find((s) => s.id === remembered);
+    if (match) return match;
+  }
+  return group[group.length - 1] ?? null;
+}
 
 export function projectKeys(state: TerminalTabsState): string[] {
   const keys: string[] = [];
@@ -82,16 +115,38 @@ export function applySessions(
   state: TerminalTabsState,
   sessions: TerminalSessionState[]
 ): TerminalTabsState {
+  const pruned = pruneActiveByProject(state.activeByProject, sessions);
   const activeAlive = state.activeId != null && sessions.some((s) => s.id === state.activeId);
   if (activeAlive) {
-    return { sessions, activeId: state.activeId, activeProject: state.activeProject };
+    const active = sessions.find((s) => s.id === state.activeId)!;
+    return {
+      sessions,
+      activeId: state.activeId,
+      activeProject: state.activeProject,
+      activeByProject: {
+        ...pruned,
+        [active.projectKey]: active.id,
+      },
+    };
   }
   const group =
     state.activeProject != null
       ? sessions.filter((s) => s.projectKey === state.activeProject)
       : [];
-  const next = group[group.length - 1] ?? sessions[sessions.length - 1] ?? null;
-  return { sessions, activeId: next?.id ?? null, activeProject: next?.projectKey ?? null };
+  const remembered =
+    state.activeProject != null ? pruned[state.activeProject] : undefined;
+  const next =
+    group.find((s) => s.id === remembered) ??
+    group[group.length - 1] ??
+    sessions[sessions.length - 1] ??
+    null;
+  if (next == null) return { sessions, activeId: null, activeProject: null, activeByProject: pruned };
+  return {
+    sessions,
+    activeId: next.id,
+    activeProject: next.projectKey,
+    activeByProject: { ...pruned, [next.projectKey]: next.id },
+  };
 }
 
 /** Optimistically merges one session (e.g. right after opening it) and makes it active. */
@@ -110,16 +165,39 @@ export function upsertSession(
 export function setActive(state: TerminalTabsState, id: string): TerminalTabsState {
   const session = state.sessions.find((s) => s.id === id);
   if (!session) return state;
-  return { ...state, activeId: id, activeProject: session.projectKey };
+  return {
+    ...state,
+    activeId: id,
+    activeProject: session.projectKey,
+    activeByProject: { ...state.activeByProject, [session.projectKey]: id },
+  };
 }
 
 export function setActiveProject(state: TerminalTabsState, projectKey: string): TerminalTabsState {
   const group = sessionsOfProject(state, projectKey);
   if (group.length === 0) return state;
-  const keepActive = state.activeId != null && group.some((s) => s.id === state.activeId);
+  const rememberedBase = { ...state.activeByProject };
+  const leaving = state.activeId != null ? state.sessions.find((s) => s.id === state.activeId) : undefined;
+  if (leaving) rememberedBase[leaving.projectKey] = leaving.id;
+  const withLeaving: TerminalTabsState = { ...state, activeByProject: rememberedBase };
+  const keepActive =
+    state.activeId != null && group.some((s) => s.id === state.activeId)
+      ? state.activeId
+      : null;
+  if (keepActive != null) {
+    return {
+      ...withLeaving,
+      activeProject: projectKey,
+      activeId: keepActive,
+      activeByProject: { ...rememberedBase, [projectKey]: keepActive },
+    };
+  }
+  const nextId =
+    preferredSessionOfProject(withLeaving, projectKey)?.id ?? group[group.length - 1].id;
   return {
-    ...state,
+    ...withLeaving,
     activeProject: projectKey,
-    activeId: keepActive ? state.activeId : group[group.length - 1].id,
+    activeId: nextId,
+    activeByProject: { ...rememberedBase, [projectKey]: nextId },
   };
 }

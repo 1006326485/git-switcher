@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use tauri::State;
+use tauri::{Emitter, State};
 
 use crate::models::{AppSettings, LlmConfig};
 use crate::AppError;
@@ -103,6 +103,11 @@ pub fn update_settings(
 ) -> Result<AppSettings, AppError> {
     apply_hotkey_if_changed(&app, &store, &new_settings)?;
     store.update_all(&new_settings)?;
+    // The frontend already switched itself; the tray and the other window need
+    // the same language, so sync the Rust catalogue and tell them to re-render.
+    crate::i18n::set_language(&new_settings.language);
+    crate::commands::tray::rebuild(&app);
+    let _ = app.emit("settings-changed", ());
     Ok(new_settings)
 }
 
@@ -125,6 +130,9 @@ pub fn update_settings_partial(
         .map_err(|e| AppError::Config(format!("Failed to deserialize: {}", e)))?;
     apply_hotkey_if_changed(&app, &store, &new_settings)?;
     store.update_all(&new_settings)?;
+    crate::i18n::set_language(&new_settings.language);
+    crate::commands::tray::rebuild(&app);
+    let _ = app.emit("settings-changed", ());
     Ok(new_settings)
 }
 

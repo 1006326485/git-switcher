@@ -1,4 +1,6 @@
 import { memo, useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import type { BranchHealthItem, BranchHealthReport } from "../lib/types";
 import { deleteMergedBranches } from "../lib/tauri";
 import { useOptionalProjectActions } from "../context/ProjectContext";
@@ -11,17 +13,16 @@ interface BranchHealthPanelProps {
   onRefresh: () => void;
 }
 
-const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
 
-function formatRelativeTime(timestamp: number): string {
+function formatRelativeTime(t: TFunction, timestamp: number): string {
   const diffMs = Date.now() - timestamp * 1000;
   const diffDays = Math.floor(diffMs / 86400000);
-  if (diffDays < 1) return "today";
-  if (diffDays < 30) return rtf.format(-diffDays, "day");
+  if (diffDays < 1) return t("branchHealth.today");
+  if (diffDays < 30) return t("branchHealth.day", { count: diffDays });
   const diffMonths = Math.floor(diffDays / 30);
-  if (diffMonths < 12) return rtf.format(-diffMonths, "month");
+  if (diffMonths < 12) return t("branchHealth.month", { count: diffMonths });
   const diffYears = Math.floor(diffMonths / 12);
-  return rtf.format(-diffYears, "year");
+  return t("branchHealth.year", { count: diffYears });
 }
 
 export const BranchHealthPanel = memo(function BranchHealthPanel({
@@ -30,6 +31,7 @@ export const BranchHealthPanel = memo(function BranchHealthPanel({
   error,
   onRefresh,
 }: BranchHealthPanelProps) {
+  const { t } = useTranslation();
   const actions = useOptionalProjectActions();
   const [expandedMerged, setExpandedMerged] = useState(true);
   const [expandedStale, setExpandedStale] = useState(true);
@@ -85,7 +87,7 @@ export const BranchHealthPanel = memo(function BranchHealthPanel({
   if (error) {
     return (
       <div className="bg-(--surface-1) rounded-xl border border-red-200 dark:border-red-900 p-4">
-        <h3 className="text-sm font-semibold text-red-600 dark:text-red-400 mb-2">Branch Health</h3>
+        <h3 className="text-sm font-semibold text-red-600 dark:text-red-400 mb-2">{t("branchHealth.title")}</h3>
         <p className="text-sm text-red-500">{error}</p>
       </div>
     );
@@ -96,8 +98,8 @@ export const BranchHealthPanel = memo(function BranchHealthPanel({
   if (totalItems === 0) {
     return (
       <div className="bg-(--surface-1) rounded-xl border border-green-200 dark:border-green-900 p-4">
-        <h3 className="text-sm font-semibold text-green-600 dark:text-green-400 mb-1">Branch Health</h3>
-        <p className="text-sm text-green-500">All branches are healthy</p>
+        <h3 className="text-sm font-semibold text-green-600 dark:text-green-400 mb-1">{t("branchHealth.title")}</h3>
+        <p className="text-sm text-green-500">{t("branchHealth.healthy")}</p>
       </div>
     );
   }
@@ -105,12 +107,12 @@ export const BranchHealthPanel = memo(function BranchHealthPanel({
   return (
     <>
     <div className="bg-(--surface-1) rounded-xl border border-(--border-color) p-4">
-      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">Branch Health</h3>
+      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">{t("branchHealth.title")}</h3>
 
       {/* Merged branches */}
       {allMerged.length > 0 && (
         <CollapsibleSection
-          title="Merged (ready to delete)"
+          title={t("branchHealth.mergedTitle")}
           count={allMerged.length}
           expanded={expandedMerged}
           onToggle={() => setExpandedMerged(!expandedMerged)}
@@ -121,12 +123,12 @@ export const BranchHealthPanel = memo(function BranchHealthPanel({
               disabled={deleting}
               className="text-xs px-2 py-1 rounded transition-colors bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600"
             >
-              Delete All
+              {t("branchHealth.deleteAll")}
             </button>
           }
         >
           {allMerged.map((item) => (
-            <BranchItem key={`${item.projectPath}-${item.name}`} item={item} projectName={item.projectName} />
+            <BranchItem key={`${item.projectPath}-${item.name}`} t={t} item={item} projectName={item.projectName} />
           ))}
         </CollapsibleSection>
       )}
@@ -134,14 +136,14 @@ export const BranchHealthPanel = memo(function BranchHealthPanel({
       {/* Stale branches */}
       {allStale.length > 0 && (
         <CollapsibleSection
-          title="Stale (>30 days)"
+          title={t("branchHealth.staleTitle")}
           count={allStale.length}
           expanded={expandedStale}
           onToggle={() => setExpandedStale(!expandedStale)}
           color="amber"
         >
           {allStale.map((item) => (
-            <BranchItem key={`${item.projectPath}-${item.name}`} item={item} projectName={item.projectName} />
+            <BranchItem key={`${item.projectPath}-${item.name}`} t={t} item={item} projectName={item.projectName} />
           ))}
         </CollapsibleSection>
       )}
@@ -149,14 +151,14 @@ export const BranchHealthPanel = memo(function BranchHealthPanel({
       {/* Behind branches */}
       {allBehind.length > 0 && (
         <CollapsibleSection
-          title="Behind (>10 commits)"
+          title={t("branchHealth.behindTitle")}
           count={allBehind.length}
           expanded={expandedBehind}
           onToggle={() => setExpandedBehind(!expandedBehind)}
           color="red"
         >
           {allBehind.map((item) => (
-            <BranchItem key={`${item.projectPath}-${item.name}`} item={item} projectName={item.projectName} />
+            <BranchItem key={`${item.projectPath}-${item.name}`} t={t} item={item} projectName={item.projectName} />
           ))}
         </CollapsibleSection>
       )}
@@ -224,9 +226,11 @@ function CollapsibleSection({
 }
 
 function BranchItem({
+  t,
   item,
   projectName,
 }: {
+  t: TFunction;
   item: BranchHealthItem;
   projectName?: string;
 }) {
@@ -240,7 +244,7 @@ function BranchItem({
       </div>
       <div className="flex items-center gap-3 text-xs text-gray-500 shrink-0">
         {item.behind > 0 && <span className="text-red-500">-{item.behind}</span>}
-        <span className="hidden sm:inline">{formatRelativeTime(item.last_commit_timestamp)}</span>
+        <span className="hidden sm:inline">{formatRelativeTime(t, item.last_commit_timestamp)}</span>
       </div>
     </div>
   );

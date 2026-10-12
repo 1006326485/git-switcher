@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
 import type { BatchResult } from "../lib/types";
+import { parseError } from "../lib/types";
 import * as api from "../lib/tauri";
 
 interface ToastApi {
@@ -15,10 +17,13 @@ export interface BatchProgress {
 }
 
 export function useBatchOps(toast: ToastApi, onRefreshAll: () => void, activeGroup: string | null) {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState<string | null>(null);
   const [progress, setProgress] = useState<BatchProgress>({ completed: 0, failed: 0, failedProjects: [] });
   const callbacksRef = useRef({ toast, onRefreshAll });
   callbacksRef.current = { toast, onRefreshAll };
+  const tRef = useRef(t);
+  tRef.current = t;
   const groupRef = useRef(activeGroup);
   groupRef.current = activeGroup;
 
@@ -41,12 +46,13 @@ export function useBatchOps(toast: ToastApi, onRefreshAll: () => void, activeGro
     const unlistenDone = listen<string>("batch-done", (event) => {
       const op = event.payload;
       setLoading(null);
-      const labels: Record<string, string> = { fetch: "Fetch", pull: "Pull", push: "Push", pull_behind: "Pull Behind", push_ahead: "Push Ahead", sync: "Sync All" };
+      const tt = tRef.current;
+      const labels: Record<string, string> = { fetch: tt("batchOps.fetch"), pull: tt("batchOps.pull"), push: tt("batchOps.push"), pull_behind: tt("batchOps.pullBehind"), push_ahead: tt("batchOps.pushAhead"), sync: tt("batchOps.syncAll") };
       const label = labels[op] ?? op;
       if (failedCount > 0) {
-        callbacksRef.current.toast.error(`${label} completed: ${completedCount - failedCount} succeeded, ${failedCount} failed`);
+        callbacksRef.current.toast.error(tt("batchOps.completedSuccess", { label, succeeded: completedCount - failedCount, failed: failedCount }));
       } else {
-        callbacksRef.current.toast.success(`${label} completed: ${completedCount} project(s)`);
+        callbacksRef.current.toast.success(tt("batchOps.completedAll", { label, count: completedCount }));
       }
       callbacksRef.current.onRefreshAll();
       failedCount = 0;
@@ -65,7 +71,7 @@ export function useBatchOps(toast: ToastApi, onRefreshAll: () => void, activeGro
     if (!loading) return;
     const timer = setTimeout(() => {
       setLoading(null);
-      callbacksRef.current.toast.error("Operation timed out");
+      callbacksRef.current.toast.error(tRef.current("batchOps.timedOut"));
     }, 120_000);
     return () => clearTimeout(timer);
   }, [loading]);
@@ -80,36 +86,36 @@ export function useBatchOps(toast: ToastApi, onRefreshAll: () => void, activeGro
 
   const fetchAll = useCallback(async () => {
     if (!startOp("fetch")) return;
-    api.logOperation("fetch_all", groupRef.current ?? "/", "All projects", undefined, "success").catch(() => {});
+    api.logOperation("fetch_all", groupRef.current ?? "/", tRef.current("batchOps.allProjects"), undefined, "success").catch(() => {});
     try {
       await api.fetchAll(groupRef.current ?? undefined);
     } catch (e) {
-      api.logOperation("fetch_all", groupRef.current ?? "/", "All projects", undefined, "error", String(e)).catch(() => {});
-      callbacksRef.current.toast.error(String(e));
+      api.logOperation("fetch_all", groupRef.current ?? "/", tRef.current("batchOps.allProjects"), undefined, "error", parseError(e)).catch(() => {});
+      callbacksRef.current.toast.error(parseError(e));
       setLoading(null);
     }
   }, [startOp]);
 
   const pullAll = useCallback(async () => {
     if (!startOp("pull")) return;
-    api.logOperation("pull_all", groupRef.current ?? "/", "All projects", undefined, "success").catch(() => {});
+    api.logOperation("pull_all", groupRef.current ?? "/", tRef.current("batchOps.allProjects"), undefined, "success").catch(() => {});
     try {
       await api.pullAll(groupRef.current ?? undefined);
     } catch (e) {
-      api.logOperation("pull_all", groupRef.current ?? "/", "All projects", undefined, "error", String(e)).catch(() => {});
-      callbacksRef.current.toast.error(String(e));
+      api.logOperation("pull_all", groupRef.current ?? "/", tRef.current("batchOps.allProjects"), undefined, "error", parseError(e)).catch(() => {});
+      callbacksRef.current.toast.error(parseError(e));
       setLoading(null);
     }
   }, [startOp]);
 
   const pushAll = useCallback(async () => {
     if (!startOp("push")) return;
-    api.logOperation("push_all", groupRef.current ?? "/", "All projects", undefined, "success").catch(() => {});
+    api.logOperation("push_all", groupRef.current ?? "/", tRef.current("batchOps.allProjects"), undefined, "success").catch(() => {});
     try {
       await api.pushAll(groupRef.current ?? undefined);
     } catch (e) {
-      api.logOperation("push_all", groupRef.current ?? "/", "All projects", undefined, "error", String(e)).catch(() => {});
-      callbacksRef.current.toast.error(String(e));
+      api.logOperation("push_all", groupRef.current ?? "/", tRef.current("batchOps.allProjects"), undefined, "error", parseError(e)).catch(() => {});
+      callbacksRef.current.toast.error(parseError(e));
       setLoading(null);
     }
   }, [startOp]);
@@ -119,7 +125,7 @@ export function useBatchOps(toast: ToastApi, onRefreshAll: () => void, activeGro
     try {
       await api.pullBehind(groupRef.current ?? undefined);
     } catch (e) {
-      callbacksRef.current.toast.error(String(e));
+      callbacksRef.current.toast.error(parseError(e));
       setLoading(null);
     }
   }, [startOp]);
@@ -129,19 +135,19 @@ export function useBatchOps(toast: ToastApi, onRefreshAll: () => void, activeGro
     try {
       await api.pushAhead(groupRef.current ?? undefined);
     } catch (e) {
-      callbacksRef.current.toast.error(String(e));
+      callbacksRef.current.toast.error(parseError(e));
       setLoading(null);
     }
   }, [startOp]);
 
   const syncAll = useCallback(async () => {
     if (!startOp("sync")) return;
-    api.logOperation("sync_all", groupRef.current ?? "/", "All projects", undefined, "success").catch(() => {});
+    api.logOperation("sync_all", groupRef.current ?? "/", tRef.current("batchOps.allProjects"), undefined, "success").catch(() => {});
     try {
       await api.syncAll(groupRef.current ?? undefined);
     } catch (e) {
-      api.logOperation("sync_all", groupRef.current ?? "/", "All projects", undefined, "error", String(e)).catch(() => {});
-      callbacksRef.current.toast.error(String(e));
+      api.logOperation("sync_all", groupRef.current ?? "/", tRef.current("batchOps.allProjects"), undefined, "error", parseError(e)).catch(() => {});
+      callbacksRef.current.toast.error(parseError(e));
       setLoading(null);
     }
   }, [startOp]);

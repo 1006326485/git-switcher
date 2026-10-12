@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, memo } from "react";
+import { useTranslation } from "react-i18next";
 import * as api from "../lib/tauri";
 import type { GitHook } from "../lib/types";
 import { parseError } from "../lib/types";
@@ -10,6 +11,7 @@ interface HooksManagerProps {
 }
 
 export const HooksManager = memo(function HooksManager({ path, onSuccess, onError }: HooksManagerProps) {
+  const { t } = useTranslation();
   const [hooks, setHooks] = useState<GitHook[]>([]);
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -24,11 +26,11 @@ export const HooksManager = memo(function HooksManager({ path, onSuccess, onErro
       const list = await api.listHooks(path);
       setHooks(list);
     } catch (e) {
-      onError(`Failed to load hooks: ${parseError(e)}`);
+      onError(t("hooks.loadFailed", { error: parseError(e) }));
     } finally {
       setLoading(false);
     }
-  }, [path, onError]);
+  }, [path, onError, t]);
 
   useEffect(() => {
     if (expanded) loadHooks();
@@ -39,10 +41,10 @@ export const HooksManager = memo(function HooksManager({ path, onSuccess, onErro
       setToggling((prev) => new Set(prev).add(hook.name));
       try {
         await api.toggleHook(path, hook.name, !hook.active);
-        onSuccess(`Hook "${hook.name}" ${hook.active ? "disabled" : "enabled"}`);
+        onSuccess(t("hooks.toggled", { name: hook.name, state: hook.active ? t("hooks.disabled") : t("hooks.enabled") }));
         await loadHooks();
       } catch (e) {
-        onError(`Failed to toggle hook: ${parseError(e)}`);
+        onError(t("hooks.toggleFailed", { error: parseError(e) }));
       } finally {
         setToggling((prev) => {
           const next = new Set(prev);
@@ -51,7 +53,7 @@ export const HooksManager = memo(function HooksManager({ path, onSuccess, onErro
         });
       }
     },
-    [path, onSuccess, onError, loadHooks]
+    [path, onSuccess, onError, loadHooks, t]
   );
 
   const handleViewContent = useCallback(
@@ -67,7 +69,7 @@ export const HooksManager = memo(function HooksManager({ path, onSuccess, onErro
         const content = await api.getHookContent(path, hook.name);
         setHookContent(content);
       } catch (e) {
-        setHookContent(`Error: ${parseError(e)}`);
+        setHookContent(t("hooks.getError", { error: parseError(e) }));
       } finally {
         setLoadingContent(false);
       }
@@ -85,7 +87,7 @@ export const HooksManager = memo(function HooksManager({ path, onSuccess, onErro
         <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
           <path d="M8 0a8 8 0 100 16A8 8 0 008 0zm3.28 5.78a.75.75 0 00-1.06-1.06L7 7.94 5.78 6.72a.75.75 0 00-1.06 1.06l1.75 1.75a.75.75 0 001.06 0l3.75-3.75z" />
         </svg>
-        Git Hooks
+        {t("hooks.title")}
         {hooks.length > 0 && (
           <span className="text-[10px] text-gray-400 dark:text-gray-500">
             ({hooks.filter((h) => h.active).length}/{hooks.length})
@@ -95,9 +97,9 @@ export const HooksManager = memo(function HooksManager({ path, onSuccess, onErro
       {expanded && (
         <div className="mt-1 ml-3 space-y-1">
           {loading ? (
-            <p className="text-xs text-gray-400 dark:text-gray-500 italic">Loading...</p>
+            <p className="text-xs text-gray-400 dark:text-gray-500 italic">{t("hooks.loading")}</p>
           ) : hooks.length === 0 ? (
-            <p className="text-xs text-gray-400 dark:text-gray-500 italic">No hooks found</p>
+            <p className="text-xs text-gray-400 dark:text-gray-500 italic">{t("hooks.empty")}</p>
           ) : (
             hooks.map((hook) => (
               <div key={hook.name} className="space-y-1">
@@ -110,7 +112,7 @@ export const HooksManager = memo(function HooksManager({ path, onSuccess, onErro
                         ? "bg-green-500"
                         : "bg-gray-300 dark:bg-gray-600"
                     }`}
-                    aria-label={`Toggle hook ${hook.name}`}
+                    aria-label={t("hooks.toggleAria", { name: hook.name })}
                   >
                     <span
                       className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform duration-200 mt-0.5 ${
@@ -130,13 +132,13 @@ export const HooksManager = memo(function HooksManager({ path, onSuccess, onErro
                     {hook.name}
                   </button>
                   <span className="text-[10px] text-gray-400 dark:text-gray-500">
-                    {hook.active ? "on" : "off"}
+                    {hook.active ? t("hooks.on") : t("hooks.off")}
                   </span>
                 </div>
                 {viewingHook === hook.name && (
                   <div className="ml-9 rounded border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 overflow-hidden">
                     <pre className="select-text p-2 text-[11px] font-mono max-h-40 overflow-y-auto whitespace-pre-wrap break-all text-gray-800 dark:text-gray-200">
-                      {loadingContent ? "Loading..." : hookContent ?? "Empty"}
+                      {loadingContent ? t("hooks.loading") : hookContent ?? t("hooks.emptyContent")}
                     </pre>
                   </div>
                 )}

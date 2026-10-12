@@ -1,4 +1,5 @@
 import { memo } from "react";
+import { useTranslation } from "react-i18next";
 import type { BatchProgress } from "../hooks/useBatchOps";
 
 interface BatchOpsToolbarProps {
@@ -16,20 +17,22 @@ interface BatchOpsToolbarProps {
 }
 
 function ProgressBadge({ progress }: { progress: BatchProgress }) {
+  const { t } = useTranslation();
   if (progress.completed === 0) {
-    return <span className="text-xs text-blue-500 animate-pulse">Starting...</span>;
+    return <span className="text-xs text-blue-500 animate-pulse">{t("batchOps.starting")}</span>;
   }
   return (
     <span className="text-xs text-blue-500 tabular-nums">
-      {progress.completed} done
+      {t("batchOps.done", { count: progress.completed })}
       {progress.failed > 0 && (
-        <span className="text-red-500 ml-1">({progress.failed} failed)</span>
+        <span className="text-red-500 ml-1">{t("batchOps.failed", { count: progress.failed })}</span>
       )}
     </span>
   );
 }
 
 export const BatchOpsToolbar = memo(function BatchOpsToolbar({ batchLoading, batchProgress, onFetchAll, onPullAll, onPushAll, onPullBehind, onPushAhead, onSyncAll, onRunCommand, behindCount, aheadCount }: BatchOpsToolbarProps) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-0.5">
       <button
@@ -47,8 +50,8 @@ export const BatchOpsToolbar = memo(function BatchOpsToolbar({ batchLoading, bat
           )}
         </span>
         <div className="flex-1 min-w-0">
-          <div className="text-gray-900 dark:text-gray-100">Fetch All</div>
-          <div className="text-xs text-gray-400 dark:text-gray-500">Download remote updates</div>
+          <div className="text-gray-900 dark:text-gray-100">{t("batchOps.fetchAll")}</div>
+          <div className="text-xs text-gray-400 dark:text-gray-500">{t("batchOps.fetchAllDesc")}</div>
         </div>
         {batchLoading === "fetch" && <ProgressBadge progress={batchProgress} />}
       </button>
@@ -69,8 +72,8 @@ export const BatchOpsToolbar = memo(function BatchOpsToolbar({ batchLoading, bat
           )}
         </span>
         <div className="flex-1 min-w-0">
-          <div className="text-gray-900 dark:text-gray-100">Pull All</div>
-          <div className="text-xs text-gray-400 dark:text-gray-500">Pull latest changes</div>
+          <div className="text-gray-900 dark:text-gray-100">{t("batchOps.pullAll")}</div>
+          <div className="text-xs text-gray-400 dark:text-gray-500">{t("batchOps.pullAllDesc")}</div>
         </div>
         {batchLoading === "pull" && <ProgressBadge progress={batchProgress} />}
       </button>
@@ -91,8 +94,8 @@ export const BatchOpsToolbar = memo(function BatchOpsToolbar({ batchLoading, bat
           )}
         </span>
         <div className="flex-1 min-w-0">
-          <div className="text-gray-900 dark:text-gray-100">Push All</div>
-          <div className="text-xs text-gray-400 dark:text-gray-500">Push local commits</div>
+          <div className="text-gray-900 dark:text-gray-100">{t("batchOps.pushAll")}</div>
+          <div className="text-xs text-gray-400 dark:text-gray-500">{t("batchOps.pushAllDesc")}</div>
         </div>
         {batchLoading === "push" && <ProgressBadge progress={batchProgress} />}
       </button>
@@ -115,8 +118,8 @@ export const BatchOpsToolbar = memo(function BatchOpsToolbar({ batchLoading, bat
           )}
         </span>
         <div className="flex-1 min-w-0">
-          <div className="text-gray-900 dark:text-gray-100">Pull Behind</div>
-          <div className="text-xs text-gray-400 dark:text-gray-500">Only pull projects behind remote</div>
+          <div className="text-gray-900 dark:text-gray-100">{t("batchOps.pullBehind")}</div>
+          <div className="text-xs text-gray-400 dark:text-gray-500">{t("batchOps.pullBehindDesc")}</div>
         </div>
         {behindCount > 0 && batchLoading !== "pull_behind" && (
           <span className="text-xs bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 px-1.5 py-0.5 rounded-full tabular-nums">
@@ -142,8 +145,8 @@ export const BatchOpsToolbar = memo(function BatchOpsToolbar({ batchLoading, bat
           )}
         </span>
         <div className="flex-1 min-w-0">
-          <div className="text-gray-900 dark:text-gray-100">Push Ahead</div>
-          <div className="text-xs text-gray-400 dark:text-gray-500">Only push projects ahead of remote</div>
+          <div className="text-gray-900 dark:text-gray-100">{t("batchOps.pushAhead")}</div>
+          <div className="text-xs text-gray-400 dark:text-gray-500">{t("batchOps.pushAheadDesc")}</div>
         </div>
         {aheadCount > 0 && batchLoading !== "push_ahead" && (
           <span className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded-full tabular-nums">
@@ -172,8 +175,8 @@ export const BatchOpsToolbar = memo(function BatchOpsToolbar({ batchLoading, bat
           )}
         </span>
         <div className="flex-1 min-w-0">
-          <div className="text-gray-900 dark:text-gray-100">Sync All</div>
-          <div className="text-xs text-gray-400 dark:text-gray-500">Fetch + Pull all projects</div>
+          <div className="text-gray-900 dark:text-gray-100">{t("batchOps.syncAll")}</div>
+          <div className="text-xs text-gray-400 dark:text-gray-500">{t("batchOps.syncAllDesc")}</div>
         </div>
         {batchLoading === "sync" && <ProgressBadge progress={batchProgress} />}
       </button>
@@ -191,8 +194,8 @@ export const BatchOpsToolbar = memo(function BatchOpsToolbar({ batchLoading, bat
           </svg>
         </span>
         <div className="flex-1 min-w-0">
-          <div className="text-gray-900 dark:text-gray-100">Run Command…</div>
-          <div className="text-xs text-gray-400 dark:text-gray-500">Run a script across all projects</div>
+          <div className="text-gray-900 dark:text-gray-100">{t("batchOps.runCommand")}</div>
+          <div className="text-xs text-gray-400 dark:text-gray-500">{t("batchOps.runCommandDesc")}</div>
         </div>
       </button>
     </div>

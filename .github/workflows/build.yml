@@ -57,6 +57,9 @@ jobs:
       - name: Check version consistency
         run: npm run version:check
 
+      - name: Check translation catalogues
+        run: npm run i18n:check
+
       - name: Validate frontend types
         run: npm run typecheck
 

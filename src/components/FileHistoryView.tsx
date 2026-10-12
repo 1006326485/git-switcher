@@ -1,16 +1,18 @@
 import { useState, useEffect, useCallback, memo } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import * as api from "../lib/tauri";
 import type { FileCommitEntry } from "../lib/types";
 import { parseError } from "../lib/types";
 
-function formatRelativeTime(timestamp: number): string {
+function formatRelativeTime(t: TFunction, timestamp: number): string {
   const now = Date.now() / 1000;
   const diff = now - timestamp;
-  if (diff < 60) return "just now";
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
+  if (diff < 60) return t("fileHistory.justNow");
+  if (diff < 3600) return t("fileHistory.mAgo", { count: Math.floor(diff / 60) });
+  if (diff < 86400) return t("fileHistory.hAgo", { count: Math.floor(diff / 3600) });
+  if (diff < 604800) return t("fileHistory.dAgo", { count: Math.floor(diff / 86400) });
   return new Date(timestamp * 1000).toLocaleDateString();
 }
 
@@ -25,6 +27,7 @@ export const FileHistoryView = memo(function FileHistoryView({
   filePath,
   onClose,
 }: FileHistoryViewProps) {
+  const { t } = useTranslation();
   const [entries, setEntries] = useState<FileCommitEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -52,29 +55,29 @@ export const FileHistoryView = memo(function FileHistoryView({
       >
         <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--border-color)]">
           <div>
-            <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-200">File History</h2>
+            <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-200">{t("fileHistory.title")}</h2>
             <p className="text-xs text-gray-500 font-mono truncate max-w-xs">{filePath}</p>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 text-lg" aria-label="Close">✕</button>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 text-lg" aria-label={t("common.close")}>✕</button>
         </div>
 
         <div className="select-text flex-1 overflow-y-auto p-4">
           {loading && (
             <div className="flex items-center justify-center py-8">
               <div className="animate-spin rounded-full h-6 w-6 border-2 border-blue-500 border-t-transparent" />
-              <span className="ml-2 text-sm text-gray-500">Loading history...</span>
+              <span className="ml-2 text-sm text-gray-500">{t("fileHistory.loading")}</span>
             </div>
           )}
 
           {error && (
             <div className="text-center py-6">
               <p className="text-sm text-red-500 mb-2">{error}</p>
-              <button onClick={load} className="text-xs text-blue-500 hover:underline">Retry</button>
+              <button onClick={load} className="text-xs text-blue-500 hover:underline">{t("common.retry")}</button>
             </div>
           )}
 
           {!loading && !error && entries.length === 0 && (
-            <p className="text-sm text-gray-500 text-center py-6">No history found for this file</p>
+            <p className="text-sm text-gray-500 text-center py-6">{t("fileHistory.empty")}</p>
           )}
 
           {!loading && !error && entries.length > 0 && (
@@ -90,7 +93,7 @@ export const FileHistoryView = memo(function FileHistoryView({
                   <div className="flex-1 min-w-0">
                     <p className="text-xs text-gray-800 dark:text-gray-200 truncate">{entry.message}</p>
                     <p className="text-xs text-gray-400 mt-0.5">
-                      {entry.author} · {formatRelativeTime(entry.timestamp)}
+                      {entry.author} · {formatRelativeTime(t, entry.timestamp)}
                     </p>
                   </div>
                   <div className="flex items-center gap-1 shrink-0 text-xs">

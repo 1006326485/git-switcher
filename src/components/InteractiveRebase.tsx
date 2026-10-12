@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, memo } from "react";
+import { useTranslation } from "react-i18next";
 import * as api from "../lib/tauri";
 import type { CommitInfo } from "../lib/types";
 import { parseError } from "../lib/types";
@@ -36,6 +37,7 @@ export const InteractiveRebase = memo(function InteractiveRebase({
   onError,
   onRefresh,
 }: InteractiveRebaseProps) {
+  const { t } = useTranslation();
   const [commits, setCommits] = useState<CommitInfo[]>([]);
   const [entries, setEntries] = useState<RebaseEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -146,7 +148,7 @@ export const InteractiveRebase = memo(function InteractiveRebase({
         await api.gitDropCommit(path, d.hash);
       }
 
-      onSuccess("Interactive rebase completed");
+      onSuccess(t("interactiveRebase.completed"));
       await onRefresh();
       onClose();
     } catch (e) {
@@ -161,11 +163,11 @@ export const InteractiveRebase = memo(function InteractiveRebase({
 
   return (
     <>
-      <Modal open={open} onClose={onClose} title="Interactive Rebase" maxWidth="max-w-xl">
+      <Modal open={open} onClose={onClose} title={t("interactiveRebase.title")} width="lg">
         <div className="px-6 py-4 space-y-4">
           {/* Commit count selector */}
           <div className="flex items-center gap-3">
-            <label className="text-xs text-gray-500 dark:text-gray-400">Show last</label>
+            <label className="text-xs text-gray-500 dark:text-gray-400">{t("interactiveRebase.showLast")}</label>
             <input
               type="number"
               value={commitCount}
@@ -179,7 +181,7 @@ export const InteractiveRebase = memo(function InteractiveRebase({
               disabled={loading}
               className="px-2.5 py-1 rounded-lg text-xs font-medium bg-[var(--surface-2)] text-gray-700 dark:text-gray-300 border border-[var(--border-color)] hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50 transition-colors"
             >
-              {loading ? "Loading..." : "Reload"}
+              {loading ? t("common.loading") : t("interactiveRebase.reload")}
             </button>
           </div>
 
@@ -189,16 +191,16 @@ export const InteractiveRebase = memo(function InteractiveRebase({
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
             </svg>
             <span className="text-xs text-amber-700 dark:text-amber-300">
-              This will rewrite history. Do not use on commits that have been pushed to a shared branch.
+              {t("interactiveRebase.warning")}
             </span>
           </div>
 
           {/* Stats summary */}
           {entries.length > 0 && (
             <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
-              <span>{pickCount} pick</span>
-              {squashCount > 0 && <span className="text-purple-600 dark:text-purple-400">{squashCount} squash</span>}
-              {dropCount > 0 && <span className="text-red-600 dark:text-red-400">{dropCount} drop</span>}
+              <span>{t("interactiveRebase.pickStat", { count: pickCount })}</span>
+              {squashCount > 0 && <span className="text-purple-600 dark:text-purple-400">{t("interactiveRebase.squashStat", { count: squashCount })}</span>}
+              {dropCount > 0 && <span className="text-red-600 dark:text-red-400">{t("interactiveRebase.dropStat", { count: dropCount })}</span>}
             </div>
           )}
 
@@ -206,12 +208,12 @@ export const InteractiveRebase = memo(function InteractiveRebase({
           {squashCount > 0 && (
             <div>
               <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">
-                Squash commit message (optional)
+                {t("interactiveRebase.squashMsgLabel")}
               </label>
               <textarea
                 value={squashMsg}
                 onChange={(e) => setSquashMsg(e.target.value)}
-                placeholder="Merged commit message..."
+                placeholder={t("interactiveRebase.mergedMessage")}
                 rows={2}
                 className="w-full px-3 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--surface-1)] text-xs focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none"
               />
@@ -222,14 +224,14 @@ export const InteractiveRebase = memo(function InteractiveRebase({
           {loading ? (
             <div className="flex items-center justify-center py-8 text-sm text-gray-500">
               <span className="animate-spin mr-2">&#x21BB;</span>
-              Loading commits...
+              {t("interactiveRebase.loadingCommits")}
             </div>
           ) : entries.length === 0 ? (
             <div className="text-center py-8 text-sm text-gray-400 italic">
-              No commits found
+              {t("interactiveRebase.noCommits")}
             </div>
           ) : (
-            <div className="select-text space-y-1 max-h-[400px] overflow-y-auto" role="list" aria-label="Commits for rebase">
+            <div className="select-text space-y-1 max-h-[400px] overflow-y-auto" role="list" aria-label={t("interactiveRebase.commitsAria")}>
               {entries.map((entry, index) => {
                 const isDragging = dragIndex === index;
                 const isDropTarget = dropIndex === index && dragIndex !== null && dragIndex !== index;
@@ -263,7 +265,7 @@ export const InteractiveRebase = memo(function InteractiveRebase({
                       value={entry.action}
                       onChange={(e) => setAction(index, e.target.value as RebaseAction)}
                       className={`px-1.5 py-0.5 rounded text-xs font-medium border cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 ${ACTION_STYLES[entry.action]}`}
-                      aria-label={`Action for commit ${entry.commit.short_hash}`}
+                      aria-label={t("interactiveRebase.actionAria", { hash: entry.commit.short_hash })}
                     >
                       <option value="pick">pick</option>
                       <option value="squash">squash</option>
@@ -303,7 +305,7 @@ export const InteractiveRebase = memo(function InteractiveRebase({
               onClick={onClose}
               className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--surface-2)] text-gray-700 dark:text-gray-300 border border-[var(--border-color)] hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
             >
-              Cancel
+              {t("interactiveRebase.cancel")}
             </button>
             <button
               onClick={() => setConfirmApply(true)}
@@ -313,10 +315,10 @@ export const InteractiveRebase = memo(function InteractiveRebase({
               {applying ? (
                 <span className="flex items-center gap-1.5">
                   <span className="animate-spin">&#x21BB;</span>
-                  Applying...
+                  {t("interactiveRebase.applying")}
                 </span>
               ) : (
-                "Apply Rebase"
+                t("interactiveRebase.applyRebase")
               )}
             </button>
           </div>
@@ -327,7 +329,7 @@ export const InteractiveRebase = memo(function InteractiveRebase({
         <OperationConfirmDialog
           open
           operation="git_rebase"
-          targets={[{ path, label: `${squashCount} squash action(s), ${dropCount} dropped commit(s)` }]}
+          targets={[{ path, label: t("interactiveRebase.targetLabel", { squash: squashCount, drop: dropCount }) }]}
           onConfirm={handleApply}
           onCancel={() => setConfirmApply(false)}
         />

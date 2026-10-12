@@ -1,4 +1,5 @@
 import { useState, useCallback, memo } from "react";
+import { useTranslation } from "react-i18next";
 import { save } from "@tauri-apps/plugin-dialog";
 import { createArchive } from "../lib/tauri";
 import { SelectDropdown } from "./ui/SelectDropdown";
@@ -29,6 +30,7 @@ export default memo(function ExportArchiveDialog({
   onSuccess,
   onError,
 }: Props) {
+  const { t } = useTranslation();
   const [format, setFormat] = useState("zip");
   const [loading, setLoading] = useState(false);
 
@@ -43,40 +45,43 @@ export default memo(function ExportArchiveDialog({
     setLoading(true);
     try {
       const result = await createArchive(repoPath, format, filePath);
-      onSuccess(`Archive exported to ${result}`);
+      onSuccess(t("exportArchive.exportedTo", { path: result }));
       onClose();
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : typeof e === "object" && e !== null && "message" in e ? String((e as { message: unknown }).message) : String(e);
-      onError(`Archive failed: ${msg}`);
+      onError(t("exportArchive.failed", { msg }));
     } finally {
       setLoading(false);
     }
-  }, [repoPath, format, onSuccess, onError, onClose]);
+  }, [repoPath, format, onSuccess, onError, onClose, t]);
 
   return (
-    <Modal open={open} onClose={onClose} title="Export Archive">
+    <Modal open={open} onClose={onClose} title={t("exportArchive.title")}>
       <div className="space-y-4">
         <div>
-          <label className="block text-sm font-medium mb-1">Format</label>
+          <label className="block text-sm font-medium mb-1">{t("exportArchive.formatLabel")}</label>
           <SelectDropdown
-            options={FORMAT_OPTIONS}
+            options={FORMAT_OPTIONS.map((o) => ({
+              ...o,
+              label: o.value === "tar.gz" ? t("exportArchive.tarGz") : t("exportArchive.zip"),
+            }))}
             value={format}
             onChange={setFormat}
-            ariaLabel="Archive format"
+            ariaLabel={t("exportArchive.formatAria")}
           />
         </div>
         <p className="text-xs text-gray-500 dark:text-gray-400">
-          Exports the current HEAD of the repository as an archive, without .git history.
+          {t("exportArchive.desc")}
         </p>
         <div className="flex justify-end gap-2">
           <button
             onClick={onClose}
             className="px-4 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700"
           >
-            Cancel
+            {t("common.cancel")}
           </button>
           <PrimaryButton onClick={handleExport} disabled={loading}>
-            {loading ? "Exporting..." : "Export"}
+            {loading ? t("exportArchive.exporting") : t("exportArchive.exportBtn")}
           </PrimaryButton>
         </div>
       </div>

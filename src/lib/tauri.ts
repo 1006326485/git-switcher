@@ -683,6 +683,10 @@ export async function updateSettingsPartial(patch: Partial<AppSettings>): Promis
   return invoke("update_settings_partial", { patch });
 }
 
+export async function rebuildTrayMenu(): Promise<void> {
+  return invoke("rebuild_tray_menu");
+}
+
 export async function setLlmApiKey(key: string): Promise<void> {
   return invoke("set_llm_api_key", { key });
 }

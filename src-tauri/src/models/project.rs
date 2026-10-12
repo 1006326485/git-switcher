@@ -39,6 +39,13 @@ impl GitProject {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecentProject {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectDetail {
     pub project: GitProject,
     pub current_branch: String,

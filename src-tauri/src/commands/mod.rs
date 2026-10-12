@@ -16,6 +16,7 @@ pub mod search;
 pub mod settings;
 pub mod task_workspaces;
 pub mod terminal;
+pub mod tray;
 
 pub use ai_review::*;
 pub use background::*;
@@ -34,6 +35,7 @@ pub use search::*;
 pub use settings::*;
 pub use task_workspaces::*;
 pub use terminal::*;
+pub use tray::*;
 
 use crate::db::Database;
 use crate::models::{GitProject, Group, ProjectDetail};

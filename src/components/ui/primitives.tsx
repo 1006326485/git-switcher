@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useId, memo, isValidElement, cloneElement } from "react";
+import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import { CloseIcon } from "./icons";
 
@@ -15,6 +16,57 @@ export const dialogAnimation = "animate-[sheetIn_220ms_var(--ease-spring)]";
 export const scrimAnimation = "animate-[scrimIn_180ms_ease-out]";
 export const toastAnimation = "animate-[toastIn_200ms_var(--ease-out-soft)]";
 export const toastExitAnimation = "animate-[toastOut_160ms_ease-out_forwards]";
+// Card view: the expanded card takes the whole grid row. Its GitOps body
+// unfolds in place while the card itself slides in from the side it sits on.
+export const expandBodyAnimation = "animate-[cardExpandIn_300ms_var(--ease-spring)]";
+export const cardExpandInFromLeft = "animate-[cardExpandInFromLeft_300ms_var(--ease-spring)]";
+export const cardExpandInFromRight = "animate-[cardExpandInFromRight_300ms_var(--ease-spring)]";
+// Collapse mirror of expandBodyAnimation. `forwards` pins the folded 0fr until
+// the exiting subtree actually unmounts one animation cycle later.
+export const expandBodyExitAnimation = "animate-[cardExpandOut_300ms_var(--ease-spring)_forwards]";
+
+// Must stay in sync with the 300ms baked into the card-expand class strings
+// above — Tailwind needs the literal class name, so it cannot interpolate it.
+export const CARD_EXPAND_MS = 300;
+
+/** True when the OS asked us to cut motion; exit windows then collapse to zero. */
+export function prefersReducedMotion() {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
+/**
+ * Keeps an exiting subtree mounted for one animation cycle after `open` turns
+ * false, so its CSS exit animation has something to animate.
+ *
+ * Returns `present` (still render the subtree) and `closing` (it is on its way
+ * out, so swap the entrance class for the matching exit one). Re-opening inside
+ * the window cancels the pending unmount, so a double-click never flashes.
+ */
+export function usePresence(open: boolean, duration = CARD_EXPAND_MS) {
+  const [present, setPresent] = useState(open);
+  const [closing, setClosing] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setPresent(true);
+      setClosing(false);
+      return;
+    }
+    if (!present) return;
+    setClosing(true);
+    const timer = window.setTimeout(() => {
+      setPresent(false);
+      setClosing(false);
+    }, prefersReducedMotion() ? 0 : duration);
+    return () => window.clearTimeout(timer);
+  }, [open, present, duration]);
+
+  return { present, closing };
+}
 
 // ── Segmented Control ─────────────────────────────────────────────────────
 
@@ -24,7 +76,7 @@ export function SegmentedControl<T extends string>({
   onChange,
   ariaLabel,
 }: {
-  options: { value: T; icon: string; label: string }[];
+  options: { value: T; icon: string; label: string; labelKey?: string }[];
   value: T;
   onChange: (v: T) => void;
   ariaLabel: string;
@@ -241,6 +293,8 @@ export const MenuItem = memo(function MenuItem({
   onClick,
   danger,
   selected,
+  disabled,
+  shortcut,
 }: {
   icon?: React.ReactNode;
   label: string;
@@ -250,21 +304,26 @@ export const MenuItem = memo(function MenuItem({
   // With `selected`, the item becomes a menuitemradio: checked state is
   // exposed via aria-checked instead of a text checkmark appended to the label.
   selected?: boolean;
+  // Native disabled: unreachable by pointer and keyboard, onClick never fires.
+  disabled?: boolean;
+  // Decorative right-aligned hint (e.g. "⌘R"); it binds no key itself.
+  shortcut?: string;
 }) {
   return (
     <button
       type="button"
       role={selected === undefined ? "menuitem" : "menuitemradio"}
       aria-checked={selected}
+      disabled={disabled}
       onClick={onClick}
       className={`press w-full text-left px-3 py-2 text-sm flex items-center gap-3 transition-all active:scale-[0.99] ${
         danger
           ? "hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600 dark:text-red-400"
           : "hover:bg-gray-50 dark:hover:bg-gray-700/50 text-gray-700 dark:text-gray-300"
-      }`}
+      }${disabled ? " opacity-50 cursor-not-allowed" : ""}`}
     >
       {icon && (
-        <span className="shrink-0 w-5 h-5 flex items-center justify-center text-gray-400 dark:text-gray-500">
+        <span className={`shrink-0 w-5 h-5 flex items-center justify-center ${danger ? "text-red-500 dark:text-red-400" : "text-gray-400 dark:text-gray-500"}`}>
           {icon}
         </span>
       )}
@@ -274,29 +333,48 @@ export const MenuItem = memo(function MenuItem({
           <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{description}</div>
         )}
       </div>
+      {shortcut && (
+        <span className="shrink-0 font-mono text-xs text-gray-400 dark:text-gray-500">
+          {shortcut}
+        </span>
+      )}
     </button>
   );
 });
 
 // ── Modal Shell ───────────────────────────────────────────────────────────
+// Width scale — every dialog must pick a token; ad-hoc `max-w-*` strings are
+// banned so the chrome stays visually coherent across the app.
+//   sm — confirmations, pickers, empty states
+//   md — simple single forms (default)
+//   lg — tabbed / medium content (settings, shortcuts, branch, tag)
+//   xl — data-heavy views (logs, stash, conflict resolution)
+export const MODAL_WIDTHS = {
+  sm: "max-w-sm",
+  md: "max-w-md",
+  lg: "max-w-lg",
+  xl: "max-w-2xl",
+} as const;
 
 export const Modal = memo(function Modal({
   open,
   onClose,
   title,
   subtitle,
-  maxWidth = "max-w-md",
-  size = "md",
+  width = "md",
+  compact = false,
   children,
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   subtitle?: string;
-  maxWidth?: string;
-  size?: "md" | "sm";
+  width?: keyof typeof MODAL_WIDTHS;
+  /** Smaller header chrome (used alongside width="sm" for confirmations). */
+  compact?: boolean;
   children: React.ReactNode;
 }) {
+  const { t } = useTranslation();
   const contentRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
 
@@ -354,27 +432,27 @@ export const Modal = memo(function Modal({
       <div className={`absolute inset-0 bg-black/50 dark:bg-black/60 backdrop-blur-sm ${scrimAnimation}`} onClick={onClose} />
       <div
         ref={contentRef}
-        className={`relative flex max-h-[calc(100dvh-1.5rem)] w-full max-w-[calc(100vw-1.5rem)] flex-col overflow-y-auto ${size === "sm" ? "rounded-xl" : "rounded-2xl"} bg-[var(--surface-1)] shadow-xl sm:max-h-[calc(100dvh-2rem)] sm:max-w-[calc(100vw-2rem)] ${dialogAnimation} ${maxWidth}`}
+        className={`relative flex max-h-[calc(100dvh-1.5rem)] w-full max-w-[calc(100vw-1.5rem)] flex-col overflow-hidden ${compact ? "rounded-xl" : "rounded-2xl"} bg-[var(--surface-1)] shadow-xl sm:max-h-[calc(100dvh-2rem)] sm:max-w-[calc(100vw-2rem)] ${dialogAnimation} ${MODAL_WIDTHS[width]}`}
       >
         {/* Header */}
-        <div className={`flex items-start justify-between gap-3 border-b border-black/5 dark:border-white/5 ${size === "sm" ? "px-3 pb-2 pt-2.5" : "px-4 pb-3 pt-4 sm:px-6 sm:pt-5"}`}>
+        <div className={`flex items-start justify-between gap-3 border-b border-black/5 dark:border-white/5 ${compact ? "px-3 pb-2 pt-2.5" : "px-4 pb-3 pt-4 sm:px-6 sm:pt-5"}`}>
           <div className="min-w-0">
-            <h2 id={titleId} className={`${size === "sm" ? "text-sm" : "text-lg"} font-semibold tracking-tight text-gray-900 dark:text-gray-100`}>{title}</h2>
+            <h2 id={titleId} className={`${compact ? "text-sm" : "text-lg"} font-semibold tracking-tight text-gray-900 dark:text-gray-100`}>{title}</h2>
             {subtitle && (
               <p className="truncate text-sm text-gray-500 dark:text-gray-400">{subtitle}</p>
             )}
           </div>
           <button
             onClick={onClose}
-            aria-label="Close dialog"
-            className={`${size === "sm" ? "p-1" : "p-1.5"} rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors`}
+            aria-label={t("ui.closeDialog")}
+            className={`${compact ? "p-1" : "p-1.5"} rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors`}
           >
-            <CloseIcon size={size === "sm" ? 14 : 16} />
+            <CloseIcon size={compact ? 14 : 16} />
           </button>
         </div>
 
-        {/* Body */}
-        {children}
+        {/* Body — scrolls internally so the header stays pinned across all dialogs */}
+        <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
       </div>
     </div>,
     document.body
@@ -525,17 +603,19 @@ export const StatusBadge = memo(function StatusBadge({
   count: number;
   variant?: "pill" | "text" | "dot" | "compact";
 }) {
+  const { t } = useTranslation();
   if (count === 0) return null;
 
   const c = STATUS_CONFIG[type];
   const symbol = type === "ahead" ? `↑${count}` : type === "behind" ? `↓${count}` : c.symbol;
+  const badgeLabel = t("status.badgeLabel", { count, type });
 
   if (variant === "dot") {
     return (
       <span
         className={`w-2 h-2 rounded-full ${c.dot}`}
-        title={`${count} ${type}`}
-        aria-label={`${count} ${type}`}
+        title={badgeLabel}
+        aria-label={badgeLabel}
       />
     );
   }
@@ -544,8 +624,8 @@ export const StatusBadge = memo(function StatusBadge({
     return (
       <span
         className={`select-none text-xs font-semibold tracking-wide tabular-nums px-1.5 py-0.5 rounded ${c.pill}`}
-        title={`${count} ${type}`}
-        aria-label={`${count} ${type}`}
+        title={badgeLabel}
+        aria-label={badgeLabel}
       >
         {type === "ahead" ? `↑${count}` : type === "behind" ? `↓${count}` : `${count}${c.symbol}`}
       </span>
@@ -554,7 +634,7 @@ export const StatusBadge = memo(function StatusBadge({
 
   if (variant === "text") {
     return (
-      <span className={`select-none text-sm font-medium ${c.text}`} aria-label={`${count} ${type}`}>
+      <span className={`select-none text-sm font-medium ${c.text}`} aria-label={badgeLabel}>
         {type === "ahead" || type === "behind" ? symbol : count}
       </span>
     );
@@ -564,13 +644,17 @@ export const StatusBadge = memo(function StatusBadge({
   return (
     <span
       className={`select-none inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium tracking-wide tabular-nums ${c.pill}`}
-      aria-label={`${count} ${type}`}
+      aria-label={badgeLabel}
     >
       {type === "ahead" || type === "behind"
         ? symbol
         : type === "stash"
-          ? `${count} stash${count !== 1 ? "es" : ""}`
-          : `${count} ${type === "modified" ? "modified" : type === "staged" ? "staged" : "untracked"}`}
+          ? t("status.stashBadge", { count })
+          : type === "modified"
+            ? t("status.modifiedBadge", { count })
+            : type === "staged"
+              ? t("status.stagedBadge", { count })
+              : t("status.untrackedBadge", { count })}
     </span>
   );
 });

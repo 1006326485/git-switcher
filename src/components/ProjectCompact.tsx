@@ -1,4 +1,5 @@
 import { memo } from "react";
+import { useTranslation } from "react-i18next";
 import type { ProjectDetail } from "../lib/types";
 import { PROJECT_COLORS } from "../lib/types";
 import { StatusBadge, GroupDot } from "./ui/primitives";
@@ -18,6 +19,7 @@ interface ProjectCompactProps {
 const ROW_HEIGHT = 44; // estimated compact row height
 
 const ProjectCompactRow = memo(function ProjectCompactRow({ detail, sortable, projectIndex, isFocused }: { detail: ProjectDetail; sortable?: boolean; projectIndex?: number; isFocused?: boolean }) {
+  const { t } = useTranslation();
   const { onSuccess, onError, onInfo } = useProjectActions();
   const { project, group } = detail;
 
@@ -31,7 +33,7 @@ const ProjectCompactRow = memo(function ProjectCompactRow({ detail, sortable, pr
 
   return (
     <ProjectRowShell detail={detail}>
-      {({ detail: d, row, actionButtons, errorBanner, activeOpIndicator }) => {
+      {({ detail: d, row, actionButtons, errorBanner, activeOpIndicator, onRowContextMenu, onRowKeyDown }) => {
         const { current_branch, branches, status } = d;
         const hasChanges = status.modified + status.staged + status.untracked > 0;
 
@@ -41,8 +43,16 @@ const ProjectCompactRow = memo(function ProjectCompactRow({ detail, sortable, pr
             style={sortableStyle}
             data-project-id={project.id}
             data-project-index={projectIndex}
+            onContextMenu={onRowContextMenu}
+            onKeyDown={onRowKeyDown}
+            tabIndex={-1}
             role="article"
-            aria-label={`${project.alias || project.name}, branch ${detail.current_branch}${hasChanges ? `, ${status.modified + status.staged + status.untracked} changes` : ""}${status.behind > 0 ? `, ${status.behind} behind` : ""}${status.ahead > 0 ? `, ${status.ahead} ahead` : ""}`}
+            aria-label={[
+              t("card.rowAriaBase", { name: project.alias || project.name, branch: detail.current_branch }),
+              hasChanges ? t("card.rowAriaChanges", { count: status.modified + status.staged + status.untracked }) : "",
+              status.behind > 0 ? t("card.rowAriaBehind", { count: status.behind }) : "",
+              status.ahead > 0 ? t("card.rowAriaAhead", { count: status.ahead }) : "",
+            ].join("")}
             className={`relative group overflow-hidden ${isDragging ? "z-50 shadow-lg dark:ring-2 dark:ring-[var(--accent)]/30 ring-2 ring-[var(--accent)]/20 rounded-lg" : ""} ${isFocused ? "ring-2 ring-blue-500 dark:ring-blue-400 rounded-lg" : ""}`}
           >
             {/* Color stripe */}
@@ -63,7 +73,7 @@ const ProjectCompactRow = memo(function ProjectCompactRow({ detail, sortable, pr
               {sortable && (
                 <button
                   className="shrink-0 cursor-grab active:cursor-grabbing text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-                  title="Drag to reorder"
+                  title={t("card.dragAria")}
                   {...attributes}
                   {...listeners}
                 >

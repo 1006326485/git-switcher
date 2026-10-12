@@ -68,10 +68,52 @@ fn default_max_tokens() -> u32 {
     4096
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TraySettings {
+    #[serde(default = "default_true")]
+    pub git_actions: bool,
+    #[serde(default = "default_true")]
+    pub recent_projects: bool,
+    #[serde(default = "default_true")]
+    pub quick_launch: bool,
+    #[serde(default = "default_recent_limit")]
+    pub recent_limit: u32,
+    /// Pinned run entries: `preset:<id>` or `saved:<id>`.
+    #[serde(default)]
+    pub pinned_commands: Vec<String>,
+    #[serde(default = "default_true")]
+    pub notifications: bool,
+}
+
+impl Default for TraySettings {
+    fn default() -> Self {
+        Self {
+            git_actions: true,
+            recent_projects: true,
+            quick_launch: true,
+            recent_limit: default_recent_limit(),
+            pinned_commands: Vec::new(),
+            notifications: true,
+        }
+    }
+}
+
+fn default_recent_limit() -> u32 {
+    5
+}
+
+/// The raw interface-language preference stored in `settings.json`: one of the
+/// codes in `locales/*.json`, or `"system"` to follow the operating system.
+fn default_language() -> String {
+    "system".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     #[serde(default)]
     pub theme: Theme,
+    #[serde(default = "default_language")]
+    pub language: String,
     #[serde(default = "default_true")]
     pub auto_refresh: bool,
     #[serde(default = "default_refresh_interval")]
@@ -88,12 +130,15 @@ pub struct AppSettings {
     /// Hide the summoned terminal window as soon as it loses focus.
     #[serde(default)]
     pub terminal_hide_on_blur: bool,
+    #[serde(default)]
+    pub tray: TraySettings,
 }
 
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
             theme: Theme::System,
+            language: default_language(),
             auto_refresh: true,
             refresh_interval_secs: 30,
             view_mode: ViewMode::Card,
@@ -101,6 +146,7 @@ impl Default for AppSettings {
             auto_fetch_on_launch: true,
             terminal_hotkey: default_terminal_hotkey(),
             terminal_hide_on_blur: false,
+            tray: TraySettings::default(),
         }
     }
 }
@@ -144,6 +190,53 @@ mod tests {
         let settings: AppSettings = serde_json::from_str(r#"{"theme":"dark"}"#).unwrap();
         assert_eq!(settings.terminal_hotkey, default_terminal_hotkey());
         assert!(!settings.terminal_hide_on_blur);
+    }
+
+    #[test]
+    fn missing_tray_fields_deserialize_to_defaults() {
+        let settings: AppSettings = serde_json::from_str(r#"{"theme":"dark"}"#).unwrap();
+        assert_eq!(settings.tray, TraySettings::default());
+        assert!(settings.tray.git_actions);
+        assert_eq!(settings.tray.recent_limit, 5);
+        assert!(settings.tray.pinned_commands.is_empty());
+    }
+
+    #[test]
+    fn tray_settings_round_trip() {
+        let settings = AppSettings {
+            tray: TraySettings {
+                git_actions: false,
+                recent_limit: 3,
+                pinned_commands: vec!["preset:p1".to_string(), "saved:c1".to_string()],
+                notifications: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&settings).unwrap();
+        let back: AppSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.tray, settings.tray);
+    }
+
+    #[test]
+    fn missing_language_deserializes_to_system() {
+        let settings: AppSettings = serde_json::from_str(r#"{"theme":"dark"}"#).unwrap();
+        assert_eq!(settings.language, "system");
+        // Old files also keep working after a full round-trip.
+        let json = serde_json::to_string(&settings).unwrap();
+        let back: AppSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.language, "system");
+    }
+
+    #[test]
+    fn language_round_trips() {
+        let settings = AppSettings {
+            language: "zh-CN".to_string(),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&settings).unwrap();
+        let back: AppSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.language, "zh-CN");
     }
 
     #[test]

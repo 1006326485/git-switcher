@@ -1,14 +1,16 @@
 import { memo, useState, useEffect, useCallback, useRef, lazy, Suspense, type ReactNode } from "react";
-import type { ProjectDetail } from "../lib/types";
-import { PROJECT_COLORS } from "../lib/types";
-import { IconButton } from "./ui/primitives";
+import type { ProjectDetail, Group } from "../lib/types";
+import { PROJECT_COLORS, parseError } from "../lib/types";
+import { IconButton, Modal } from "./ui/primitives";
 import { ClockIcon, CloseIcon } from "./ui/icons";
 import { ProjectContextMenu } from "./ProjectContextMenu";
 import { ColorPicker } from "./ColorPicker";
 import { GroupAssignDropdown } from "./ProjectGroupsPanel";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { useProjectRow } from "../hooks/useProjectRow";
-import { setProjectDescription, setProjectNotes, setProjectColor } from "../lib/tauri";
+import { useContextMenu } from "../hooks/useContextMenu";
+import { setProjectDescription, setProjectNotes, setProjectColor, setProjectAlias, listGroups, assignToGroup } from "../lib/tauri";
+import { useTranslation, Trans } from "react-i18next";
 import { useProjectActions } from "../context/ProjectContext";
 import type { ActiveGitOp } from "../hooks/useGitOpTracker";
 
@@ -16,6 +18,12 @@ const GitLogViewer = lazy(() => import("./GitLogViewer"));
 const BranchManager = lazy(() => import("./BranchManager"));
 const AiReviewDialog = lazy(() => import("./AiReviewDialog"));
 const TagManager = lazy(() => import("./TagManager"));
+const StashManager = lazy(() =>
+  import("./StashManager").then((m) => ({ default: m.StashManager }))
+);
+
+// Matches spec §2.6 rule 2: interactive controls keep the native menu.
+const ROW_MENU_SKIP = 'button, input, textarea, a, [role="button"]';
 
 // ── Description Editor ──────────────────────────────────────────────────────
 
@@ -35,6 +43,7 @@ export const DescriptionEditor = memo(function DescriptionEditor({
   onError,
   editTrigger,
 }: DescriptionEditorProps) {
+  const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(description ?? "");
   const [saving, setSaving] = useState(false);
@@ -118,7 +127,7 @@ export const DescriptionEditor = memo(function DescriptionEditor({
           onBlur={handleSave}
           maxLength={100}
           disabled={saving}
-          placeholder="Enter project description..."
+          placeholder={t("row.description.placeholder")}
           className="w-full text-xs px-1.5 py-0.5 rounded border border-blue-400 dark:border-blue-500 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 outline-none focus:ring-1 focus:ring-blue-400"
         />
       </div>
@@ -150,7 +159,7 @@ export const DescriptionEditor = memo(function DescriptionEditor({
         type="button"
         onClick={() => setEditing(true)}
         className="opacity-0 group-hover/desc:opacity-100 shrink-0 p-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-all"
-        title="Edit description"
+        title={t("row.description.edit")}
       >
         <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
           <path d="M11.013 1.427a1.75 1.75 0 012.474 0l1.086 1.086a1.75 1.75 0 010 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 01-.927-.928l.929-3.25a1.75 1.75 0 01.445-.758l8.61-8.61zM11.72 2.84l-8.61 8.61a.25.25 0 00-.064.108l-.558 1.953 1.953-.558a.25.25 0 00.108-.064l8.61-8.61a.25.25 0 000-.354L12.073 2.84a.25.25 0 00-.354 0z" />
@@ -178,6 +187,7 @@ export const NotesEditor = memo(function NotesEditor({
   onError,
   editTrigger,
 }: NotesEditorProps) {
+  const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(notes ?? "");
   const [saving, setSaving] = useState(false);
@@ -256,7 +266,7 @@ export const NotesEditor = memo(function NotesEditor({
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
           disabled={saving}
-          placeholder="Enter notes..."
+          placeholder={t("row.notes.placeholder")}
           rows={3}
           className="w-full text-xs px-1.5 py-1 rounded border border-blue-400 dark:border-blue-500 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 outline-none focus:ring-1 focus:ring-blue-400 resize-none"
         />
@@ -266,17 +276,17 @@ export const NotesEditor = memo(function NotesEditor({
             disabled={saving}
             className="px-2 py-0.5 text-xs rounded bg-blue-500 hover:bg-blue-600 text-white disabled:opacity-50 transition-colors"
           >
-            {saving ? "Saving..." : "Save"}
+            {saving ? t("common.saving") : t("common.save")}
           </button>
           <button
             onClick={() => setEditing(false)}
             disabled={saving}
             className="px-2 py-0.5 text-xs rounded bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 text-gray-600 dark:text-gray-300 disabled:opacity-50 transition-colors"
           >
-            Cancel
+            {t("common.cancel")}
           </button>
           <span className="text-[10px] text-gray-400 dark:text-gray-500 ml-auto">
-            Cmd+Enter to save
+            {t("row.notes.saveHint")}
           </span>
         </div>
       </div>
@@ -299,14 +309,14 @@ export const NotesEditor = memo(function NotesEditor({
         </span>
       ) : (
         <span className="text-xs text-gray-300 dark:text-gray-600 italic cursor-default">
-          No notes
+          {t("row.notes.empty")}
         </span>
       )}
       <button
         type="button"
         onClick={() => setEditing(true)}
         className="opacity-0 group-hover/notes:opacity-100 shrink-0 p-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-all"
-        title="Edit notes"
+        title={t("row.notes.edit")}
       >
         <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
           <path d="M11.013 1.427a1.75 1.75 0 012.474 0l1.086 1.086a1.75 1.75 0 010 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 01-.927-.928l.929-3.25a1.75 1.75 0 01.445-.758l8.61-8.61zM11.72 2.84l-8.61 8.61a.25.25 0 00-.064.108l-.558 1.953 1.953-.558a.25.25 0 00.108-.064l8.61-8.61a.25.25 0 000-.354L12.073 2.84a.25.25 0 00-.354 0z" />
@@ -351,6 +361,10 @@ export interface RowRenderProps {
   activeOpIndicator: ReactNode | null;
   /** Whether a git op is currently active for this project */
   hasActiveOp: boolean;
+  /** Bind to the row root element to open its right-click menu. */
+  onRowContextMenu: (e: React.MouseEvent) => void;
+  /** Bind to the row root element so Shift+F10 / the ContextMenu key opens the same menu. */
+  onRowKeyDown: (e: React.KeyboardEvent) => void;
 }
 
 interface ProjectRowShellProps {
@@ -360,23 +374,24 @@ interface ProjectRowShellProps {
 
 // ── Active Op Indicator ─────────────────────────────────────────────────────
 
-const OP_LABELS: Record<string, string> = {
-  switch_branch: "Switching",
-  commit: "Committing",
-  push: "Pushing",
-  pull: "Pulling",
-  fetch: "Fetching",
-  stash: "Stashing",
-  pop: "Popping",
-  merge: "Merging",
-  cherry_pick: "Cherry-picking",
-  rebase: "Rebasing",
-  delete_branch: "Deleting branch",
-  create_branch: "Creating branch",
+const OP_LABEL_KEYS: Record<string, "row.op.switch_branch" | "row.op.commit" | "row.op.push" | "row.op.pull" | "row.op.fetch" | "row.op.stash" | "row.op.pop" | "row.op.merge" | "row.op.cherry_pick" | "row.op.rebase" | "row.op.delete_branch" | "row.op.create_branch"> = {
+  switch_branch: "row.op.switch_branch",
+  commit: "row.op.commit",
+  push: "row.op.push",
+  pull: "row.op.pull",
+  fetch: "row.op.fetch",
+  stash: "row.op.stash",
+  pop: "row.op.pop",
+  merge: "row.op.merge",
+  cherry_pick: "row.op.cherry_pick",
+  rebase: "row.op.rebase",
+  delete_branch: "row.op.delete_branch",
+  create_branch: "row.op.create_branch",
 };
 
 function ActiveOpBanner({ op, onCancel }: { op: ActiveGitOp; onCancel?: () => void }) {
-  const label = OP_LABELS[op.op] ?? op.op;
+  const { t } = useTranslation();
+  const label = OP_LABEL_KEYS[op.op] ? t(OP_LABEL_KEYS[op.op]) : op.op;
   const [elapsed, setElapsed] = useState(() => Math.floor((Date.now() - op.startedAt) / 1000));
 
   useEffect(() => {
@@ -393,14 +408,14 @@ function ActiveOpBanner({ op, onCancel }: { op: ActiveGitOp; onCancel?: () => vo
         <span className="font-medium">{label}...</span>
         {elapsed > 0 && (
           <span className="text-blue-500 dark:text-blue-400 tabular-nums">
-            {elapsed}s
+            {t("row.op.elapsed", { time: elapsed })}
           </span>
         )}
         {onCancel && (
           <button
             onClick={onCancel}
             className="ml-auto px-1.5 py-0.5 rounded hover:bg-blue-200 dark:hover:bg-blue-800/50 text-blue-600 dark:text-blue-400 transition-colors"
-            title="Cancel operation"
+            title={t("row.op.cancel")}
           >
             ✕
           </button>
@@ -415,11 +430,20 @@ function ActiveOpBanner({ op, onCancel }: { op: ActiveGitOp; onCancel?: () => vo
 const ActionButtons = memo(function ActionButtons({
   detail,
   row,
+  contextAnchor,
+  contextOnClose,
+  onAssignGroup,
+  onEditAlias,
 }: {
   detail: ProjectDetail;
   row: RowState;
+  contextAnchor: { x: number; y: number } | null;
+  contextOnClose: () => void;
+  onAssignGroup: () => void;
+  onEditAlias: () => void;
 }) {
-  const { onSuccess, onError, onColorChange: syncProjectColor, onFetch, onPull, onPush } = useProjectActions();
+  const { t } = useTranslation();
+  const { onSuccess, onError, onColorChange: syncProjectColor, onFetch, onPull, onPush, isOpActive } = useProjectActions();
   const { project, group } = detail;
   const [fetching, setFetching] = useState(false);
   const [pulling, setPulling] = useState(false);
@@ -472,13 +496,17 @@ const ActionButtons = memo(function ActionButtons({
     }
   }, [onPush, pushing, project.path]);
 
+  const fetchBusy = fetching || !!isOpActive?.("fetch", project.path);
+  const pullBusy = pulling || !!isOpActive?.("pull", project.path);
+  const pushBusy = pushing || !!isOpActive?.("push", project.path);
+
   return (
     <>
       {row.recent && (
         <button
           onClick={row.handleRunRecentCommand}
-          aria-label={`Run ${row.recent.command}`}
-          title={`Run ${row.recent.command}`}
+          aria-label={t("row.buttons.run", { command: row.recent.command })}
+          title={t("row.buttons.run", { command: row.recent.command })}
           className="p-1.5 rounded-lg text-gray-400 opacity-50 hover:opacity-100 transition-all duration-150 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 active:scale-[0.95]"
         >
           <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
@@ -490,8 +518,8 @@ const ActionButtons = memo(function ActionButtons({
         <button
           onClick={handleFetch}
           disabled={fetching}
-          aria-label="Fetch"
-          title="Fetch remote updates"
+          aria-label={t("row.buttons.fetch")}
+          title={t("row.buttons.fetchTitle")}
           className="p-1.5 rounded-lg text-gray-400 opacity-50 hover:opacity-100 transition-all duration-150 disabled:opacity-30 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 active:scale-[0.95]"
         >
           {fetching ? (
@@ -507,8 +535,8 @@ const ActionButtons = memo(function ActionButtons({
         <button
           onClick={handlePull}
           disabled={pulling}
-          aria-label="Pull"
-          title="Pull latest changes"
+          aria-label={t("row.buttons.pull")}
+          title={t("row.buttons.pullTitle")}
           className="p-1.5 rounded-lg text-gray-400 opacity-50 hover:opacity-100 transition-all duration-150 disabled:opacity-30 hover:text-green-500 hover:bg-green-50 dark:hover:bg-green-900/20 active:scale-[0.95]"
         >
           {pulling ? (
@@ -525,8 +553,8 @@ const ActionButtons = memo(function ActionButtons({
         <button
           onClick={handlePush}
           disabled={pushing}
-          aria-label="Push"
-          title="Push local commits"
+          aria-label={t("row.buttons.push")}
+          title={t("row.buttons.pushTitle")}
           className="p-1.5 rounded-lg text-gray-400 opacity-50 hover:opacity-100 transition-all duration-150 disabled:opacity-30 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 active:scale-[0.95]"
         >
           {pushing ? (
@@ -546,7 +574,7 @@ const ActionButtons = memo(function ActionButtons({
             // using static import
             await setProjectColor(project.id, color);
             handleColorChange(color);
-            onSuccess(color ? `Color set to ${color}` : "Color removed");
+            onSuccess(color ? t("row.color.set", { color }) : t("row.color.removed"));
           } catch (e) {
             onError(String(e));
           }
@@ -554,7 +582,7 @@ const ActionButtons = memo(function ActionButtons({
         trigger={
           <button
             type="button"
-            title="Set project color"
+            title={t("row.color.title")}
             className="p-1.5 rounded-lg opacity-50 hover:opacity-100 transition-all duration-150 hover:bg-gray-50 dark:hover:bg-gray-700/50 active:scale-[0.95]"
           >
             <span className={`block w-3.5 h-3.5 rounded-full ${colorBg} transition-colors`} />
@@ -568,10 +596,10 @@ const ActionButtons = memo(function ActionButtons({
         onRefresh={row.handleGitRefresh}
         onError={onError}
       />
-      <IconButton onClick={row.handleOpenLog} title="Commit history" hoverColor="purple">
+      <IconButton onClick={row.handleOpenLog} title={t("row.buttons.log")} hoverColor="purple">
         <ClockIcon />
       </IconButton>
-      <IconButton onClick={row.handleRefresh} title="Refresh" hoverColor="gray">
+      <IconButton onClick={row.handleRefresh} title={t("row.buttons.refresh")} hoverColor="gray">
         <span className={row.refreshing ? "animate-spin inline-block text-sm" : "text-sm"}>
           &#x21BB;
         </span>
@@ -586,6 +614,13 @@ const ActionButtons = memo(function ActionButtons({
         onOpenTagManager={row.handleOpenTagMgr}
         onOpenLogViewer={row.handleOpenLog}
         onOpenAiReview={row.handleOpenAiReview}
+        onRunFetch={handleFetch}
+        fetching={fetchBusy}
+        onRunPull={handlePull}
+        pulling={pullBusy}
+        onRunPush={handlePush}
+        pushing={pushBusy}
+        onOpenStashManager={row.handleOpenStashMgr}
         onOpenBuiltInTerminal={row.handleOpenBuiltInTerminal}
         onRunProjectScript={row.handleRunProjectScript}
         title={project.name}
@@ -593,8 +628,14 @@ const ActionButtons = memo(function ActionButtons({
         onEditDescription={row.handleEditDescription}
         notes={project.notes}
         onEditNotes={row.handleEditNotes}
+        onRefresh={row.handleRefresh}
+        onAssignGroup={onAssignGroup}
+        onEditAlias={onEditAlias}
+        onRemoveProject={row.handleRemove}
+        contextAnchor={contextAnchor}
+        contextOnClose={contextOnClose}
       />
-      <IconButton onClick={row.handleRemove} title="Remove project" hoverColor="red">
+      <IconButton onClick={row.handleRemove} title={t("row.buttons.remove")} hoverColor="red">
         <CloseIcon />
       </IconButton>
     </>
@@ -618,6 +659,7 @@ function RowModals({ detail, row }: { detail: ProjectDetail; row: RowState }) {
             onClose={row.handleCloseLog}
             unpushedCount={detail.status.ahead}
             onRefresh={row.handleGitRefresh}
+            onSuccess={onSuccess}
           />
         </Suspense>
       )}
@@ -660,6 +702,18 @@ function RowModals({ detail, row }: { detail: ProjectDetail; row: RowState }) {
           />
         </Suspense>
       )}
+      {row.stashMgrOpen && (
+        <Suspense fallback={null}>
+          <StashManager
+            path={project.path}
+            open
+            onClose={row.handleCloseStashMgr}
+            onRefresh={row.handleGitRefresh}
+            onSuccess={onSuccess}
+            onError={onError}
+          />
+        </Suspense>
+      )}
     </>
   );
 }
@@ -688,7 +742,8 @@ export const ProjectRowShell = memo(function ProjectRowShell({
   detail,
   children,
 }: ProjectRowShellProps) {
-  const { onSwitchBranch, onRefresh, onRemove, getAnyActiveOp, cancelOp } = useProjectActions();
+  const { onSwitchBranch, onRefresh, onRemove, getAnyActiveOp, cancelOp, onSuccess, onError, onAliasChange } = useProjectActions();
+  const { t } = useTranslation();
 
   // Confirm dialog state for dirty branch switch
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -711,18 +766,18 @@ export const ProjectRowShell = memo(function ProjectRowShell({
     const total = modified + untracked;
     setConfirmMsg(
       <>
-        This project has <strong>{total}</strong> uncommitted change(s).
+        <Trans i18nKey="row.switchMessage.hasChanges" values={{ total }} components={{ strong: <strong /> }} />
         <br />
-        Switching to "<strong>{branch}</strong>" may discard them.
+        <Trans i18nKey="row.switchMessage.mayDiscard" values={{ branch }} components={{ strong: <strong /> }} />
         <br /><br />
-        Do you want to continue?
+        {t("row.switchMessage.continue")}
       </>
     );
     setConfirmOpen(true);
     return new Promise<boolean>((resolve) => {
       confirmResolveRef.current = resolve;
     });
-  }, []);
+  }, [t]);
 
   const handleConfirmProceed = useCallback(() => {
     confirmResolveRef.current?.(true);
@@ -744,6 +799,104 @@ export const ProjectRowShell = memo(function ProjectRowShell({
     onConfirmDirtySwitch: handleConfirmDirtySwitch,
   });
 
+  const contextMenu = useContextMenu();
+
+  // Menu + metadata dialogs opened from the row context menu.
+  const [groupPickerOpen, setGroupPickerOpen] = useState(false);
+  const [assignableGroups, setAssignableGroups] = useState<Group[]>([]);
+  const [loadingGroups, setLoadingGroups] = useState(false);
+  const [groupsError, setGroupsError] = useState<string | null>(null);
+  const [aliasEditorOpen, setAliasEditorOpen] = useState(false);
+  const [aliasValue, setAliasValue] = useState("");
+  const [savingAlias, setSavingAlias] = useState(false);
+
+  const loadGroups = useCallback(async () => {
+    setGroupsError(null);
+    setLoadingGroups(true);
+    try {
+      setAssignableGroups(await listGroups());
+    } catch (e) {
+      setGroupsError(parseError(e));
+    } finally {
+      setLoadingGroups(false);
+    }
+  }, []);
+
+  const openGroupPicker = useCallback(() => {
+    setGroupPickerOpen(true);
+    void loadGroups();
+  }, [loadGroups]);
+
+  const handleAssignGroup = useCallback(
+    async (groupId: string) => {
+      try {
+        await assignToGroup(detail.project.id, groupId);
+        await row.handleGitRefresh();
+        setGroupPickerOpen(false);
+        onSuccess(t("row.group.updated"));
+      } catch (e) {
+        onError(parseError(e));
+      }
+    },
+    [detail.project.id, row.handleGitRefresh, onSuccess, onError, t]
+  );
+
+  const openAliasEditor = useCallback(() => {
+    setAliasValue(detail.project.alias ?? "");
+    setAliasEditorOpen(true);
+  }, [detail.project.alias]);
+
+  const handleSaveAlias = useCallback(async () => {
+    const next = aliasValue.trim();
+    setSavingAlias(true);
+    try {
+      if (onAliasChange) await onAliasChange(detail.project.id, next);
+      else await setProjectAlias(detail.project.id, next);
+      setAliasEditorOpen(false);
+      onSuccess(next ? t("row.alias.set", { name: next }) : t("row.alias.cleared"));
+    } catch (e) {
+      onError(parseError(e));
+    } finally {
+      setSavingAlias(false);
+    }
+  }, [aliasValue, onAliasChange, detail.project.id, onSuccess, onError, t]);
+
+  // Right-clicking interactive controls (or a text selection) keeps the native
+  // menu; useContextMenu also bails out when text is selected.
+  const onRowContextMenu = useCallback(
+    (e: React.MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest(ROW_MENU_SKIP)) {
+        return;
+      }
+      contextMenu.onContextMenu(e);
+    },
+    [contextMenu.onContextMenu]
+  );
+
+  // Shift+F10 / the ContextMenu key mirrors the mouse path: same skip rule,
+  // menu anchored just inside the row's top-left corner, row takes focus.
+  const onRowKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key !== "ContextMenu" && !(e.key === "F10" && e.shiftKey)) return;
+      const target = e.target as HTMLElement | null;
+      if (target?.closest(ROW_MENU_SKIP)) return;
+      const rowEl = e.currentTarget as HTMLElement;
+      const rect = rowEl.getBoundingClientRect();
+      e.preventDefault();
+      rowEl.focus();
+      rowEl.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: rect.left + 8,
+          clientY: rect.top + 8,
+        })
+      );
+    },
+    []
+  );
+
   // Check for any active git operation on this project
   const activeOp = getAnyActiveOp
     ? getAnyActiveOp(detail.project.path)
@@ -754,18 +907,112 @@ export const ProjectRowShell = memo(function ProjectRowShell({
     ? <ActiveOpBanner op={activeOp} onCancel={cancelOp ? () => cancelOp(activeOp.id) : undefined} />
     : null;
 
-  const actionButtons = <ActionButtons detail={detail} row={row} />;
+  const actionButtons = (
+    <ActionButtons
+      detail={detail}
+      row={row}
+      contextAnchor={contextMenu.anchor}
+      contextOnClose={contextMenu.close}
+      onAssignGroup={openGroupPicker}
+      onEditAlias={openAliasEditor}
+    />
+  );
   const errorBanner = <ErrorBanner error={row.error} />;
 
   return (
     <>
-      {children({ detail, row, actionButtons, errorBanner, activeOpIndicator, hasActiveOp })}
+      {children({ detail, row, actionButtons, errorBanner, activeOpIndicator, hasActiveOp, onRowContextMenu, onRowKeyDown })}
       <RowModals detail={detail} row={row} />
+      <Modal
+        open={groupPickerOpen}
+        onClose={() => setGroupPickerOpen(false)}
+        title={t("row.group.title")}
+        subtitle={detail.project.name}
+        width="sm"
+        compact
+      >
+        <div className="p-2 space-y-0.5">
+          {loadingGroups ? (
+            <p className="px-2 py-1.5 text-sm text-gray-500 dark:text-gray-400">{t("groups.loading")}</p>
+          ) : groupsError ? (
+            <div className="px-2 py-1.5 space-y-1.5">
+              <p className="text-sm text-red-600 dark:text-red-400">{t("groups.loadFailed")}</p>
+              <button
+                type="button"
+                onClick={() => void loadGroups()}
+                className="text-xs px-2 py-1 rounded-lg border border-(--border-color) text-gray-600 dark:text-gray-300 hover:bg-[var(--surface-2)] transition-colors"
+              >
+                {t("groups.retry")}
+              </button>
+            </div>
+          ) : assignableGroups.length === 0 ? (
+            <p className="px-2 py-1.5 text-sm text-gray-500 dark:text-gray-400">{t("row.group.empty")}</p>
+          ) : (
+            assignableGroups.map((g) => (
+              <button
+                key={g.id}
+                type="button"
+                onClick={() => handleAssignGroup(g.id)}
+                className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+                  g.id === detail.project.group_id
+                    ? "bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400"
+                    : "text-gray-700 dark:text-gray-200 hover:bg-[var(--surface-2)]"
+                }`}
+              >
+                {g.name}
+              </button>
+            ))
+          )}
+        </div>
+      </Modal>
+      <Modal
+        open={aliasEditorOpen}
+        onClose={() => setAliasEditorOpen(false)}
+        title={t("row.alias.title")}
+        subtitle={detail.project.name}
+        width="sm"
+        compact
+      >
+        <div className="p-4 space-y-3">
+          <input
+            type="text"
+            value={aliasValue}
+            onChange={(e) => setAliasValue(e.target.value.slice(0, 100))}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void handleSaveAlias();
+              }
+            }}
+            maxLength={100}
+            disabled={savingAlias}
+            placeholder={t("row.alias.placeholder")}
+            className="w-full text-sm px-2 py-1.5 rounded-lg border border-(--border-color) bg-[var(--surface-2)] text-gray-900 dark:text-gray-100 outline-none focus:ring-1 focus:ring-blue-400"
+          />
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setAliasEditorOpen(false)}
+              className="px-3 py-1.5 rounded-lg text-sm text-gray-500 hover:bg-[var(--surface-2)] transition-colors"
+            >
+              {t("common.cancel")}
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleSaveAlias()}
+              disabled={savingAlias}
+              className="px-3 py-1.5 rounded-lg text-sm bg-blue-500 hover:bg-blue-600 text-white disabled:opacity-50 transition-colors"
+            >
+              {savingAlias ? t("row.savingEllipsis") : t("common.save")}
+            </button>
+          </div>
+        </div>
+      </Modal>
       <ConfirmDialog
         open={confirmOpen}
-        title="Uncommitted Changes"
+        title={t("row.switch.title")}
         message={confirmMsg}
-        confirmLabel="Switch Branch"
+        confirmLabel={t("row.switch.confirm")}
         confirmColor="blue"
         onConfirm={handleConfirmProceed}
         onCancel={handleConfirmCancel}

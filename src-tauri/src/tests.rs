@@ -121,3 +121,38 @@ fn persists_task_workspace_entries_with_the_retain_current_strategy() {
         TaskWorkspaceStatus::Archived
     );
 }
+
+#[test]
+fn tray_recent_projects_rank_by_open_recency() {
+    use tempfile::tempdir;
+
+    use crate::db::Database;
+    use crate::models::GitProject;
+
+    let directory = tempdir().unwrap();
+    let database = Database::new(&directory.path().to_path_buf()).unwrap();
+    let group = database.get_all_groups().unwrap().remove(0);
+    let first = GitProject::new(
+        "first".to_string(),
+        "/tmp/tray-first".to_string(),
+        group.id.clone(),
+    );
+    let second = GitProject::new(
+        "second".to_string(),
+        "/tmp/tray-second".to_string(),
+        group.id,
+    );
+    database.insert_project(&first).unwrap();
+    database.insert_project(&second).unwrap();
+
+    database.touch_project_opened(&first.id).unwrap();
+
+    let recent = database.get_recent_projects(5).unwrap();
+    assert_eq!(recent.len(), 2);
+    assert_eq!(recent[0].id, first.id);
+    assert_eq!(recent[1].id, second.id);
+
+    let limited = database.get_recent_projects(1).unwrap();
+    assert_eq!(limited.len(), 1);
+    assert_eq!(limited[0].id, first.id);
+}

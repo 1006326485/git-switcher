@@ -1,8 +1,10 @@
 import { memo, useCallback, useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
 import TerminalWorkspace from "./components/TerminalWorkspace";
 import { getSettings, terminalWindowDismiss } from "./lib/tauri";
 import { formatHotkey } from "./lib/hotkey";
+import { syncLanguageFromSettings } from "./hooks/useLanguage";
 
 /**
  * Standalone terminal window summoned by the global hotkey — terminal UI only,
@@ -40,6 +42,29 @@ export const TerminalWindowApp = memo(function TerminalWindowApp() {
     window.addEventListener("blur", onBlur);
     return () => window.removeEventListener("blur", onBlur);
   }, [hideOnBlur]);
+
+  // The main window persists settings through the backend; pick up a language
+  // change saved there without waiting for the next summon.
+  useEffect(() => {
+    const unlisten = listen("settings-changed", () => {
+      void syncLanguageFromSettings();
+    });
+    return () => {
+      unlisten.then((f) => f());
+    };
+  }, []);
+
+  // Cmd+W / Ctrl+W dismisses this window like the summon hotkey does.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "w") {
+        e.preventDefault();
+        hideWindow();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [hideWindow]);
 
   return (
     <div className="app-root h-screen flex flex-col overflow-hidden rounded-xl ring-1 ring-black/10 dark:ring-white/10 bg-[var(--surface-0)]">

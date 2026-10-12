@@ -1238,13 +1238,19 @@ pub async fn git_set_remote_url(path: String, name: String, url: String) -> Resu
 type BatchOperation = fn(&[String]) -> Vec<(String, Result<String, AppError>)>;
 type StatusFilter = fn(&GitStatus) -> bool;
 
-fn run_batch_sync(
+/// Success/failure tallies for one batch run, used for tray feedback.
+pub(crate) struct BatchOutcome {
+    pub ok: usize,
+    pub failed: usize,
+}
+
+pub(crate) fn run_batch_sync(
     app: &AppHandle,
     db: &Database,
     label: &str,
     group_id: Option<&str>,
     op: BatchOperation,
-) -> Result<(), AppError> {
+) -> Result<BatchOutcome, AppError> {
     let projects = match group_id {
         Some(gid) => db.get_projects_in_group(gid)?,
         None => db.get_all_projects()?,
@@ -1252,7 +1258,13 @@ fn run_batch_sync(
     let paths: Vec<String> = projects.iter().map(|p| p.path.clone()).collect();
 
     let results = op(&paths);
+    let mut outcome = BatchOutcome { ok: 0, failed: 0 };
     for (name, result) in results {
+        if result.is_ok() {
+            outcome.ok += 1;
+        } else {
+            outcome.failed += 1;
+        }
         let batch_result = BatchResult {
             project_name: name,
             success: result.is_ok(),
@@ -1266,7 +1278,7 @@ fn run_batch_sync(
         log::error!("failed to emit batch-done: {}", e);
     }
 
-    Ok(())
+    Ok(outcome)
 }
 
 #[tauri::command]
@@ -1277,7 +1289,7 @@ pub async fn fetch_all(
 ) -> Result<(), AppError> {
     let db = db.inner().clone();
     let app_clone = app.clone();
-    tokio::task::spawn_blocking(move || -> Result<(), AppError> {
+    tokio::task::spawn_blocking(move || -> Result<BatchOutcome, AppError> {
         run_batch_sync(
             &app_clone,
             &db,
@@ -1288,6 +1300,7 @@ pub async fn fetch_all(
     })
     .await
     .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
+    .map(|_| ())
 }
 
 /// Auto-fetch all projects on launch. Skips recently fetched repos.
@@ -1325,7 +1338,7 @@ pub async fn pull_all(
 ) -> Result<(), AppError> {
     let db = db.inner().clone();
     let app_clone = app.clone();
-    tokio::task::spawn_blocking(move || -> Result<(), AppError> {
+    tokio::task::spawn_blocking(move || -> Result<BatchOutcome, AppError> {
         run_batch_sync(
             &app_clone,
             &db,
@@ -1336,6 +1349,7 @@ pub async fn pull_all(
     })
     .await
     .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
+    .map(|_| ())
 }
 
 #[tauri::command]
@@ -1346,7 +1360,7 @@ pub async fn push_all(
 ) -> Result<(), AppError> {
     let db = db.inner().clone();
     let app_clone = app.clone();
-    tokio::task::spawn_blocking(move || -> Result<(), AppError> {
+    tokio::task::spawn_blocking(move || -> Result<BatchOutcome, AppError> {
         run_batch_sync(
             &app_clone,
             &db,
@@ -1357,6 +1371,7 @@ pub async fn push_all(
     })
     .await
     .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
+    .map(|_| ())
 }
 
 fn run_batch_filtered(
@@ -1366,7 +1381,7 @@ fn run_batch_filtered(
     group_id: Option<&str>,
     filter: StatusFilter,
     op: BatchOperation,
-) -> Result<(), AppError> {
+) -> Result<BatchOutcome, AppError> {
     let projects = match group_id {
         Some(gid) => db.get_projects_in_group(gid)?,
         None => db.get_all_projects()?,
@@ -1386,15 +1401,21 @@ fn run_batch_filtered(
         }
     }
 
+    let mut outcome = BatchOutcome { ok: 0, failed: 0 };
     if filtered.is_empty() {
         if let Err(e) = app.emit("batch-done", label) {
             log::error!("failed to emit batch-done: {}", e);
         }
-        return Ok(());
+        return Ok(outcome);
     }
 
     let results = op(&filtered);
     for (name, result) in results {
+        if result.is_ok() {
+            outcome.ok += 1;
+        } else {
+            outcome.failed += 1;
+        }
         let batch_result = BatchResult {
             project_name: name,
             success: result.is_ok(),
@@ -1408,7 +1429,7 @@ fn run_batch_filtered(
         log::error!("failed to emit batch-done: {}", e);
     }
 
-    Ok(())
+    Ok(outcome)
 }
 
 fn behind_filter(s: &GitStatus) -> bool {
@@ -1426,7 +1447,7 @@ pub async fn pull_behind(
 ) -> Result<(), AppError> {
     let db = db.inner().clone();
     let app_clone = app.clone();
-    tokio::task::spawn_blocking(move || -> Result<(), AppError> {
+    tokio::task::spawn_blocking(move || -> Result<BatchOutcome, AppError> {
         run_batch_filtered(
             &app_clone,
             &db,
@@ -1438,6 +1459,7 @@ pub async fn pull_behind(
     })
     .await
     .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
+    .map(|_| ())
 }
 
 #[tauri::command]
@@ -1448,7 +1470,7 @@ pub async fn push_ahead(
 ) -> Result<(), AppError> {
     let db = db.inner().clone();
     let app_clone = app.clone();
-    tokio::task::spawn_blocking(move || -> Result<(), AppError> {
+    tokio::task::spawn_blocking(move || -> Result<BatchOutcome, AppError> {
         run_batch_filtered(
             &app_clone,
             &db,
@@ -1460,6 +1482,7 @@ pub async fn push_ahead(
     })
     .await
     .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
+    .map(|_| ())
 }
 
 // ── Sync operations ──────────────────────────────────────────────────────
@@ -1530,7 +1553,7 @@ pub async fn sync_all(
 ) -> Result<(), AppError> {
     let db = db.inner().clone();
     let app_clone = app.clone();
-    tokio::task::spawn_blocking(move || -> Result<(), AppError> {
+    tokio::task::spawn_blocking(move || -> Result<BatchOutcome, AppError> {
         run_batch_sync(
             &app_clone,
             &db,
@@ -1541,6 +1564,7 @@ pub async fn sync_all(
     })
     .await
     .map_err(|e| AppError::Other(format!("Task failed: {}", e)))?
+    .map(|_| ())
 }
 
 // ── Cancellation ──────────────────────────────────────────────────────

@@ -1,4 +1,5 @@
-import { useMemo, useCallback, memo } from "react";
+import { useMemo, useCallback, useEffect, useRef, memo } from "react";
+import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import { useDropdownPortal } from "../../hooks/useDropdownPortal";
 
@@ -8,6 +9,9 @@ export interface SelectOption {
   disabled?: boolean;
   hint?: string;
   hintStyle?: "badge" | "text";
+  /** Machine token for the hint badge color; when present the color
+      decision uses this instead of the translated `hint` text. */
+  hintKind?: "merged" | "unmerged";
 }
 
 interface SelectDropdownProps {
@@ -19,20 +23,25 @@ interface SelectDropdownProps {
   className?: string;
   ariaLabel?: string;
   size?: "md" | "sm";
+  /** Increment to programmatically open the menu (e.g. from a hotkey). */
+  openSignal?: number;
 }
 
 export const SelectDropdown = memo(function SelectDropdown({
   options,
   value,
   onChange,
-  placeholder = "Select...",
+  placeholder,
   disabled,
   className,
   ariaLabel,
   size = "md",
+  openSignal,
 }: SelectDropdownProps) {
+  const { t } = useTranslation();
+  const defaultPlaceholder = t("ui.select.placeholder");
   const {
-    open, search, setSearch, activeIndex, setActiveIndex,
+    open, setOpen, search, setSearch, activeIndex, setActiveIndex,
     pos, triggerRef, inputRef, listRef, portalRef,
     close, toggle, handleKeyDown,
   } = useDropdownPortal({ minWidth: 260 });
@@ -59,6 +68,13 @@ export const SelectDropdown = memo(function SelectDropdown({
     if (!disabled) toggle();
   }, [disabled, toggle]);
 
+  const lastOpenSignal = useRef(0);
+  useEffect(() => {
+    if (openSignal == null || openSignal <= lastOpenSignal.current) return;
+    lastOpenSignal.current = openSignal;
+    if (!disabled) setOpen(true);
+  }, [openSignal, disabled, setOpen]);
+
   return (
     <div ref={triggerRef} className={`relative ${className ?? ""}`}>
       <button
@@ -77,7 +93,7 @@ export const SelectDropdown = memo(function SelectDropdown({
         <span
           className={`truncate flex-1 text-left ${selectedLabel || size === "sm" ? "" : "text-gray-400"}`}
         >
-          {selectedLabel || placeholder}
+          {selectedLabel || placeholder || defaultPlaceholder}
         </span>
         <span className="text-gray-400 shrink-0">&#x25BE;</span>
       </button>
@@ -96,8 +112,8 @@ export const SelectDropdown = memo(function SelectDropdown({
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 onKeyDown={(e) => handleKeyDown(e, selectOption, filtered.length)}
-                placeholder="Search..."
-                aria-label="Search options"
+                placeholder={t("ui.select.searchPlaceholder")}
+                aria-label={t("ui.select.searchOptions")}
                 autoCapitalize="off"
                 autoCorrect="off"
                 autoComplete="off"
@@ -106,10 +122,10 @@ export const SelectDropdown = memo(function SelectDropdown({
               />
             </div>
           )}
-          <div ref={listRef} role="listbox" aria-label="Options" className="overflow-y-auto max-h-65">
+          <div ref={listRef} role="listbox" aria-label={t("ui.select.options")} className="overflow-y-auto max-h-65">
             {filtered.length === 0 ? (
               <div className="px-3 py-4 text-sm text-gray-500 dark:text-gray-400 text-center">
-                No options found
+                {t("ui.select.noOptions")}
               </div>
             ) : (
               filtered.map((opt, i) => {

@@ -33,15 +33,17 @@ import { useCommandPalette } from "./hooks/useCommandPalette";
 import { useRecentProjects } from "./hooks/useRecentProjects";
 import { useGitOpTracker } from "./hooks/useGitOpTracker";
 import { useOperationHistory } from "./hooks/useOperationHistory";
+import { syncLanguageFromSettings } from "./hooks/useLanguage";
 import type { ViewMode, SortOption, RunPresetItem } from "./lib/types";
 import { parseError, isBenignFetchFailure, createErrorAggregator } from "./lib/types";
 import { setRecentCommand } from "./lib/recentCommands";
 import type { DashboardFilter } from "./components/DashboardView";
 import { gitFetch, gitPull, gitPush, gitStash, getSettings, onDragDropEnter, onDragDropLeave, onDragDropResult, logOperation } from "./lib/tauri";
+import { useTranslation } from "react-i18next";
 import { Modal, scrimAnimation } from "./components/ui/primitives";
-import { useScrollEdge } from "./hooks/useScrollEdge";
 
 export default function App() {
+  const { t } = useTranslation();
   const { theme, setTheme } = useTheme();
   const rawToast = useToast();
   const toastSinkRef = useRef(rawToast.error);
@@ -90,22 +92,7 @@ export default function App() {
   const [exportArchiveOpen, setExportArchiveOpen] = useState(false);
   const [exportArchivePath, setExportArchivePath] = useState("");
   const scrollParentRef = useRef<HTMLElement>(null);
-  const mainScrolled = useScrollEdge(scrollParentRef);
-  const headerRef = useRef<HTMLDivElement>(null);
-  const [headerHeight, setHeaderHeight] = useState(52);
 
-  // Content scrolls *underneath* the material header (chrome-overlay
-  // layout): the header floats above the scroll area, and main's top
-  // padding tracks the header's live height so nothing starts hidden.
-  useEffect(() => {
-    const el = headerRef.current;
-    if (!el) return;
-    const update = () => setHeaderHeight(el.getBoundingClientRect().height);
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    update();
-    return () => ro.disconnect();
-  }, []);
   const [focusIndex, setFocusIndex] = useState(-1);
   const [dragOver, setDragOver] = useState(false);
 
@@ -156,16 +143,27 @@ export default function App() {
     });
     const unlistenHidden = listen("window-hidden-to-tray", () => {
       if (!localStorage.getItem("tray-hint-shown")) {
-        toastRef.current.info("App running in background");
+        toastRef.current.info(t("app.backgroundHint"));
         localStorage.setItem("tray-hint-shown", "1");
       }
+    });
+    // Global terminal hotkey while this window is focused — see hotkeys::handle_terminal_hotkey.
+    const unlistenTerminal = listen("toggle-builtin-terminal", () => {
+      setTerminalPanelOpen((v) => !v);
+    });
+    // The Settings page persists the language through the backend; when the
+    // terminal window is the one that saved, this window learns about it here.
+    const unlistenSettings = listen("settings-changed", () => {
+      void syncLanguageFromSettings();
     });
     return () => {
       unlistenRefresh.then((f) => f());
       unlistenTrayRefresh.then((f) => f());
       unlistenHidden.then((f) => f());
+      unlistenTerminal.then((f) => f());
+      unlistenSettings.then((f) => f());
     };
-  }, [refreshAll]);
+  }, [refreshAll, t]);
 
   // ── Drag & drop import ───────────────────────────────────────────────
   useEffect(() => {
@@ -198,7 +196,7 @@ export default function App() {
     return () => {
       unlistenFns.forEach((f) => f());
     };
-  }, [refreshAll]);
+  }, [refreshAll, t]);
 
   const { cancelOp, isOpActive, getActiveOp, getAnyActiveOp } = useGitOpTracker();
 
@@ -359,15 +357,15 @@ export default function App() {
       if (localStorage.getItem("skip-remove-confirm") === "skip") {
         try {
           await removeProject(id);
-          toastRef.current.success(`Removed "${project.project.name}"`);
+          toastRef.current.success(t("app.projectRemoved", { name: project.project.name }));
         } catch (e) {
-          toastRef.current.error(`Failed to remove: ${e}`);
+          toastRef.current.error(t("app.removeFailed", { error: parseError(e) }));
         }
       } else {
         setConfirmDelete({ id, name: project.project.name });
       }
     }
-  }, [removeProject]);
+  }, [removeProject, t]);
 
   const confirmDeleteRef = useRef(confirmDelete);
   confirmDeleteRef.current = confirmDelete;
@@ -377,12 +375,12 @@ export default function App() {
     if (!item) return;
     try {
       await removeProject(item.id);
-      toastRef.current.success(`Removed "${item.name}"`);
+      toastRef.current.success(t("app.projectRemoved", { name: item.name }));
     } catch (e) {
-      toastRef.current.error(`Failed to remove: ${e}`);
+      toastRef.current.error(t("app.removeFailed", { error: parseError(e) }));
     }
     setConfirmDelete(null);
-  }, [removeProject]);
+  }, [removeProject, t]);
 
   const handleAddProject = useCallback(() => setDialogOpen(true), []);
   const handleToggleSidebar = useCallback(() => setShowSidebar((s) => {
@@ -524,36 +522,36 @@ export default function App() {
       await gitFetch(path);
       await refreshProject(path);
       logOperation("fetch", path, undefined, undefined, "success").catch(() => {});
-      toastRef.current.success("Fetch completed");
+      toastRef.current.success(t("app.fetchCompleted"));
     } catch (e) {
-      logOperation("fetch", path, undefined, undefined, "error", String(e)).catch(() => {});
-      toastRef.current.error(`Fetch failed: ${e}`, undefined, e, path);
+      logOperation("fetch", path, undefined, undefined, "error", parseError(e)).catch(() => {});
+      toastRef.current.error(t("app.fetchFailed", { error: parseError(e) }), undefined, e, path);
     }
-  }, [refreshProject]);
+  }, [refreshProject, t]);
 
   const handlePullProject = useCallback(async (path: string) => {
     try {
       await gitPull(path);
       await refreshProject(path);
       logOperation("pull", path, undefined, undefined, "success").catch(() => {});
-      toastRef.current.success("Pull completed");
+      toastRef.current.success(t("app.pullCompleted"));
     } catch (e) {
-      logOperation("pull", path, undefined, undefined, "error", String(e)).catch(() => {});
-      toastRef.current.error(`Pull failed: ${e}`, undefined, e, path);
+      logOperation("pull", path, undefined, undefined, "error", parseError(e)).catch(() => {});
+      toastRef.current.error(t("app.pullFailed", { error: parseError(e) }), undefined, e, path);
     }
-  }, [refreshProject]);
+  }, [refreshProject, t]);
 
   const handlePushProject = useCallback(async (path: string) => {
     try {
       await gitPush(path);
       await refreshProject(path);
       logOperation("push", path, undefined, undefined, "success").catch(() => {});
-      toastRef.current.success("Push completed");
+      toastRef.current.success(t("app.pushCompleted"));
     } catch (e) {
-      logOperation("push", path, undefined, undefined, "error", String(e)).catch(() => {});
-      toastRef.current.error(`Push failed: ${e}`, undefined, e, path);
+      logOperation("push", path, undefined, undefined, "error", parseError(e)).catch(() => {});
+      toastRef.current.error(t("app.pushFailed", { error: parseError(e) }), undefined, e, path);
     }
-  }, [refreshProject]);
+  }, [refreshProject, t]);
 
   const handleToastAction = useCallback(async (actionType: string, path?: string) => {
     if (!path) return;
@@ -562,20 +560,20 @@ export default function App() {
         case "pull":
           await gitPull(path);
           await refreshProject(path);
-          toastRef.current.success("Pull completed");
+          toastRef.current.success(t("app.pullCompleted"));
           break;
         case "fetch":
           await gitFetch(path);
           await refreshProject(path);
-          toastRef.current.success("Fetch completed");
+          toastRef.current.success(t("app.fetchCompleted"));
           break;
         case "stash":
           await gitStash(path);
           await refreshProject(path);
-          toastRef.current.success("Changes stashed");
+          toastRef.current.success(t("app.changesStashed"));
           break;
         case "abort_merge":
-          toastRef.current.info("Use 'git merge --abort' in terminal to abort the merge");
+          toastRef.current.info(t("app.abortMergeHint"));
           break;
         case "resolve_conflicts":
           setConflictResolvePath(path);
@@ -584,9 +582,9 @@ export default function App() {
           break;
       }
     } catch (e) {
-      toastRef.current.error(`Action failed: ${e}`);
+      toastRef.current.error(t("app.actionFailed", { error: parseError(e) }));
     }
-  }, [refreshProject]);
+  }, [refreshProject, t]);
 
   // Keyboard shortcuts — Escape stays here (closes multiple dialogs)
   useEffect(() => {
@@ -633,20 +631,27 @@ export default function App() {
         }
       }
 
-      if (e.key === "Escape") {
+      // Escape or Cmd+W closes whatever dialog/panel is open.
+      if (e.key === "Escape" || ((e.metaKey || e.ctrlKey) && e.key === "w")) {
+        if (e.key === "w") e.preventDefault();
         setDialogOpen(false);
         setConfirmDelete(null);
         setExportImportOpen(false);
+        setExportArchiveOpen(false);
         setBulkImportOpen(false);
         setSettingsOpen(false);
         setPaletteOpen(false);
         setShortcutsHelpOpen(false);
         setQuickDiffOpen(false);
+        setTaskWorkspacesOpen(false);
+        setConflictResolvePath(null);
+        setBatchPickerOpen(false);
+        handleCloseTerminalPanel();
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [setViewMode, refreshAll, fetchAll]);
+  }, [setViewMode, refreshAll, fetchAll, handleCloseTerminalPanel]);
 
   // Project keyboard navigation (↑/↓/Enter/Space)
   useEffect(() => {
@@ -724,7 +729,7 @@ export default function App() {
   );
 
   return (
-    <div className="app-root h-screen min-w-0 bg-[var(--surface-0)] flex flex-col">
+    <div className="app-root window-root h-screen min-w-0 flex flex-col">
       {/* Title bar — draggable top band of the unified window chrome */}
       <div
         data-tauri-drag-region
@@ -739,16 +744,15 @@ export default function App() {
             <svg className="w-10 h-10 text-[var(--accent)]" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V9.75m0 0 3 3m-3-3-3 3M6.75 19.5a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z" />
             </svg>
-            <span className="text-base font-medium text-[var(--text-1)]">Drop folders to import</span>
-            <span className="text-xs text-[var(--text-2)]">Git repositories will be detected automatically</span>
+            <span className="text-base font-medium text-[var(--text-1)]">{t("app.dropFolders")}</span>
+            <span className="text-xs text-[var(--text-2)]">{t("app.dropFoldersHint")}</span>
           </div>
         </div>
       )}
 
       <ProjectProvider value={projectActions}>
         <div
-          className="flex flex-1 min-w-0 overflow-hidden"
-          style={{ "--header-h": `${headerHeight}px` } as React.CSSProperties}
+          className="flex flex-1 min-w-0 overflow-hidden p-[var(--panel-gap)] gap-[var(--panel-gap)]"
         >
           {/* Sidebar: docked on wide windows, drawer on narrow windows. */}
           {showSidebar && (
@@ -756,17 +760,10 @@ export default function App() {
               <button
                 type="button"
                 className={`fixed inset-0 top-[var(--titlebar-h)] z-30 bg-black/30 lg:hidden ${scrimAnimation}`}
-                aria-label="Close sidebar"
+                aria-label={t("app.closeSidebar")}
                 onClick={handleToggleSidebar}
               />
-              <aside className="chrome fixed inset-y-0 left-0 top-[var(--titlebar-h)] z-40 w-72 max-w-[85vw] overflow-y-auto p-4 shadow-2xl animate-[drawerIn_280ms_var(--ease-spring)] lg:relative lg:top-auto lg:z-auto lg:w-56 lg:max-w-none lg:shrink-0 lg:shadow-none lg:animate-none">
-                {/* Depth wash along the chrome/content boundary — starts
-                  * below the menu bar so the chrome corner stays seamless;
-                  * replaces a hard border-r */}
-                <div
-                  aria-hidden
-                  className="pointer-events-none absolute right-0 bottom-0 top-[var(--header-h,3.25rem)] hidden w-8 bg-gradient-to-r from-transparent to-black/5 dark:to-white/5 lg:block"
-                />
+              <aside className="app-panel fixed bottom-[var(--panel-gap)] left-[var(--panel-gap)] top-[calc(var(--titlebar-h)+var(--panel-gap))] z-40 w-72 max-w-[85vw] overflow-y-auto p-4 animate-[drawerIn_280ms_var(--ease-spring)] lg:relative lg:bottom-auto lg:left-auto lg:top-auto lg:z-auto lg:w-56 lg:max-w-none lg:shrink-0 lg:animate-none">
                 <ProjectGroupsPanel
                   activeGroup={activeGroup}
                   onGroupChange={handleGroupChange}
@@ -778,9 +775,9 @@ export default function App() {
           )}
 
         {/* Main area: toolbar + content */}
-        <div className="relative flex-1 min-w-0 flex flex-col overflow-hidden">
-          {/* Menu bar (floating chrome) — content scrolls beneath it */}
-          <div ref={headerRef} className="absolute inset-x-0 top-0 z-20">
+        <div className="relative flex-1 min-w-0 flex flex-col overflow-hidden gap-[var(--panel-gap)]">
+          {/* Menu bar — 流内 header 面板，内容不再从其下方滚过 */}
+          <div className="app-panel shrink-0 z-20">
             <Header
             projectCount={sortedProjects.length}
             totalCount={projects.length}
@@ -817,15 +814,13 @@ export default function App() {
             needsAttention={needsAttention}
             onAttentionClick={handleAttentionClick}
             onOpenShortcutsHelp={handleOpenShortcutsHelp}
-            elevated={mainScrolled}
           />
           </div>
 
           {/* Main content */}
           <main
             ref={scrollParentRef}
-            style={{ paddingTop: "calc(var(--header-h, 3.25rem) + 0.75rem)" }}
-            className="flex-1 min-w-0 overflow-y-auto bg-[var(--surface-0)] px-3 pb-3 sm:px-4 sm:pb-4 lg:px-6 lg:pb-6"
+            className="app-panel flex-1 min-h-[240px] min-w-0 overflow-y-auto px-3 pt-3 pb-3 sm:px-4 sm:pt-4 sm:pb-4 lg:px-6 lg:pt-6 lg:pb-6"
           >
             <ErrorBoundary>
               <OfflineBanner
@@ -870,16 +865,16 @@ export default function App() {
       <Suspense fallback={null}>
         <ConfirmDialog
           open={confirmDelete !== null}
-          title="Remove Project"
+          title={t("app.removeTitle")}
           skipKey="skip-remove-confirm"
           message={
             <>
-              Are you sure you want to remove{" "}
+              {t("app.removeConfirmPrefix")}{" "}
               <span className="font-semibold text-(--accent)">{confirmDelete?.name}</span>
-              ? This only removes it from the app, not from disk.
+              ? {t("app.removeConfirmSuffix")}
             </>
           }
-          confirmLabel="Remove"
+          confirmLabel={t("common.remove")}
           onConfirm={handleConfirmDelete}
           onCancel={handleCancelDelete}
         />
@@ -940,7 +935,7 @@ export default function App() {
 
       <Suspense fallback={null}>
         {conflictResolvePath && (
-          <Modal open onClose={() => setConflictResolvePath(null)} title="Resolve conflicts" maxWidth="max-w-2xl">
+          <Modal open onClose={() => setConflictResolvePath(null)} title={t("app.resolveConflicts")} width="xl">
             <div className="p-3">
               <Suspense fallback={null}>
                 <ConflictResolver
@@ -984,7 +979,7 @@ export default function App() {
         <ScriptPickerDialog
           open={batchPickerOpen}
           projectPath={projects[0]?.project.path ?? ""}
-          projectTitle="All projects"
+          projectTitle={t("app.allProjects")}
           targets={projects.map((p) => ({ path: p.project.path, title: p.project.name }))}
           onRun={handleBatchRun}
           onClose={() => setBatchPickerOpen(false)}

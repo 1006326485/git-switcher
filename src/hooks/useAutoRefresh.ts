@@ -1,6 +1,8 @@
 import { useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getSettings } from "../lib/tauri";
+import { parseError } from "../lib/types";
+import { t as translate } from "../lib/i18n";
 import type { GitOpEvent } from "../lib/types";
 
 export function useAutoRefresh(
@@ -71,7 +73,7 @@ export function useAutoRefresh(
           };
         }
       })
-      .catch((e) => onError(`Failed to load settings: ${e}`));
+      .catch((e) => onError(translate("errors.loadAutoRefresh", { error: parseError(e) })));
 
     return () => {
       cancelled = true;

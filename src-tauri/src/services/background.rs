@@ -98,7 +98,7 @@ impl BackgroundService {
     }
 
     /// Perform a silent fetch across all projects and return counts.
-    fn do_refresh(db: &Database) -> RefreshCounts {
+    pub(crate) fn do_refresh(db: &Database) -> RefreshCounts {
         let projects = match db.get_all_projects() {
             Ok(p) => p,
             Err(_) => {

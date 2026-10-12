@@ -1,4 +1,5 @@
 import { memo, useState, useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import type { Toast as ToastType } from "../hooks/useToast";
 import type { UndoPrompt } from "../hooks/useOperationHistory";
 import { ErrorRecoveryBanner } from "./ErrorRecoveryBanner";
@@ -53,6 +54,7 @@ function ToastItem({
   onResume?: (id: string) => void;
   onAction?: (actionType: string, path?: string) => void;
 }) {
+  const { t } = useTranslation();
   const [paused, setPaused] = useState(false);
   const [progress, setProgress] = useState(100);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -101,15 +103,15 @@ function ToastItem({
         <span className="text-base">{typeIcons[toast.type]}</span>
         <span className="flex-1">{toast.message}</span>
         {paused && (
-          <span className="text-xs opacity-60">Paused</span>
+          <span className="text-xs opacity-60">{t("toast.paused")}</span>
         )}
         {hasSuggestions && (
           <button
             onClick={() => setShowSuggestions((v) => !v)}
-            aria-label={showSuggestions ? "Hide recovery suggestions" : "Show recovery suggestions"}
+            aria-label={showSuggestions ? t("toast.hideSuggestions") : t("toast.showSuggestions")}
             className="ml-1 px-2 py-0.5 rounded text-xs font-semibold bg-amber-200 dark:bg-amber-800 text-amber-800 dark:text-amber-200 hover:bg-amber-300 dark:hover:bg-amber-700 transition-colors"
           >
-            {showSuggestions ? "Hide fixes" : "Fixes"}
+            {showSuggestions ? t("toast.hideFixes") : t("toast.fixes")}
           </button>
         )}
         {toast.type === "error" && toast.retry && (
@@ -121,15 +123,15 @@ function ToastItem({
               }
               onRemove(toast.id);
             }}
-            aria-label="Retry failed operation"
+            aria-label={t("toast.retryFailed")}
             className="ml-1 px-2 py-0.5 rounded text-xs font-semibold bg-red-200 dark:bg-red-800 text-red-800 dark:text-red-200 hover:bg-red-300 dark:hover:bg-red-700 transition-colors"
           >
-            Retry
+            {t("common.retry")}
           </button>
         )}
         <button
           onClick={() => onRemove(toast.id)}
-          aria-label="Dismiss notification"
+          aria-label={t("toast.dismiss")}
           className="ml-2 opacity-60 hover:opacity-100 transition-opacity"
         >
           ✕

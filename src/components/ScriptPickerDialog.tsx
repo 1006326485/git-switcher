@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import * as api from "../lib/tauri";
 import { parseError, type ProjectScript } from "../lib/types";
@@ -28,6 +29,7 @@ export const ScriptPickerDialog = memo(function ScriptPickerDialog({
   onRun,
   onClose,
 }: ScriptPickerDialogProps) {
+  const { t } = useTranslation();
   const [saved, setSaved] = useState<SavedCommandInput[]>([]);
   const [scripts, setScripts] = useState<ProjectScript[]>([]);
   const [loading, setLoading] = useState(false);
@@ -78,7 +80,10 @@ export const ScriptPickerDialog = memo(function ScriptPickerDialog({
     if (!open) return;
     inputRef.current?.focus();
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape" || ((e.metaKey || e.ctrlKey) && e.key === "w")) {
+        if (e.key === "w") e.preventDefault();
+        onClose();
+      }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
@@ -138,7 +143,7 @@ export const ScriptPickerDialog = memo(function ScriptPickerDialog({
       >
         <span className="text-sm text-gray-900 dark:text-gray-100 shrink-0">{item.name}</span>
         {item.isGlobal && (
-          <span className="text-[10px] uppercase tracking-wide text-gray-400 shrink-0">Global</span>
+          <span className="text-[10px] uppercase tracking-wide text-gray-400 shrink-0">{t("scriptPicker.global")}</span>
         )}
         <span className="text-xs text-gray-400 truncate">{item.command}</span>
       </button>
@@ -157,14 +162,14 @@ export const ScriptPickerDialog = memo(function ScriptPickerDialog({
       >
         <div className="px-4 py-2.5 border-b border-[var(--border-color)] flex items-center gap-2.5">
           <SearchIcon size={14} />
-          <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Run Script</h2>
+          <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t("scriptPicker.title")}</h2>
           <span className="text-xs text-gray-400 truncate flex-1">
-            {targets ? `Run on ${targets.length} projects` : projectTitle}
+            {targets ? t("scriptPicker.runOn_one", { count: targets.length }) : projectTitle}
           </span>
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close"
+            aria-label={t("scriptPicker.close")}
             className="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
           >
             <CloseIcon />
@@ -180,15 +185,15 @@ export const ScriptPickerDialog = memo(function ScriptPickerDialog({
               setQuery(e.target.value);
               setSelected(0);
             }}
-            placeholder="Filter commands and scripts"
-            aria-label="Filter commands and scripts"
+            placeholder={t("scriptPicker.filterPlaceholder")}
+            aria-label={t("scriptPicker.filterPlaceholder")}
             className="w-full px-2.5 py-1.5 text-sm rounded-md bg-[var(--surface-2)] border border-[var(--border-color)] text-gray-800 dark:text-gray-200 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
           />
         </div>
 
         <div className="max-h-64 overflow-y-auto py-1">
           {loading && (
-            <div className="px-4 py-6 text-center text-sm text-gray-400">Loading commands…</div>
+            <div className="px-4 py-6 text-center text-sm text-gray-400">{t("scriptPicker.loading")}</div>
           )}
           {!loading && error && (
             <div className="px-4 py-6 text-center text-sm text-red-500">{error}</div>
@@ -196,14 +201,14 @@ export const ScriptPickerDialog = memo(function ScriptPickerDialog({
           {!loading && !error && filtered.length === 0 && (
             <div className="px-4 py-6 text-center text-sm text-gray-400">
               {items.length === 0
-                ? "No saved commands or scripts found"
-                : "No matching commands"}
+                ? t("scriptPicker.empty")
+                : t("scriptPicker.noMatch")}
             </div>
           )}
           {!loading && !error && savedItems.length > 0 && (
             <>
               <div className="px-4 py-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
-                Saved Commands
+                {t("scriptPicker.savedSection")}
               </div>
               {savedItems.map(renderItem)}
             </>
@@ -211,7 +216,7 @@ export const ScriptPickerDialog = memo(function ScriptPickerDialog({
           {!loading && !error && scriptItems.length > 0 && (
             <>
               <div className="px-4 py-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
-                Scripts
+                {t("scriptPicker.scriptsSection")}
               </div>
               {scriptItems.map(renderItem)}
             </>
@@ -223,8 +228,8 @@ export const ScriptPickerDialog = memo(function ScriptPickerDialog({
             type="text"
             value={commandText}
             onChange={(e) => setCommandText(e.target.value)}
-            placeholder="Command"
-            aria-label="Command to run"
+            placeholder={t("scriptPicker.commandPlaceholder")}
+            aria-label={t("scriptPicker.commandAria")}
             className="flex-1 px-2.5 py-1.5 text-sm font-mono rounded-md bg-[var(--surface-2)] border border-[var(--border-color)] text-gray-800 dark:text-gray-200 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
           />
           <button
@@ -236,7 +241,7 @@ export const ScriptPickerDialog = memo(function ScriptPickerDialog({
             disabled={!filtered[selected] || !commandText.trim()}
             className="h-8 px-3 rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-sm font-medium transition-colors disabled:opacity-50 shrink-0"
           >
-            Run
+            {t("scriptPicker.run")}
           </button>
         </div>
       </div>

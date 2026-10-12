@@ -3,8 +3,8 @@ import { memo } from "react";
 // ═══════════════════════════════════════════════════════════════════════════
 // ChipButton — tone-driven colored action pill
 //
-// Replaces the copy-pasted colored pill className blocks across GitOpsToolbar,
-// RemoteManager and GitOpsFileList. Tone/size tables are literal strings so
+// Replaces the copy-pasted colored pill className blocks across GitOpsToolbar
+// and RemoteManager. Tone/size tables are literal strings so
 // Tailwind's scanner picks up every utility; adding a tone is a one-line edit.
 // ═══════════════════════════════════════════════════════════════════════════
 

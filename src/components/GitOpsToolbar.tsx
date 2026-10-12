@@ -1,4 +1,5 @@
 import { memo } from "react";
+import { useTranslation } from "react-i18next";
 import type { StashInfo, TagInfo } from "../lib/types";
 import { ChipButton } from "./ui/ChipButton";
 
@@ -80,6 +81,7 @@ export const GitOpsToolbar = memo(function GitOpsToolbar(props: GitOpsToolbarPro
     showCleanPreview, cleanFiles, onCleanExecute, onCancelClean,
     stashDiff, stashDiffIndex, onClearStashDiff,
   } = props;
+  const { t } = useTranslation();
 
   return (
     <>
@@ -88,46 +90,46 @@ export const GitOpsToolbar = memo(function GitOpsToolbar(props: GitOpsToolbarPro
         <ChipButton
           onClick={onFetch}
           disabled={isLoading("fetch")}
-          aria-label="Fetch from remote"
+          aria-label={t("gitops.fetchAria")}
           tone="surface"
           size="md"
         >
-          {isLoading("fetch") ? "Fetching..." : "Fetch"}
+          {isLoading("fetch") ? t("gitops.fetchLoading") : t("gitops.fetch")}
         </ChipButton>
         <ChipButton
           onClick={onPull}
           disabled={isLoading("pull")}
-          aria-label="Pull from remote"
+          aria-label={t("gitops.pullAria")}
           tone="blue"
           size="md"
         >
-          {isLoading("pull") ? "Pulling..." : "Pull"}
+          {isLoading("pull") ? t("gitops.pullLoading") : t("gitops.pull")}
         </ChipButton>
         <ChipButton
           onClick={onPush}
           disabled={isLoading("push")}
-          aria-label="Push to remote"
+          aria-label={t("gitops.pushAria")}
           tone="green"
           size="md"
         >
-          {isLoading("push") ? "Pushing..." : "Push"}
+          {isLoading("push") ? t("gitops.pushLoading") : t("gitops.push")}
         </ChipButton>
         <ChipButton
           onClick={onStash}
           disabled={isLoading("stash")}
-          aria-label="Stash changes"
+          aria-label={t("gitops.stashAria")}
           tone="amber"
           size="md"
         >
-          {isLoading("stash") ? "Stashing..." : "Stash"}
+          {isLoading("stash") ? t("gitops.stashLoading") : t("gitops.stash")}
         </ChipButton>
         <input
           type="text"
           value={stashMsg}
           onChange={(e) => onStashMsgChange(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && onStash()}
-          placeholder="Stash message (optional)"
-          aria-label="Stash message"
+          placeholder={t("gitops.stashMsgPlaceholder")}
+          aria-label={t("gitops.stashMsgAria")}
           className="px-2 py-1 rounded-lg border border-[var(--border-color)] bg-[var(--surface-1)] text-xs min-w-0 flex-1 basis-24 focus:outline-none focus:ring-2 focus:ring-yellow-500"
         />
         <label className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
@@ -137,25 +139,25 @@ export const GitOpsToolbar = memo(function GitOpsToolbar(props: GitOpsToolbarPro
             onChange={(e) => onStashIncludeUntrackedChange(e.target.checked)}
             className="rounded"
           />
-          Include untracked
+          {t("gitops.includeUntracked")}
         </label>
         <ChipButton
           onClick={onPop}
           disabled={isLoading("pop")}
-          aria-label="Pop stash"
+          aria-label={t("gitops.popAria")}
           tone="purple"
           size="md"
         >
-          {isLoading("pop") ? "Popping..." : "Pop"}
+          {isLoading("pop") ? t("gitops.popLoading") : t("gitops.pop")}
         </ChipButton>
         <ChipButton
           onClick={onToggleStashList}
-          aria-label="Toggle stash list"
+          aria-label={t("gitops.toggleStashList")}
           aria-expanded={showStashList}
           tone="surface"
           size="md"
         >
-          Stash List {stashList.length > 0 ? `(${stashList.length})` : ""}
+          {t("gitops.stashList", { count: stashList.length })}
         </ChipButton>
       </div>
 
@@ -163,7 +165,7 @@ export const GitOpsToolbar = memo(function GitOpsToolbar(props: GitOpsToolbarPro
       {showStashList && (
         <div className="space-y-1 max-h-32 overflow-y-auto">
           {stashList.length === 0 ? (
-            <p className="text-xs text-gray-400 dark:text-gray-500 italic">No stash entries</p>
+            <p className="text-xs text-gray-400 dark:text-gray-500 italic">{t("gitops.noStash")}</p>
           ) : (
             stashList.map((s) => (
               <div key={s.index} className="flex items-center gap-2 text-xs">
@@ -177,40 +179,40 @@ export const GitOpsToolbar = memo(function GitOpsToolbar(props: GitOpsToolbarPro
                   onClick={() => onShowStash(s.index)}
                   tone="gray"
                   size="sm"
-                  aria-label={`Show stash@{${s.index}}`}
-                  title="Show diff"
+                  aria-label={`${t("gitops.showStashPrefix")}{${s.index}}`}
+                  title={t("gitops.showDiff")}
                 >
-                  Show
+                  {t("gitops.showDiff")}
                 </ChipButton>
                 <ChipButton
                   onClick={() => onStashApply(s.index)}
                   disabled={isLoading("stash_apply")}
                   tone="blue"
                   size="sm"
-                  aria-label={`Apply stash@{${s.index}}`}
-                  title="Apply"
+                  aria-label={`${t("gitops.applyStashPrefix")}{${s.index}}`}
+                  title={t("gitops.apply")}
                 >
-                  Apply
+                  {t("gitops.apply")}
                 </ChipButton>
                 <ChipButton
                   onClick={() => onStashPopAt(s.index)}
                   disabled={isLoading("pop")}
                   tone="purple"
                   size="sm"
-                  aria-label={`Pop stash@{${s.index}}`}
-                  title="Pop"
+                  aria-label={`${t("gitops.popStashPrefix")}{${s.index}}`}
+                  title={t("gitops.pop")}
                 >
-                  Pop
+                  {t("gitops.pop")}
                 </ChipButton>
                 <ChipButton
                   onClick={() => onStashDrop(s.index)}
                   disabled={isLoading("stash_drop")}
                   tone="red"
                   size="sm"
-                  aria-label={`Drop stash@{${s.index}}`}
-                  title="Drop"
+                  aria-label={`${t("gitops.dropStashPrefix")}{${s.index}}`}
+                  title={t("gitops.dropStash")}
                 >
-                  Drop
+                  {t("gitops.dropStash")}
                 </ChipButton>
               </div>
             ))
@@ -225,8 +227,8 @@ export const GitOpsToolbar = memo(function GitOpsToolbar(props: GitOpsToolbarPro
           value={tagName}
           onChange={(e) => onTagNameChange(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && onCreateTag()}
-          placeholder="Tag name"
-          aria-label="Tag name"
+          placeholder={t("gitops.tagNamePlaceholder")}
+          aria-label={t("gitops.tagNameAria")}
           className="px-2 py-1 rounded-lg border border-[var(--border-color)] bg-[var(--surface-1)] text-xs min-w-0 flex-1 basis-24 focus:outline-none focus:ring-2 focus:ring-yellow-500"
         />
         <input
@@ -234,27 +236,27 @@ export const GitOpsToolbar = memo(function GitOpsToolbar(props: GitOpsToolbarPro
           value={tagMsg}
           onChange={(e) => onTagMsgChange(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && onCreateTag()}
-          placeholder="Tag message (optional)"
-          aria-label="Tag message"
+          placeholder={t("gitops.tagMsgPlaceholder")}
+          aria-label={t("gitops.tagMsgAria")}
           className="px-2 py-1 rounded-lg border border-[var(--border-color)] bg-[var(--surface-1)] text-xs min-w-0 flex-1 basis-24 focus:outline-none focus:ring-2 focus:ring-yellow-500"
         />
         <ChipButton
           onClick={onCreateTag}
           disabled={!tagName.trim() || isLoading("tag_create")}
-          aria-label="Create tag"
+          aria-label={t("gitops.createTagAria")}
           tone="cyan"
           size="md"
         >
-          {isLoading("tag_create") ? "Creating..." : "Create Tag"}
+          {isLoading("tag_create") ? t("gitops.createTagLoading") : t("gitops.createTag")}
         </ChipButton>
         <ChipButton
           onClick={onToggleTagList}
-          aria-label="Toggle tag list"
+          aria-label={t("gitops.toggleTagList")}
           aria-expanded={showTagList}
           tone="surface"
           size="md"
         >
-          Tag List {tagList.length > 0 ? `(${tagList.length})` : ""}
+          {t("gitops.tagList", { count: tagList.length })}
         </ChipButton>
       </div>
 
@@ -265,28 +267,28 @@ export const GitOpsToolbar = memo(function GitOpsToolbar(props: GitOpsToolbarPro
           value={resetTarget}
           onChange={(e) => onResetTargetChange(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && onReset()}
-          placeholder="HEAD~1, commit hash..."
-          aria-label="Reset target"
+          placeholder={t("gitops.resetTargetPlaceholder")}
+          aria-label={t("gitops.resetTargetAria")}
           className="px-2 py-1 rounded-lg border border-[var(--border-color)] bg-[var(--surface-1)] text-xs min-w-0 flex-1 basis-24 font-mono focus:outline-none focus:ring-2 focus:ring-yellow-500"
         />
         <select
           value={resetMode}
           onChange={(e) => onResetModeChange(e.target.value as "soft" | "mixed" | "hard")}
-          aria-label="Reset mode"
+          aria-label={t("gitops.resetModeAria")}
           className="px-2 py-1 rounded-lg border border-[var(--border-color)] bg-[var(--surface-1)] text-xs focus:outline-none focus:ring-2 focus:ring-yellow-500"
         >
-          <option value="soft">Soft (keep staged)</option>
-          <option value="mixed">Mixed (unstage)</option>
-          <option value="hard">Hard (discard)</option>
+          <option value="soft">{t("gitops.resetSoft")}</option>
+          <option value="mixed">{t("gitops.resetMixed")}</option>
+          <option value="hard">{t("gitops.resetHard")}</option>
         </select>
         <ChipButton
           onClick={onReset}
           disabled={!resetTarget.trim() || isLoading("reset")}
-          aria-label="Reset"
+          aria-label={t("gitops.resetAria")}
           tone="orange"
           size="md"
         >
-          {isLoading("reset") ? "Resetting..." : "Reset"}
+          {isLoading("reset") ? t("gitops.resetLoading") : t("gitops.reset")}
         </ChipButton>
       </div>
 
@@ -297,36 +299,36 @@ export const GitOpsToolbar = memo(function GitOpsToolbar(props: GitOpsToolbarPro
           value={patchCommitHash}
           onChange={(e) => onPatchCommitHashChange(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && onCreatePatch()}
-          placeholder="Commit hash for patch..."
-          aria-label="Commit hash for patch"
+          placeholder={t("gitops.patchHashPlaceholder")}
+          aria-label={t("gitops.patchHashAria")}
           className="px-2 py-1 rounded-lg border border-[var(--border-color)] bg-[var(--surface-1)] text-xs min-w-0 flex-1 basis-24 font-mono focus:outline-none focus:ring-2 focus:ring-yellow-500"
         />
         <ChipButton
           onClick={onCreatePatch}
           disabled={!patchCommitHash.trim() || isLoading("patch_create")}
-          aria-label="Create patch from commit"
+          aria-label={t("gitops.createPatchAria")}
           tone="indigo"
           size="md"
         >
-          {isLoading("patch_create") ? "Creating..." : "Create Patch"}
+          {isLoading("patch_create") ? t("gitops.createPatchLoading") : t("gitops.createPatch")}
         </ChipButton>
         <ChipButton
           onClick={onLoadPatchFile}
-          aria-label="Load patch from file"
+          aria-label={t("gitops.loadPatchAria")}
           tone="violet"
           size="md"
         >
-          Load .patch
+          {t("gitops.loadPatch")}
         </ChipButton>
         <ChipButton
           onClick={onTogglePatchPanel}
           disabled={!patchContent}
-          aria-label="Toggle patch preview"
+          aria-label={t("gitops.togglePatchAria")}
           aria-expanded={showPatchPanel}
           tone="surface"
           size="md"
         >
-          {showPatchPanel ? "Hide Patch" : "Preview Patch"}
+          {showPatchPanel ? t("gitops.hidePatch") : t("gitops.previewPatch")}
         </ChipButton>
       </div>
 
@@ -334,21 +336,21 @@ export const GitOpsToolbar = memo(function GitOpsToolbar(props: GitOpsToolbarPro
       {showPatchPanel && patchContent && (
         <div className="rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 overflow-hidden">
           <div className="flex items-center justify-between px-3 py-1.5 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-            <span className="text-xs font-medium text-gray-600 dark:text-gray-400">Patch Content</span>
+            <span className="text-xs font-medium text-gray-600 dark:text-gray-400">{t("gitops.patchContent")}</span>
             <div className="flex items-center gap-2">
               <button
                 onClick={onCopyPatch}
                 className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-                aria-label="Copy patch to clipboard"
+                aria-label={t("gitops.copyPatchAria")}
               >
-                Copy
+                {t("gitops.copyPatch")}
               </button>
               <button
                 onClick={onApplyPatch}
                 disabled={isLoading("patch_apply")}
                 className="px-2 py-0.5 rounded text-xs font-medium bg-green-500 text-white hover:bg-green-600 disabled:opacity-50 transition-colors"
               >
-                {isLoading("patch_apply") ? "Applying..." : "Apply Patch"}
+                {isLoading("patch_apply") ? t("gitops.applyPatchLoading") : t("gitops.applyPatch")}
               </button>
             </div>
           </div>
@@ -365,7 +367,7 @@ export const GitOpsToolbar = memo(function GitOpsToolbar(props: GitOpsToolbarPro
           tone="gray"
           size="md"
         >
-          Preview Clean
+          {t("gitops.previewClean")}
         </ChipButton>
         <label className="flex items-center gap-1 text-xs text-gray-500">
           <input
@@ -374,13 +376,13 @@ export const GitOpsToolbar = memo(function GitOpsToolbar(props: GitOpsToolbarPro
             onChange={(e) => onCleanIncludeIgnoredChange(e.target.checked)}
             className="rounded"
           />
-          Include ignored
+          {t("gitops.includeIgnored")}
         </label>
       </div>
       {showCleanPreview && cleanFiles.length > 0 && (
         <div className="space-y-2 p-2 bg-red-50 dark:bg-red-900/10 rounded-lg border border-red-200 dark:border-red-800/30">
           <p className="text-xs font-medium text-red-700 dark:text-red-300">
-            {cleanFiles.length} file{cleanFiles.length !== 1 ? "s" : ""} will be deleted:
+            {t("gitops.cleanFiles", { count: cleanFiles.length })}
           </p>
           <div className="max-h-24 overflow-y-auto space-y-0.5">
             {cleanFiles.map((f) => (
@@ -392,54 +394,54 @@ export const GitOpsToolbar = memo(function GitOpsToolbar(props: GitOpsToolbarPro
               onClick={onCleanExecute}
               className="px-3 py-1 rounded-lg text-xs font-medium bg-red-500 text-white hover:bg-red-600 transition-colors"
             >
-              Delete {cleanFiles.length} file{cleanFiles.length !== 1 ? "s" : ""}
+              {t("gitops.deleteCleanFiles", { count: cleanFiles.length })}
             </button>
             <button
               onClick={onCancelClean}
               className="px-3 py-1 rounded-lg text-xs font-medium bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
             >
-              Cancel
+              {t("common.cancel")}
             </button>
           </div>
         </div>
       )}
       {showCleanPreview && cleanFiles.length === 0 && (
-        <p className="text-xs text-gray-500 italic">No untracked files to clean</p>
+        <p className="text-xs text-gray-500 italic">{t("gitops.noCleanFiles")}</p>
       )}
 
       {/* Tag list */}
       {showTagList && (
         <div className="space-y-1 max-h-32 overflow-y-auto">
           {tagList.length === 0 ? (
-            <p className="text-xs text-gray-400 dark:text-gray-500 italic">No tags</p>
+            <p className="text-xs text-gray-400 dark:text-gray-500 italic">{t("gitops.noTags")}</p>
           ) : (
-            tagList.map((t) => (
-              <div key={t.name} className="flex items-center gap-2 text-xs">
+            tagList.map((tag) => (
+              <div key={tag.name} className="flex items-center gap-2 text-xs">
                 <span className="px-1.5 py-0.5 rounded font-mono bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-300">
-                  {t.name}
+                  {tag.name}
                 </span>
                 <span className="flex-1 truncate text-gray-500 dark:text-gray-400 font-mono">
-                  {t.target_oid.slice(0, 7)}{t.message ? ` — ${t.message}` : ""}
+                  {tag.target_oid.slice(0, 7)}{tag.message ? ` — ${tag.message}` : ""}
                 </span>
                 <ChipButton
-                  onClick={() => onPushTag(t.name)}
+                  onClick={() => onPushTag(tag.name)}
                   disabled={isLoading("tag_push")}
                   tone="green"
                   size="sm"
-                  aria-label={`Push tag ${t.name}`}
-                  title="Push"
+                  aria-label={t("gitops.pushTagAria", { name: tag.name })}
+                  title={t("gitops.pushTag")}
                 >
-                  Push
+                  {t("gitops.pushTag")}
                 </ChipButton>
                 <ChipButton
-                  onClick={() => onDeleteTag(t.name)}
+                  onClick={() => onDeleteTag(tag.name)}
                   disabled={isLoading("tag_delete")}
                   tone="red"
                   size="sm"
-                  aria-label={`Delete tag ${t.name}`}
-                  title="Delete"
+                  aria-label={t("gitops.deleteTagAria", { name: tag.name })}
+                  title={t("gitops.deleteTag")}
                 >
-                  Del
+                  {t("gitops.deleteTag")}
                 </ChipButton>
               </div>
             ))
@@ -451,7 +453,7 @@ export const GitOpsToolbar = memo(function GitOpsToolbar(props: GitOpsToolbarPro
       {stashDiff !== null && stashDiffIndex !== null && (
         <div className="mt-2 p-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-[var(--border-color)]">
           <div className="flex items-center justify-between mb-1">
-            <span className="text-xs font-medium text-gray-700 dark:text-gray-300">Stash@{'{' + stashDiffIndex + '}'} Diff</span>
+            <span className="text-xs font-medium text-gray-700 dark:text-gray-300">{`${t("gitops.stashDiffPrefix")}{${stashDiffIndex}}${t("gitops.stashDiffSuffix")}`}</span>
             <button onClick={onClearStashDiff} className="text-xs text-gray-400 hover:text-gray-600">✕</button>
           </div>
           <pre className="select-text text-xs font-mono overflow-x-auto max-h-48 overflow-y-auto whitespace-pre">{stashDiff}</pre>

@@ -164,3 +164,75 @@ export function ExportIcon({ size = 14, className }: IconProps) {
     </svg>
   );
 }
+
+// ── Sync icon (fetch) ───────────────────────────────────────────────────────
+export function SyncIcon({ size = 14, className }: IconProps) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 16 16" fill="currentColor" className={className}>
+      <path d="M8 2.5a5.49 5.49 0 0 0-4.355 2.07L2.34 3.264a.75.75 0 0 0-1.28.53v2.626c0 .414.336.75.75.75h2.626a.75.75 0 0 0 .53-1.28L3.66 4.584A3.99 3.99 0 0 1 8 4a3.996 3.996 0 0 1 3.598 2.285A.75.75 0 0 0 13.09 5.9a5.49 5.49 0 0 0-5.09-3.4Zm5.19 3.575a.75.75 0 0 0-.53 1.28l1.306 1.306A3.99 3.99 0 0 1 8 12.001a3.996 3.996 0 0 1-3.598-2.285.75.75 0 0 0-1.492.385A5.49 5.49 0 0 0 8 13.5a5.49 5.49 0 0 0 4.355-2.07l1.305 1.306a.75.75 0 0 0 1.28-.53V9.58a.75.75 0 0 0-.75-.75h-2.626Z" />
+    </svg>
+  );
+}
+
+// ── Arrow down icon ─────────────────────────────────────────────────────────
+export function ArrowDownIcon({ size = 14, className }: IconProps) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 16 16" fill="currentColor" className={className}>
+      <path d="M8 1a.75.75 0 0 1 .75.75v7.69l2.22-2.22a.75.75 0 0 1 1.06 1.06l-3.5 3.5a.75.75 0 0 1-1.06 0l-3.5-3.5a.75.75 0 0 1 1.06-1.06l2.22 2.22V1.75A.75.75 0 0 1 8 1z" />
+    </svg>
+  );
+}
+
+// ── Arrow up icon ───────────────────────────────────────────────────────────
+export function ArrowUpIcon({ size = 14, className }: IconProps) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 16 16" fill="currentColor" className={className}>
+      <path d="M8 15a.75.75 0 0 1-.75-.75V6.56L5.03 8.78a.75.75 0 0 1-1.06-1.06l3.5-3.5a.75.75 0 0 1 1.06 0l3.5 3.5a.75.75 0 0 1-1.06 1.06l-2.22-2.22v7.69A.75.75 0 0 1 8 15z" />
+    </svg>
+  );
+}
+
+// ── Stash / layers icon ─────────────────────────────────────────────────────
+export function StashIcon({ size = 14, className }: IconProps) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 16 16" fill="currentColor" className={className}>
+      <path d="M1 3.5 8 1l7 2.5v1L8 7 1 4.5v-1Zm0 4L8 10l7-2.5v1L8 11 1 8.5v-1Zm0 4L8 14l7-2.5v1L8 15l-7-2.5v-1Z" />
+    </svg>
+  );
+}
+
+// ── Pencil icon ─────────────────────────────────────────────────────────────
+export function PencilIcon({ size = 14, className }: IconProps) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 16 16" fill="currentColor" className={className}>
+      <path d="M11.013 1.427a1.75 1.75 0 0 1 2.474 0l1.086 1.086a1.75 1.75 0 0 1 0 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 0 1-.927-.928l.929-3.25a1.75 1.75 0 0 1.445-.758l8.61-8.61z" />
+    </svg>
+  );
+}
+
+// ── Tag icon (alias) ─────────────────────────────────────────────────────────
+export function TagIcon({ size = 14, className }: IconProps) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 16 16" fill="currentColor" className={className}>
+      <path d="M1 7.775V2.75C1 1.784 1.784 1 2.75 1h5.025c.464 0 .91.184 1.238.513l6.25 6.25a1.75 1.75 0 0 1 0 2.474l-5.026 5.026a1.75 1.75 0 0 1-2.474 0l-6.25-6.25A1.752 1.752 0 0 1 1 7.775ZM12 7.5a1.5 1.5 0 1 0-3 0 1.5 1.5 0 0 0 3 0Z" />
+    </svg>
+  );
+}
+
+// ── File text icon (notes) ──────────────────────────────────────────────────
+export function FileTextIcon({ size = 14, className }: IconProps) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 16 16" fill="currentColor" className={className}>
+      <path d="M2 1.75C2 .784 2.784 0 3.75 0h6.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 13.25 16H3.75A1.75 1.75 0 0 1 2 14.25V1.75Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25h9.5a.25.25 0 0 0 .25-.25V6h-2.75A1.75 1.75 0 0 1 9 4.25V1.5H3.75Z" />
+    </svg>
+  );
+}
+
+// ── Play icon (run script) ──────────────────────────────────────────────────
+export function PlayIcon({ size = 14, className }: IconProps) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 16 16" fill="currentColor" className={className}>
+      <path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM6.672 3.991a.75.75 0 0 0-1.172.622v6.774a.75.75 0 0 0 1.172.622l4.94-3.387a.75.75 0 0 0 0-1.244L6.672 3.991Z" />
+    </svg>
+  );
+}

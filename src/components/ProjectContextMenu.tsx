@@ -1,18 +1,13 @@
-import { useCallback, memo, useState, lazy, Suspense } from "react";
+import { useCallback, memo, useState, lazy, Suspense, Fragment } from "react";
+import { useTranslation } from "react-i18next";
 import * as api from "../lib/tauri";
-import { parseError, PROJECT_COLORS, type ProjectScript, type GitFileEntry } from "../lib/types";
+import { parseError, type GitFileEntry } from "../lib/types";
 import { DropdownMenu, MenuItem, IconButton, Modal } from "./ui/primitives";
+import { ContextMenu, MenuSeparator } from "./ui/ContextMenu";
 import { ColorPicker } from "./ColorPicker";
 import { ScriptPickerDialog } from "./ScriptPickerDialog";
-import {
-  KebabIcon,
-  BranchIcon,
-  ClockIcon,
-  AiGenerateIcon,
-  TerminalIcon,
-  FinderIcon,
-  VscodeIcon,
-} from "./ui/icons";
+import { KebabIcon } from "./ui/icons";
+import { useProjectMenuGroups, type ProjectMenuParams } from "./projectMenu";
 
 // ── Project Tools (second-level menu) ───────────────────────────────────────
 // The tool panels below used to ship with zero UI entry points. They are
@@ -42,54 +37,60 @@ type ToolId =
 
 type FileTool = "filehistory" | "blame";
 
-const TOOL_GROUPS: { label: string; items: { id: ToolId; label: string }[] }[] = [
+type ToolGroupKey = "menu.group.history" | "menu.group.worktree" | "menu.group.tools";
+type ToolLabelKey =
+  | "menu.tool.reflog"
+  | "menu.tool.fileHistory"
+  | "menu.tool.blame"
+  | "menu.tool.rebase"
+  | "menu.tool.worktrees"
+  | "menu.tool.submodules"
+  | "menu.tool.bisect"
+  | "menu.tool.hooks"
+  | "menu.tool.gitignore"
+  | "menu.tool.stats";
+
+const TOOL_GROUPS: { labelKey: ToolGroupKey; items: { id: ToolId; labelKey: ToolLabelKey }[] }[] = [
   {
-    label: "History",
+    labelKey: "menu.group.history",
     items: [
-      { id: "reflog", label: "Reflog" },
-      { id: "filehistory", label: "File History…" },
-      { id: "blame", label: "Blame…" },
-      { id: "rebase", label: "Interactive Rebase…" },
+      { id: "reflog", labelKey: "menu.tool.reflog" },
+      { id: "filehistory", labelKey: "menu.tool.fileHistory" },
+      { id: "blame", labelKey: "menu.tool.blame" },
+      { id: "rebase", labelKey: "menu.tool.rebase" },
     ],
   },
   {
-    label: "Worktree",
+    labelKey: "menu.group.worktree",
     items: [
-      { id: "worktrees", label: "Worktrees" },
-      { id: "submodules", label: "Submodules" },
+      { id: "worktrees", labelKey: "menu.tool.worktrees" },
+      { id: "submodules", labelKey: "menu.tool.submodules" },
     ],
   },
   {
-    label: "Tools",
+    labelKey: "menu.group.tools",
     items: [
-      { id: "bisect", label: "Bisect" },
-      { id: "hooks", label: "Git Hooks" },
-      { id: "gitignore", label: ".gitignore Editor…" },
-      { id: "stats", label: "Project Stats" },
+      { id: "bisect", labelKey: "menu.tool.bisect" },
+      { id: "hooks", labelKey: "menu.tool.hooks" },
+      { id: "gitignore", labelKey: "menu.tool.gitignore" },
+      { id: "stats", labelKey: "menu.tool.stats" },
     ],
   },
 ];
 
-interface ProjectContextMenuProps {
-  projectId: string;
-  currentColor?: string;
-  path: string;
-  title: string;
-  onSuccess: (msg: string) => void;
-  onError: (msg: string) => void;
-  /** Refresh hook for git-mutating tools (reflog checkout, rebase, …). */
-  onGitRefresh?: () => void | Promise<void>;
-  onOpenBranchManager?: () => void;
-  onOpenTagManager?: () => void;
-  onOpenLogViewer?: () => void;
-  onOpenAiReview?: () => void;
-  onOpenBuiltInTerminal?: (path: string) => void;
-  onRunProjectScript?: (script: ProjectScript) => void;
-  onColorChange?: (color: string | null) => void;
-  onEditDescription?: () => void;
-  notes?: string;
-  onEditNotes?: () => void;
-}
+type ProjectContextMenuProps = Omit<
+  ProjectMenuParams,
+  "onOpenColorPicker" | "onOpenScriptPicker" | "onOpenTools"
+> & {
+  /** Anchor for the row right-click menu (null when closed). */
+  contextAnchor?: { x: number; y: number } | null;
+  /** Closes the row right-click menu. */
+  contextOnClose?: () => void;
+  /** Requests removal; App owns the confirmation dialog. */
+  onRemoveProject?: () => void | Promise<void>;
+};
+
+const noop = () => {};
 
 export const ProjectContextMenu = memo(function ProjectContextMenu({
   projectId,
@@ -102,6 +103,16 @@ export const ProjectContextMenu = memo(function ProjectContextMenu({
   onOpenTagManager,
   onOpenLogViewer,
   onOpenAiReview,
+  onRunFetch,
+  fetching,
+  onRunPull,
+  pulling,
+  onRunPush,
+  pushing,
+  onOpenStashManager,
+  onRefresh,
+  onAssignGroup,
+  onEditAlias,
   onOpenBuiltInTerminal,
   onRunProjectScript,
   onColorChange,
@@ -109,7 +120,11 @@ export const ProjectContextMenu = memo(function ProjectContextMenu({
   notes,
   onEditNotes,
   onGitRefresh,
+  onRemoveProject,
+  contextAnchor = null,
+  contextOnClose,
 }: ProjectContextMenuProps) {
+  const { t } = useTranslation();
   const [colorPickerOpen, setColorPickerOpen] = useState(false);
   const [scriptPickerOpen, setScriptPickerOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
@@ -176,162 +191,97 @@ export const ProjectContextMenu = memo(function ProjectContextMenu({
     setFileQuery("");
   }, []);
 
-  const handleAction = useCallback(
-    async (name: string, fn: () => Promise<void>) => {
-      try {
-        await fn();
-        onSuccess(`Opened in ${name}`);
-      } catch (e) {
-        onError(parseError(e));
-      }
-    },
-    [onSuccess, onError]
-  );
-
-  const handleOpenTerminal = useCallback(() => handleAction("Terminal", () => api.openInTerminal(path)), [handleAction, path]);
-  const handleOpenFinder = useCallback(() => handleAction("Finder", () => api.openInFinder(path)), [handleAction, path]);
-  const handleOpenVscode = useCallback(() => handleAction("VS Code", () => api.openInVscode(path)), [handleAction, path]);
-
   const handleColorSelect = useCallback(
     async (color: string | null) => {
       try {
         await api.setProjectColor(projectId, color);
         onColorChange?.(color);
-        onSuccess(color ? `Color set to ${color}` : "Color removed");
+        onSuccess(color ? t("row.color.set", { color }) : t("row.color.removed"));
       } catch (e) {
         onError(parseError(e));
       }
     },
-    [projectId, onSuccess, onError, onColorChange]
+    [projectId, onSuccess, onError, onColorChange, t]
+  );
+
+  const groups = useProjectMenuGroups({
+    projectId,
+    currentColor,
+    path,
+    title,
+    onSuccess,
+    onError,
+    onGitRefresh,
+    onOpenBranchManager,
+    onOpenTagManager,
+    onOpenLogViewer,
+    onOpenAiReview,
+    onRunFetch,
+    fetching,
+    onRunPull,
+    pulling,
+    onRunPush,
+    pushing,
+    onOpenStashManager,
+    onRefresh,
+    onAssignGroup,
+    onEditAlias,
+    onOpenBuiltInTerminal,
+    onRunProjectScript,
+    onColorChange,
+    onEditDescription,
+    notes,
+    onEditNotes,
+    onRequestRemove: onRemoveProject,
+    onOpenColorPicker: () => setColorPickerOpen(true),
+    onOpenScriptPicker: () => setScriptPickerOpen(true),
+    onOpenTools: () => setToolsOpen(true),
+  });
+
+  // The kebab dropdown and the row right-click menu render the same items.
+  // Separators mark group boundaries so both entry points keep an identical
+  // block structure regardless of which conditional items are present.
+  const visibleGroups = groups.filter((group) => group.items.length > 0);
+  const menuItems = (
+    <>
+      {visibleGroups.map((group, groupIndex) => (
+        <Fragment key={group.id}>
+          {groupIndex > 0 && <MenuSeparator />}
+          {group.items.map((item) => (
+            <MenuItem
+              key={item.id}
+              icon={item.icon}
+              label={item.label}
+              description={item.description}
+              danger={item.danger}
+              disabled={item.disabled}
+              shortcut={item.shortcut}
+              onClick={item.run}
+            />
+          ))}
+        </Fragment>
+      ))}
+    </>
   );
 
   return (
     <>
     <DropdownMenu
       trigger={
-        <IconButton title="More actions">
+        <IconButton title={t("menu.more")}>
           <KebabIcon />
         </IconButton>
       }
     >
-      {onOpenBranchManager && (
-        <MenuItem
-          icon={<BranchIcon />}
-          label="Branch Manager"
-          description="Create, delete, merge branches"
-          onClick={onOpenBranchManager}
-        />
-      )}
-      {onOpenTagManager && (
-        <MenuItem
-          icon={
-            <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M1 7.775V2.75C1 1.784 1.784 1 2.75 1h5.025c.464 0 .91.184 1.238.513l6.25 6.25a1.75 1.75 0 010 2.474l-5.026 5.026a1.75 1.75 0 01-2.474 0l-6.25-6.25A1.752 1.752 0 011 7.775zM12 7.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" />
-            </svg>
-          }
-          label="Tags"
-          description="Create, delete tags"
-          onClick={onOpenTagManager}
-        />
-      )}
-      {onOpenLogViewer && (
-        <MenuItem
-          icon={<ClockIcon />}
-          label="Commit History"
-          description="View commit log"
-          onClick={onOpenLogViewer}
-        />
-      )}
-      {onOpenAiReview && (
-        <MenuItem
-          icon={<AiGenerateIcon />}
-          label="AI Code Review"
-          description="Review diff with LLM"
-          onClick={onOpenAiReview}
-        />
-      )}
-
-      <MenuItem
-        icon={<ClockIcon />}
-        label="Project Tools"
-        description="History, worktrees, hooks & more"
-        onClick={() => setToolsOpen(true)}
-      />
-
-      {onEditDescription && (
-        <MenuItem
-          icon={
-            <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M11.013 1.427a1.75 1.75 0 012.474 0l1.086 1.086a1.75 1.75 0 010 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 01-.927-.928l.929-3.25a1.75 1.75 0 01.445-.758l8.61-8.61z" />
-            </svg>
-          }
-          label="Edit Description"
-          description="Set project description"
-          onClick={onEditDescription}
-        />
-      )}
-
-      {onEditNotes && (
-        <MenuItem
-          icon={
-            <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M1 2.75C1 1.784 1.784 1 2.75 1h10.5c.966 0 1.75.784 1.75 1.75v10.5A1.75 1.75 0 0113.25 15H2.75A1.75 1.75 0 011 13.25V2.75zm1.75-.25a.25.25 0 00-.25.25v10.5c0 .138.112.25.25.25h10.5a.25.25 0 00.25-.25V2.75a.25.25 0 00-.25-.25H2.75zM4 5.75A.75.75 0 014.75 5h6.5a.75.75 0 010 1.5h-6.5A.75.75 0 014 5.75zm0 3A.75.75 0 014.75 8h6.5a.75.75 0 010 1.5h-6.5A.75.75 0 014 8.75zm0 3a.75.75 0 01.75-.75h3.5a.75.75 0 010 1.5h-3.5a.75.75 0 01-.75-.75z" />
-            </svg>
-          }
-          label="Notes"
-          description={notes ? "Edit notes" : "Add notes"}
-          onClick={onEditNotes}
-        />
-      )}
-
-      <MenuItem
-        icon={
-          <span
-            className={`w-3.5 h-3.5 rounded-full inline-block ${
-              currentColor
-                ? (PROJECT_COLORS.find((x) => x.id === currentColor)?.bg ?? "bg-gray-400")
-                : "bg-gray-400"
-            }`}
-          />
-        }
-        label="Set Color"
-        description={currentColor ? `Current: ${currentColor}` : "No color set"}
-        onClick={() => setColorPickerOpen(true)}
-      />
-
-      <div className="border-t border-gray-100 dark:border-gray-700 my-1" />
-
-      {onRunProjectScript && (
-        <MenuItem
-          icon={<TerminalIcon />}
-          label="Run Script…"
-          description="Run a package.json script"
-          onClick={() => setScriptPickerOpen(true)}
-        />
-      )}
-      {onOpenBuiltInTerminal && (
-        <MenuItem
-          icon={<TerminalIcon />}
-          label="Open Built-in Terminal"
-          onClick={() => onOpenBuiltInTerminal(path)}
-        />
-      )}
-      <MenuItem
-        icon={<TerminalIcon />}
-        label="Open in System Terminal"
-        onClick={handleOpenTerminal}
-      />
-      <MenuItem
-        icon={<FinderIcon />}
-        label="Open in Finder"
-        onClick={handleOpenFinder}
-      />
-      <MenuItem
-        icon={<VscodeIcon />}
-        label="Open in VS Code"
-        onClick={handleOpenVscode}
-      />
+      {menuItems}
     </DropdownMenu>
+    <ContextMenu
+      open={contextAnchor !== null}
+      anchor={contextAnchor ?? { x: 0, y: 0 }}
+      onClose={contextOnClose ?? noop}
+    >
+      {menuItems}
+    </ContextMenu>
     <ColorPicker
       currentColor={currentColor}
       onSelect={handleColorSelect}
@@ -355,18 +305,18 @@ export const ProjectContextMenu = memo(function ProjectContextMenu({
     <Modal
       open={toolsOpen}
       onClose={closeTools}
-      title="Project Tools"
+      title={t("menu.tools")}
       subtitle={title}
-      maxWidth="max-w-3xl"
+      width="xl"
     >
       <div className="flex flex-col sm:flex-row gap-3 p-4">
-        <nav className="sm:w-44 shrink-0 space-y-3" aria-label="Project tools">
+        <nav className="sm:w-44 shrink-0 space-y-3" aria-label={t("menu.toolsNav")}>
           {TOOL_GROUPS.map((group) => (
-            <div key={group.label}>
+            <div key={group.labelKey}>
               <div className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
-                {group.label}
+                {t(group.labelKey)}
               </div>
-              <div className="space-y-0.5" role="group" aria-label={group.label}>
+              <div className="space-y-0.5" role="group" aria-label={t(group.labelKey)}>
                 {group.items.map((item) => {
                   const selected =
                     activeTool === item.id ||
@@ -384,7 +334,7 @@ export const ProjectContextMenu = memo(function ProjectContextMenu({
                           : "text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50"
                       }`}
                     >
-                      {item.label}
+                      {t(item.labelKey)}
                     </button>
                   );
                 })}
@@ -393,15 +343,15 @@ export const ProjectContextMenu = memo(function ProjectContextMenu({
           ))}
         </nav>
         <div className="flex-1 min-w-0 border-t sm:border-t-0 sm:border-l border-gray-100 dark:border-gray-700 sm:pl-3 pt-3 sm:pt-0">
-          <Suspense fallback={<div className="text-xs text-gray-400 p-2">Loading…</div>}>
+          <Suspense fallback={<div className="text-xs text-gray-400 p-2">{t("menu.loading")}</div>}>
             {filePickerFor && (
               <div className="space-y-2">
                 <input
                   type="text"
                   value={fileQuery}
                   onChange={(e) => setFileQuery(e.target.value)}
-                  placeholder="Filter files…"
-                  aria-label="Filter files"
+                  placeholder={t("menu.filterFiles")}
+                  aria-label={t("menu.filterFilesAria")}
                   className="w-full px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-transparent text-sm"
                 />
                 <div className="max-h-72 overflow-auto rounded-lg border border-gray-100 dark:border-gray-700 divide-y divide-gray-50 dark:divide-gray-800">
@@ -418,7 +368,7 @@ export const ProjectContextMenu = memo(function ProjectContextMenu({
                       </button>
                     ))}
                   {repoFiles.length === 0 && (
-                    <div className="px-2 py-3 text-xs text-gray-400">No changed files</div>
+                    <div className="px-2 py-3 text-xs text-gray-400">{t("menu.noChangedFiles")}</div>
                   )}
                 </div>
               </div>

@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, useRef, memo } from "react";
+import { useTranslation } from "react-i18next";
+import { formatDateTime } from "../lib/format";
 import type { BackgroundStatus } from "../lib/types";
 import {
   getBackgroundStatus,
@@ -12,6 +14,7 @@ interface BackgroundSettingsProps {
 }
 
 export const BackgroundSettings = memo(function BackgroundSettings({ onError }: BackgroundSettingsProps) {
+  const { t } = useTranslation();
   const [status, setStatus] = useState<BackgroundStatus | null>(null);
   const [intervalInput, setIntervalInput] = useState(300);
   const onErrorRef = useRef(onError);
@@ -23,7 +26,7 @@ export const BackgroundSettings = memo(function BackgroundSettings({ onError }: 
         setStatus(s);
         setIntervalInput(s.interval_secs);
       })
-      .catch((e) => onErrorRef.current(`Failed to load background status: ${e}`));
+      .catch((e) => onErrorRef.current(t("settings.background.failLoad", { error: String(e) })));
   }, []);
 
   useEffect(() => {
@@ -40,7 +43,7 @@ export const BackgroundSettings = memo(function BackgroundSettings({ onError }: 
       }
       loadStatus();
     } catch (e) {
-      onErrorRef.current(`Failed to toggle background refresh: ${e}`);
+      onErrorRef.current(t("settings.background.failToggle", { error: String(e) }));
     }
   }, [status, loadStatus]);
 
@@ -52,19 +55,19 @@ export const BackgroundSettings = memo(function BackgroundSettings({ onError }: 
         await setBackgroundInterval(clamped);
         loadStatus();
       } catch (e) {
-        onErrorRef.current(`Failed to update interval: ${e}`);
+        onErrorRef.current(t("settings.background.failInterval", { error: String(e) }));
       }
     },
     [loadStatus]
   );
 
   if (!status) {
-    return <div className="text-sm text-gray-500 dark:text-gray-400">Loading...</div>;
+    return <div className="text-sm text-gray-500 dark:text-gray-400">{t("common.loading")}</div>;
   }
 
   const formatTime = (ts: number | null) => {
-    if (!ts) return "Never";
-    return new Date(ts * 1000).toLocaleTimeString();
+    if (!ts) return t("settings.background.never");
+    return formatDateTime(new Date(ts * 1000));
   };
 
   return (
@@ -73,16 +76,16 @@ export const BackgroundSettings = memo(function BackgroundSettings({ onError }: 
       <div className="flex items-center justify-between">
         <div>
           <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
-            Background Fetch
+            {t("settings.background.title")}
           </div>
           <div className="text-xs text-gray-500 dark:text-gray-400">
-            Silently fetch all repos in the background
+            {t("settings.background.description")}
           </div>
         </div>
         <button
           role="switch"
           aria-checked={status.active}
-          aria-label="Enable background fetch"
+          aria-label={t("settings.background.enableAria")}
           onClick={handleToggle}
           className={`relative w-10 h-6 rounded-full transition-colors ${
             status.active ? "bg-blue-600" : "bg-gray-300 dark:bg-gray-600"
@@ -99,7 +102,7 @@ export const BackgroundSettings = memo(function BackgroundSettings({ onError }: 
       {/* Interval slider */}
       <div>
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-          Refresh Interval
+          {t("settings.background.interval")}
         </label>
         <div className="flex items-center gap-3">
           <input
@@ -120,26 +123,26 @@ export const BackgroundSettings = memo(function BackgroundSettings({ onError }: 
           </span>
         </div>
         <p className="text-xs text-gray-400 mt-1">
-          Minimum 60 seconds. Default: 5 minutes.
+          {t("settings.background.intervalHint")}
         </p>
       </div>
 
       {/* Status info */}
       <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 space-y-2">
         <div className="flex justify-between text-sm">
-          <span className="text-gray-500 dark:text-gray-400">Status</span>
+          <span className="text-gray-500 dark:text-gray-400">{t("settings.background.status")}</span>
           <span className={status.active ? "text-green-600 dark:text-green-400" : "text-gray-400"}>
-            {status.active ? "Active" : "Paused"}
+            {status.active ? t("settings.background.active") : t("settings.background.paused")}
           </span>
         </div>
         <div className="flex justify-between text-sm">
-          <span className="text-gray-500 dark:text-gray-400">Interval</span>
+          <span className="text-gray-500 dark:text-gray-400">{t("settings.background.intervalLabel")}</span>
           <span className="text-gray-900 dark:text-gray-100">
             {Math.floor(status.interval_secs / 60)}m {status.interval_secs % 60}s
           </span>
         </div>
         <div className="flex justify-between text-sm">
-          <span className="text-gray-500 dark:text-gray-400">Last Refresh</span>
+          <span className="text-gray-500 dark:text-gray-400">{t("settings.background.lastRefresh")}</span>
           <span className="text-gray-900 dark:text-gray-100">
             {formatTime(status.last_refresh)}
           </span>

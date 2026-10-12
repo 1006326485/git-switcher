@@ -63,3 +63,43 @@ describe("DropdownMenu", () => {
     expect(panel.style.maxHeight).toBe(`${700 - 6 - 8}px`);
   });
 });
+
+const baseMenuItemClass =
+  "press w-full text-left px-3 py-2 text-sm flex items-center gap-3 transition-all active:scale-[0.99] hover:bg-gray-50 dark:hover:bg-gray-700/50 text-gray-700 dark:text-gray-300";
+
+describe("MenuItem", () => {
+  it("renders the pre-disabled/shortcut DOM when both props are omitted", () => {
+    render(<MenuItem label="Copy" onClick={() => {}} />);
+
+    expect(screen.getByRole("menuitem").outerHTML).toBe(
+      `<button type="button" role="menuitem" class="${baseMenuItemClass}"><div class="flex-1 min-w-0"><div class="text-gray-900 dark:text-gray-100">Copy</div></div></button>`
+    );
+  });
+
+  it("does not call onClick and dims the item when disabled", () => {
+    const onClick = vi.fn();
+    render(<MenuItem label="Fetch" onClick={onClick} disabled />);
+
+    const item = screen.getByRole("menuitem");
+    expect(item).toBeDisabled();
+    expect(item.className).toBe(`${baseMenuItemClass} opacity-50 cursor-not-allowed`);
+
+    fireEvent.click(item);
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it("renders the shortcut hint on the trailing edge", () => {
+    render(<MenuItem label="Refresh" onClick={() => {}} shortcut="⌘R" />);
+
+    const item = screen.getByRole("menuitem");
+    expect(item).toHaveAttribute("role", "menuitem");
+    expect(item.lastElementChild).toHaveTextContent("⌘R");
+    expect(item.lastElementChild?.className).toContain("font-mono");
+  });
+
+  it("keeps the menuitemradio role when selected is combined with the new props", () => {
+    render(<MenuItem label="VS Code" onClick={() => {}} selected shortcut="⇧⌘O" disabled />);
+
+    expect(screen.getByRole("menuitemradio")).toHaveAttribute("aria-checked", "true");
+  });
+});

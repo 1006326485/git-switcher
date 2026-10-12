@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, memo } from "react";
+import { useTranslation } from "react-i18next";
 import { writeTextFile } from "@tauri-apps/plugin-fs";
 import * as api from "../lib/tauri";
 import { parseError } from "../lib/types";
@@ -126,6 +127,7 @@ export const ConflictResolver = memo(function ConflictResolver({
   onError,
   onRefresh,
 }: ConflictResolverProps) {
+  const { t } = useTranslation();
   const [conflicts, setConflicts] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [resolving, setResolving] = useState<string | null>(null);
@@ -153,7 +155,7 @@ export const ConflictResolver = memo(function ConflictResolver({
       await api.gitResolveConflict(path, filePath, resolution);
       setConflicts((prev) => prev.filter((f) => f !== filePath));
       if (preview?.file === filePath) setPreview(null);
-      onSuccess(`Resolved ${filePath} (${resolution})`);
+      onSuccess(t("conflict.resolved", { file: filePath, resolution }));
       onRefresh();
     } catch (e) {
       onError(parseError(e));
@@ -195,7 +197,7 @@ export const ConflictResolver = memo(function ConflictResolver({
       await writeTextFile(joinRepoPath(path, preview.file), content);
       await api.gitStageFile(path, preview.file);
       setConflicts((prev) => prev.filter((f) => f !== preview.file));
-      onSuccess(`Resolved ${preview.file} (hunks applied)`);
+      onSuccess(t("conflict.resolvedHunks", { file: preview.file }));
       setPreview(null);
       onRefresh();
     } catch (e) {
@@ -211,7 +213,7 @@ export const ConflictResolver = memo(function ConflictResolver({
       await api.gitAbortMerge(path);
       setConflicts([]);
       setPreview(null);
-      onSuccess("Merge aborted");
+      onSuccess(t("conflict.mergedAborted"));
       onRefresh();
     } catch (e) {
       onError(parseError(e));

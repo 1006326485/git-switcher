@@ -1,6 +1,6 @@
 [package]
 name = "git-switcher"
-version = "1.4.0"
+version = "1.5.0"
 edition = "2021"
 
 [lib]
@@ -14,6 +14,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-global-shortcut = "2"
+tauri-plugin-notification = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-shell = "2"
 serde = { version = "1", features = ["derive"] }
@@ -38,6 +39,8 @@ grep = "0.3"
 portable-pty = "0.8"
 walkdir = "2"
 tempfile = "3.27.0"
+# Read the OS locale for the "follow system" language preference.
+sys-locale = "0.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

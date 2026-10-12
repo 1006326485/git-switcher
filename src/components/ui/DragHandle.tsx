@@ -1,4 +1,5 @@
 import { memo } from "react";
+import { useTranslation } from "react-i18next";
 
 interface DragHandleProps {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -15,12 +16,13 @@ export const DragHandle = memo(function DragHandle({
   width = 10,
   height = 14,
 }: DragHandleProps) {
+  const { t } = useTranslation();
   return (
     <button
       {...attributes}
       {...listeners}
       className="cursor-grab active:cursor-grabbing text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-0.5"
-      aria-label="Drag to reorder"
+      aria-label={t("card.dragAria")}
     >
       <svg width={width} height={height} viewBox="0 0 10 14" fill="currentColor">
         <circle cx="3" cy="2" r="1.2" />

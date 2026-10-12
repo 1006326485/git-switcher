@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, memo } from "react";
+import { useTranslation } from "react-i18next";
 import type { LlmConfig } from "../lib/types";
 import { parseError } from "../lib/types";
 import { getSettings, updateSettings } from "../lib/tauri";
@@ -8,6 +9,7 @@ interface LlmSettingsProps {
 }
 
 export const LlmSettings = memo(function LlmSettings({ onError }: LlmSettingsProps) {
+  const { t } = useTranslation();
   const [config, setConfig] = useState<LlmConfig>({
     enabled: false,
     api_key: "",
@@ -26,7 +28,7 @@ export const LlmSettings = memo(function LlmSettings({ onError }: LlmSettingsPro
   useEffect(() => {
     getSettings().then((s) => setConfig(s.llm)).catch((e) => {
       setLoadFailed(true);
-      onErrorRef.current(`Failed to load LLM settings: ${e}`);
+      onErrorRef.current(t("settings.llm.failLoad", { error: String(e) }));
     });
   }, []);
 
@@ -54,16 +56,16 @@ export const LlmSettings = memo(function LlmSettings({ onError }: LlmSettingsPro
       <div className="flex items-center justify-between">
         <div>
           <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
-            Enable AI Code Review
+            {t("settings.llm.enable")}
           </div>
           <div className="text-xs text-gray-500 dark:text-gray-400">
-            Use an LLM to review branch diffs
+            {t("settings.llm.enableDesc")}
           </div>
         </div>
         <button
           role="switch"
           aria-checked={config.enabled}
-          aria-label="Enable AI Code Review"
+          aria-label={t("settings.llm.enableAria")}
           onClick={toggleEnabled}
           className={`relative w-10 h-6 rounded-full transition-colors ${
             config.enabled
@@ -84,25 +86,25 @@ export const LlmSettings = memo(function LlmSettings({ onError }: LlmSettingsPro
           {/* API Endpoint */}
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              API Endpoint
+              {t("settings.llm.endpoint")}
             </label>
             <input
               type="text"
               value={config.endpoint}
               onChange={(e) => update("endpoint", e.target.value)}
               placeholder="https://api.openai.com/v1/chat/completions"
-              aria-label="API Endpoint"
+              aria-label={t("settings.llm.endpointAria")}
               className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400"
             />
             <p className="text-xs text-gray-400 mt-1">
-              OpenAI-compatible endpoint. Works with OpenAI, Azure, local models (Ollama), etc.
+              {t("settings.llm.endpointHint")}
             </p>
           </div>
 
           {/* API Key */}
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              API Key
+              {t("settings.llm.apiKey")}
             </label>
             <div className="relative">
               <input
@@ -110,12 +112,12 @@ export const LlmSettings = memo(function LlmSettings({ onError }: LlmSettingsPro
                 value={config.api_key}
                 onChange={(e) => update("api_key", e.target.value)}
                 placeholder="sk-..."
-                aria-label="API Key"
+                aria-label={t("settings.llm.apiKeyAria")}
                 className="w-full px-3 py-2 pr-10 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400 font-mono"
               />
               <button
                 onClick={toggleShowKey}
-                aria-label={showKey ? "Hide API key" : "Show API key"}
+                aria-label={showKey ? t("settings.llm.hideKey") : t("settings.llm.showKey")}
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
               >
                 {showKey ? (
@@ -134,18 +136,18 @@ export const LlmSettings = memo(function LlmSettings({ onError }: LlmSettingsPro
           {/* Model */}
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Model
+              {t("settings.llm.model")}
             </label>
             <input
               type="text"
               value={config.model}
               onChange={(e) => update("model", e.target.value)}
               placeholder="gpt-4o-mini"
-              aria-label="Model"
+              aria-label={t("settings.llm.modelAria")}
               className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400"
             />
             <p className="text-xs text-gray-400 mt-1">
-              e.g. gpt-4o, gpt-4o-mini, claude-3-sonnet, llama3
+              {t("settings.llm.modelHint")}
             </p>
           </div>
 
@@ -153,7 +155,7 @@ export const LlmSettings = memo(function LlmSettings({ onError }: LlmSettingsPro
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Temperature
+                {t("settings.llm.temperature")}
               </label>
               <input
                 type="number"
@@ -162,13 +164,13 @@ export const LlmSettings = memo(function LlmSettings({ onError }: LlmSettingsPro
                 step="0.1"
                 value={config.temperature}
                 onChange={(e) => update("temperature", parseFloat(e.target.value) || 0.3)}
-                aria-label="Temperature"
+                aria-label={t("settings.llm.temperatureAria")}
                 className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400"
               />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Max Tokens
+                {t("settings.llm.maxTokens")}
               </label>
               <input
                 type="number"
@@ -177,7 +179,7 @@ export const LlmSettings = memo(function LlmSettings({ onError }: LlmSettingsPro
                 step="256"
                 value={config.max_tokens}
                 onChange={(e) => update("max_tokens", parseInt(e.target.value) || 4096)}
-                aria-label="Max Tokens"
+                aria-label={t("settings.llm.maxTokensAria")}
                 className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400"
               />
             </div>
@@ -191,7 +193,7 @@ export const LlmSettings = memo(function LlmSettings({ onError }: LlmSettingsPro
         disabled={saving || loadFailed}
         className="w-full px-4 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium text-sm transition-colors"
       >
-        {saving ? "Saving..." : loadFailed ? "Settings unavailable" : "Save LLM Settings"}
+        {saving ? t("common.saving") : loadFailed ? t("settings.llm.unavailable") : t("settings.llm.save")}
       </button>
     </div>
   );

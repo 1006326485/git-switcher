@@ -1,8 +1,11 @@
 import { useState, useEffect, useCallback, useMemo, memo, lazy, Suspense } from "react";
+import { useTranslation } from "react-i18next";
 import * as api from "../lib/tauri";
 import type { BranchInfo, MergeResult } from "../lib/types";
 import { parseError } from "../lib/types";
-import { Modal, Tabs, PrimaryButton } from "./ui/primitives";
+import { Modal, Tabs, PrimaryButton, MenuItem } from "./ui/primitives";
+import { ContextMenu, MenuSeparator } from "./ui/ContextMenu";
+import { useContextMenu } from "../hooks/useContextMenu";
 import { SelectDropdown } from "./ui/SelectDropdown";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { OperationConfirmDialog } from "./OperationConfirmDialog";
@@ -31,6 +34,7 @@ export const BranchManager = memo(function BranchManager({
   onSuccess,
   onError,
 }: BranchManagerProps) {
+  const { t } = useTranslation();
   const [tab, setTab] = useState<"create" | "delete" | "merge" | "rebase" | "cherrypick" | "compare">("create");
   const [newBranchName, setNewBranchName] = useState("");
   const [fromBranch, setFromBranch] = useState("");
@@ -56,6 +60,8 @@ export const BranchManager = memo(function BranchManager({
   const [rebaseConflicts, setRebaseConflicts] = useState<string[] | null>(null);
   const [rebaseRecovering, setRebaseRecovering] = useState(false);
   const [confirmDeleteRemote, setConfirmDeleteRemote] = useState<string | null>(null);
+  const [menuRemote, setMenuRemote] = useState<BranchInfo | null>(null);
+  const { onContextMenu, menuProps } = useContextMenu();
 
   const localBranches = branches.filter((b) => !b.is_remote && !b.is_tag);
   const remoteBranches = branches.filter((b) => b.is_remote && !b.is_tag);
@@ -74,17 +80,18 @@ export const BranchManager = memo(function BranchManager({
   }, [branches, selectedBranch, fromBranch, rebaseBranch, compareBranchA, compareBranchB]);
 
   const fromBranchOptions = useMemo(() => [
-    { value: "", label: "HEAD (current)" },
+    { value: "", label: t("branch.headCurrent") },
     ...localBranches.map((b) => ({ value: b.name, label: b.name })),
-  ], [localBranches]);
+  ], [localBranches, t]);
 
   const otherBranchOptions = useMemo(() =>
     localBranches.filter((b) => !b.is_current).map((b) => ({
       value: b.name,
       label: b.name,
-      hint: b.is_merged ? "merged" : "unmerged",
+      hint: b.is_merged ? t("branch.mergedHint") : t("branch.unmergedHint"),
+      hintStyle: b.is_merged ? undefined : ("badge" as const),
     })),
-    [localBranches]
+    [localBranches, t]
   );
 
   const handleCreate = useCallback(async () => {
@@ -92,7 +99,7 @@ export const BranchManager = memo(function BranchManager({
     setLoading(true);
     try {
       await api.createBranch(path, newBranchName.trim(), fromBranch || undefined);
-      onSuccess(`Created branch "${newBranchName.trim()}"`);
+      onSuccess(t("branchToast.created", { name: newBranchName.trim() }));
       setNewBranchName("");
       await onRefresh();
     } catch (e) {
@@ -100,14 +107,14 @@ export const BranchManager = memo(function BranchManager({
     } finally {
       setLoading(false);
     }
-  }, [path, newBranchName, fromBranch, onRefresh, onSuccess, onError]);
+  }, [path, newBranchName, fromBranch, onRefresh, onSuccess, onError, t]);
 
   const handleDelete = useCallback(async () => {
     if (!selectedBranch || selectedBranch === currentBranch) return;
     setLoading(true);
     try {
       await api.deleteBranch(path, selectedBranch);
-      onSuccess(`Deleted branch "${selectedBranch}"`);
+      onSuccess(t("branchToast.deleted", { name: selectedBranch }));
       setSelectedBranch("");
       await onRefresh();
     } catch (e) {
@@ -115,7 +122,7 @@ export const BranchManager = memo(function BranchManager({
     } finally {
       setLoading(false);
     }
-  }, [path, selectedBranch, currentBranch, onRefresh, onSuccess, onError]);
+  }, [path, selectedBranch, currentBranch, onRefresh, onSuccess, onError, t]);
 
   const handleDeleteRemote = useCallback(async (name: string) => {
     const sep = name.indexOf("/");
@@ -124,14 +131,46 @@ export const BranchManager = memo(function BranchManager({
     setLoading(true);
     try {
       await api.gitDeleteRemoteBranch(path, remote, branch);
-      onSuccess(`Deleted remote branch "${name}"`);
+      onSuccess(t("branchToast.deletedRemote", { name }));
       await onRefresh();
     } catch (e) {
       onError(parseError(e));
     } finally {
       setLoading(false);
     }
-  }, [path, onRefresh, onSuccess, onError]);
+  }, [path, onRefresh, onSuccess, onError, t]);
+
+  const openRemoteMenu = useCallback(
+    (e: React.MouseEvent, branch: BranchInfo) => {
+      const target = e.target;
+      if (target instanceof Element && target.closest('button, input, textarea, a, [role="button"]')) return;
+      setMenuRemote(branch);
+      onContextMenu(e);
+    },
+    [onContextMenu]
+  );
+
+  const handleCheckoutRemote = useCallback(async (name: string) => {
+    setLoading(true);
+    try {
+      await api.switchBranch(path, name);
+      onSuccess(t("branch.switchedTo", { name }));
+      await onRefresh();
+    } catch (e) {
+      onError(parseError(e));
+    } finally {
+      setLoading(false);
+    }
+  }, [path, onRefresh, onSuccess, onError, t]);
+
+  const handleCopyRemoteName = useCallback(async (name: string) => {
+    try {
+      await navigator.clipboard.writeText(name);
+      onSuccess(t("branch.copiedName", { name }));
+    } catch (e) {
+      onError(parseError(e));
+    }
+  }, [onSuccess, onError, t]);
 
   const handleMerge = useCallback(async () => {
     if (!selectedBranch || selectedBranch === currentBranch) return;
@@ -143,7 +182,7 @@ export const BranchManager = memo(function BranchManager({
         onSuccess(result.message);
       } else {
         setMergeConflicts(result.conflicts?.length ? result.conflicts : []);
-        onError(`${result.message}: ${result.conflicts?.join(", ") || "unknown conflicts"}`);
+        onError(`${result.message}: ${result.conflicts?.join(", ") || t("branchToast.unknownConflicts")}`);
       }
       setSelectedBranch("");
       await onRefresh();
@@ -152,7 +191,7 @@ export const BranchManager = memo(function BranchManager({
     } finally {
       setLoading(false);
     }
-  }, [path, selectedBranch, currentBranch, mergeStrategy, onRefresh, onSuccess, onError]);
+  }, [path, selectedBranch, currentBranch, mergeStrategy, onRefresh, onSuccess, onError, t]);
 
   const handleCherryPick = useCallback(async () => {
     if (!commitHash.trim()) return;
@@ -172,7 +211,7 @@ export const BranchManager = memo(function BranchManager({
     } finally {
       setLoading(false);
     }
-  }, [path, commitHash, onRefresh, onSuccess, onError]);
+  }, [path, commitHash, onRefresh, onSuccess, onError, t]);
 
   const handleRebase = useCallback(async () => {
     if (!rebaseBranch) return;
@@ -181,12 +220,12 @@ export const BranchManager = memo(function BranchManager({
       const result = await api.gitRebase(path, rebaseBranch);
       if (result.success) {
         setRebaseConflicts(null);
-        onSuccess(result.message || `Rebased onto "${rebaseBranch}"`);
+        onSuccess(result.message || t("branchToast.rebasedOnto", { branch: rebaseBranch }));
         setRebaseBranch("");
       } else {
         setRebaseConflicts(result.conflicts);
         const conflictInfo = result.conflicts.length > 0
-          ? `\nConflicts: ${result.conflicts.join(", ")}`
+          ? `\n${t("branchToast.conflictsPrefix")} ${result.conflicts.join(", ")}`
           : "";
         onError(`${result.message}${conflictInfo}`);
       }
@@ -196,7 +235,7 @@ export const BranchManager = memo(function BranchManager({
     } finally {
       setLoading(false);
     }
-  }, [path, rebaseBranch, onRefresh, onSuccess, onError]);
+  }, [path, rebaseBranch, onRefresh, onSuccess, onError, t]);
 
   const handleRebaseRecovery = useCallback(async (action: "continue" | "skip" | "abort") => {
     setRebaseRecovering(true);
@@ -205,14 +244,14 @@ export const BranchManager = memo(function BranchManager({
       else if (action === "skip") await api.gitRebaseSkip(path);
       else await api.gitRebaseAbort(path);
       setRebaseConflicts(null);
-      onSuccess(action === "continue" ? "Rebase continued" : action === "skip" ? "Commit skipped" : "Rebase aborted");
+      onSuccess(action === "continue" ? t("branchToast.rebaseContinued") : action === "skip" ? t("branchToast.commitSkipped") : t("branchToast.rebaseAborted"));
       await onRefresh();
     } catch (e) {
       onError(parseError(e));
     } finally {
       setRebaseRecovering(false);
     }
-  }, [path, onRefresh, onSuccess, onError]);
+  }, [path, onRefresh, onSuccess, onError, t]);
 
   useEffect(() => {
     if (!open) return;
@@ -260,14 +299,14 @@ export const BranchManager = memo(function BranchManager({
     try {
       await api.gitAbortCherryPick(path);
       setCherryPickConflicts(null);
-      onSuccess("Cherry-pick aborted");
+      onSuccess(t("branchToast.cherryAborted"));
       await onRefresh();
     } catch (e) {
       onError(parseError(e));
     } finally {
       setAbortingCherryPick(false);
     }
-  }, [path, onRefresh, onSuccess, onError]);
+  }, [path, onRefresh, onSuccess, onError, t]);
 
 
   const handleSquash = useCallback(async () => {
@@ -276,10 +315,10 @@ export const BranchManager = memo(function BranchManager({
     try {
       const result = await api.gitSquashCommits(path, squashN, squashMsg.trim() || undefined);
       if (result.success) {
-        onSuccess(result.message || `Squashed ${squashN} commits`);
+        onSuccess(result.message || t("branchToast.squashed", { n: squashN }));
         setSquashMsg("");
       } else {
-        onError(result.message || "Squash failed");
+        onError(result.message || t("branchToast.squashFailed"));
       }
       onRefresh();
     } catch (e) {
@@ -287,7 +326,7 @@ export const BranchManager = memo(function BranchManager({
     } finally {
       setLoading(false);
     }
-  }, [path, squashN, squashMsg, onRefresh, onSuccess, onError]);
+  }, [path, squashN, squashMsg, onRefresh, onSuccess, onError, t]);
 
   const handleConfirmSquash = useCallback(() => { setConfirmSquash(false); handleSquash(); }, [handleSquash]);
   const handleCancelSquash = useCallback(() => setConfirmSquash(false), []);
@@ -303,18 +342,19 @@ export const BranchManager = memo(function BranchManager({
 
   return (
     <>
-    <Modal open={open} onClose={onClose} title="Branch Manager">
+    <Modal open={open} onClose={onClose} title={t("branch.title")} width="lg">
       <Tabs
         tabs={[
-          { value: "create", label: "Create" },
-          { value: "delete", label: "Delete" },
-          { value: "merge", label: "Merge" },
-          { value: "rebase", label: "Rebase" },
-          { value: "cherrypick", label: "Cherry-pick" },
-          { value: "compare", label: "Compare" },
+          { value: "create", label: t("branch.tabCreate") },
+          { value: "delete", label: t("branch.tabDelete") },
+          { value: "merge", label: t("branch.tabMerge") },
+          { value: "rebase", label: t("branch.tabRebase") },
+          { value: "cherrypick", label: t("branch.tabCherryPick") },
+          { value: "compare", label: t("branch.tabCompare") },
         ]}
         active={tab}
         onChange={setTab}
+        aria-label={t("branch.tabRebase")}
       />
 
       <div className="px-6 py-5">
@@ -322,7 +362,7 @@ export const BranchManager = memo(function BranchManager({
           <div className="mb-4 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/40 rounded-lg space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium text-amber-700 dark:text-amber-300">
-                Rebase in progress — resolve conflicts, then continue, skip or abort
+                {t("branch.rebaseInProgress")}
               </span>
               <div className="flex items-center gap-2">
                 <button
@@ -330,21 +370,21 @@ export const BranchManager = memo(function BranchManager({
                   disabled={rebaseRecovering}
                   className="px-3 py-1 rounded text-xs bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 transition-colors"
                 >
-                  {rebaseRecovering ? "Working..." : "Continue"}
+                  {rebaseRecovering ? t("branch.working") : t("branch.continue")}
                 </button>
                 <button
                   onClick={() => handleRebaseRecovery("skip")}
                   disabled={rebaseRecovering}
                   className="px-3 py-1 rounded text-xs bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50 transition-colors"
                 >
-                  Skip
+                  {t("branch.skip")}
                 </button>
                 <button
                   onClick={() => handleRebaseRecovery("abort")}
                   disabled={rebaseRecovering}
                   className="px-3 py-1 rounded text-xs bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 transition-colors"
                 >
-                  Abort
+                  {t("branch.abort")}
                 </button>
               </div>
             </div>
@@ -359,7 +399,7 @@ export const BranchManager = memo(function BranchManager({
               onClick={() => setResolveOpen(true)}
               className="px-3 py-1 rounded text-xs bg-blue-500 text-white hover:bg-blue-600 transition-colors"
             >
-              Resolve conflicts
+              {t("branch.resolveConflicts")}
             </button>
           </div>
         )}
@@ -367,34 +407,34 @@ export const BranchManager = memo(function BranchManager({
           <div className="space-y-4">
             <div>
               <label htmlFor="new-branch-name" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                New Branch Name
+                {t("branch.newBranchName")}
               </label>
               <input
                 id="new-branch-name"
                 type="text"
                 value={newBranchName}
                 onChange={(e) => setNewBranchName(e.target.value)}
-                placeholder="feature/my-feature"
+                placeholder={t("branch.newBranchPlaceholder")}
                 className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400"
               />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                From Branch (optional)
+                {t("branch.fromBranch")}
               </label>
               <SelectDropdown
                 options={fromBranchOptions}
                 value={fromBranch}
                 onChange={setFromBranch}
-                placeholder="HEAD (current)"
-                ariaLabel="From branch"
+                placeholder={t("branch.headCurrentPlaceholder")}
+                ariaLabel={t("branch.fromBranchAria")}
               />
             </div>
             <PrimaryButton
               onClick={handleCreate}
               disabled={!newBranchName.trim() || loading}
             >
-              {loading ? "Creating..." : "Create Branch"}
+              {loading ? t("branch.creating") : t("branch.createBranch")}
             </PrimaryButton>
           </div>
         )}
@@ -403,14 +443,14 @@ export const BranchManager = memo(function BranchManager({
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Select Branch to Delete
+                {t("branch.selectDelete")}
               </label>
               <SelectDropdown
                 options={otherBranchOptions}
                 value={selectedBranch}
                 onChange={setSelectedBranch}
-                placeholder="-- Select --"
-                ariaLabel="Branch to delete"
+                placeholder={t("branch.selectPlaceholder")}
+                ariaLabel={t("branch.deleteAria")}
               />
             </div>
             <PrimaryButton
@@ -418,26 +458,30 @@ export const BranchManager = memo(function BranchManager({
               onClick={openConfirmDelete}
               disabled={!selectedBranch || loading}
             >
-              {loading ? "Deleting..." : "Delete Branch"}
+              {loading ? t("branch.deleting") : t("branch.deleteBranch")}
             </PrimaryButton>
 
             <hr className="border-[var(--border-color)]" />
             <div className="space-y-3">
-              <h4 className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide">Remote Branches</h4>
+              <h4 className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide">{t("branch.remoteBranches")}</h4>
               {remoteBranches.length === 0 ? (
-                <p className="text-xs text-gray-400 dark:text-gray-500 italic">No remote branches</p>
+                <p className="text-xs text-gray-400 dark:text-gray-500 italic">{t("branch.noRemote")}</p>
               ) : (
                 <div className="space-y-1 max-h-40 overflow-y-auto">
                   {remoteBranches.map((b) => (
-                    <div key={b.name} className="flex items-center gap-2 text-xs">
+                    <div
+                      key={b.name}
+                      className="flex items-center gap-2 text-xs"
+                      onContextMenu={(e) => openRemoteMenu(e, b)}
+                    >
                       <span className="flex-1 truncate font-mono text-gray-700 dark:text-gray-300">{b.name}</span>
                       <button
                         onClick={() => setConfirmDeleteRemote(b.name)}
                         disabled={loading}
                         className="px-2 py-0.5 rounded text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 transition-colors"
-                        aria-label={`Delete remote branch ${b.name}`}
+                        aria-label={t("branch.deleteRemoteAria", { name: b.name })}
                       >
-                        Delete
+                        {t("branch.tabDelete")}
                       </button>
                     </div>
                   ))}
@@ -451,30 +495,30 @@ export const BranchManager = memo(function BranchManager({
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Merge Into Current ({currentBranch})
+                {t("branch.mergeInto", { branch: currentBranch })}
               </label>
               <SelectDropdown
                 options={otherBranchOptions}
                 value={selectedBranch}
                 onChange={setSelectedBranch}
-                placeholder="-- Select branch to merge --"
-                ariaLabel="Branch to merge"
+                placeholder={t("branch.mergePlaceholder")}
+                ariaLabel={t("branch.mergeAria")}
               />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Merge Strategy
+                {t("branch.mergeStrategy")}
               </label>
               <SelectDropdown
                 options={[
-                  { value: "default", label: "Default (fast-forward if possible)" },
-                  { value: "no-ff", label: "No Fast-Forward (always merge commit)" },
-                  { value: "squash", label: "Squash (stage changes only)" },
+                  { value: "default", label: t("branch.strategyDefault") },
+                  { value: "no-ff", label: t("branch.strategyNoFf") },
+                  { value: "squash", label: t("branch.strategySquash") },
                 ]}
                 value={mergeStrategy}
                 onChange={(v) => setMergeStrategy(v as "default" | "no-ff" | "squash")}
-                placeholder="-- Select strategy --"
-                ariaLabel="Merge strategy"
+                placeholder={t("branch.strategyPlaceholder")}
+                ariaLabel={t("branch.strategyAria")}
               />
             </div>
             <PrimaryButton
@@ -482,7 +526,7 @@ export const BranchManager = memo(function BranchManager({
               onClick={openConfirmMerge}
               disabled={!selectedBranch || loading}
             >
-              {loading ? "Merging..." : `Merge "${selectedBranch}" into "${currentBranch}"`}
+              {loading ? t("branch.merging") : t("branch.mergeIntoBtn", { source: selectedBranch, target: currentBranch })}
             </PrimaryButton>
           </div>
         )}
@@ -491,14 +535,14 @@ export const BranchManager = memo(function BranchManager({
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Rebase Current ({currentBranch}) Onto
+                {t("branch.rebaseOnto", { branch: currentBranch })}
               </label>
               <SelectDropdown
                 options={otherBranchOptions}
                 value={rebaseBranch}
                 onChange={setRebaseBranch}
-                placeholder="-- Select branch to rebase onto --"
-                ariaLabel="Branch to rebase onto"
+                placeholder={t("branch.rebasePlaceholder")}
+                ariaLabel={t("branch.rebaseAria")}
               />
             </div>
             <PrimaryButton
@@ -506,15 +550,15 @@ export const BranchManager = memo(function BranchManager({
               onClick={openConfirmRebase}
               disabled={!rebaseBranch || loading}
             >
-              {loading ? "Rebasing..." : `Rebase onto "${rebaseBranch}"`}
+              {loading ? t("branch.rebasing") : t("branch.rebaseOntoBtn", { branch: rebaseBranch })}
             </PrimaryButton>
 
             <hr className="border-[var(--border-color)]" />
             <div className="space-y-3">
-              <h4 className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide">Squash Commits</h4>
+              <h4 className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide">{t("branch.squashTitle")}</h4>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Squash Last N Commits
+                  {t("branch.squashLastN")}
                 </label>
                 <input
                   type="number"
@@ -527,13 +571,13 @@ export const BranchManager = memo(function BranchManager({
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Commit Message (optional)
+                  {t("branch.squashMsgLabel")}
                 </label>
                 <input
                   type="text"
                   value={squashMsg}
                   onChange={(e) => setSquashMsg(e.target.value)}
-                  placeholder="Squashed commit message"
+                  placeholder={t("branch.squashMsgPlaceholder")}
                   className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
@@ -542,7 +586,7 @@ export const BranchManager = memo(function BranchManager({
                 onClick={openConfirmSquash}
                 disabled={squashN < 2 || loading}
               >
-                {loading ? "Squashing..." : `Squash Last ${squashN} Commits`}
+                {loading ? t("branch.squashing") : t("branch.squashBtn_other", { n: squashN })}
               </PrimaryButton>
             </div>
           </div>
@@ -552,14 +596,14 @@ export const BranchManager = memo(function BranchManager({
           <div className="space-y-4">
             <div>
               <label htmlFor="commit-hash" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Commit Hash
+                {t("branch.commitHash")}
               </label>
               <input
                 id="commit-hash"
                 type="text"
                 value={commitHash}
                 onChange={(e) => setCommitHash(e.target.value)}
-                placeholder="abc1234..."
+                placeholder={t("branch.commitHashPlaceholder")}
                 className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400"
               />
             </div>
@@ -568,27 +612,27 @@ export const BranchManager = memo(function BranchManager({
               onClick={openConfirmCherryPick}
               disabled={!commitHash.trim() || loading}
             >
-              {loading ? "Cherry-picking..." : "Cherry-pick Commit"}
+              {loading ? t("branch.cherryPicking") : t("branch.cherryPickCommit")}
             </PrimaryButton>
 
             {mergeConflicts && mergeConflicts.length > 0 && (
               <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/40 rounded-lg space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium text-red-700 dark:text-red-300">
-                    Merge conflict ({mergeConflicts.length} file{mergeConflicts.length !== 1 ? "s" : ""})
+                    {mergeConflicts.length === 1 ? t("branch.mergeConflict_one", { count: mergeConflicts.length }) : t("branch.mergeConflict_other", { count: mergeConflicts.length })}
                   </span>
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => setResolveOpen(true)}
                       className="px-3 py-1 rounded text-xs bg-blue-500 text-white hover:bg-blue-600 transition-colors"
                     >
-                      Resolve conflicts
+                      {t("branch.resolveConflicts")}
                     </button>
                     <button
                       onClick={() => setMergeConflicts(null)}
                       className="px-3 py-1 rounded text-xs text-red-500 hover:text-red-700 dark:hover:text-red-300 transition-colors"
                     >
-                      Dismiss
+                      {t("branch.dismiss")}
                     </button>
                   </div>
                 </div>
@@ -604,21 +648,21 @@ export const BranchManager = memo(function BranchManager({
               <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/40 rounded-lg space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium text-red-700 dark:text-red-300">
-                    Cherry-pick conflict ({cherryPickConflicts.length} file{cherryPickConflicts.length !== 1 ? "s" : ""})
+                    {cherryPickConflicts.length === 1 ? t("branch.cherryConflict_one", { count: cherryPickConflicts.length }) : t("branch.cherryConflict_other", { count: cherryPickConflicts.length })}
                   </span>
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => setResolveOpen(true)}
                       className="px-3 py-1 rounded text-xs bg-blue-500 text-white hover:bg-blue-600 transition-colors"
                     >
-                      Resolve conflicts
+                      {t("branch.resolveConflicts")}
                     </button>
                     <button
                       onClick={handleAbortCherryPick}
                       disabled={abortingCherryPick}
                       className="px-3 py-1 rounded text-xs bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 transition-colors"
                     >
-                      {abortingCherryPick ? "Aborting..." : "Abort Cherry-pick"}
+                      {abortingCherryPick ? t("branch.aborting") : t("branch.abortCherryPick")}
                     </button>
                   </div>
                 </div>
@@ -634,30 +678,30 @@ export const BranchManager = memo(function BranchManager({
         {tab === "compare" && (
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Branch A</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t("branch.branchA")}</label>
               <SelectDropdown
-                options={localBranches.map((b) => ({ value: b.name, label: b.name + (b.name === currentBranch ? " (current)" : "") }))}
+                options={localBranches.map((b) => ({ value: b.name, label: b.name + (b.name === currentBranch ? t("branch.currentSuffix") : "") }))}
                 value={compareA}
                 onChange={setCompareBranchA}
-                placeholder="Select branch"
-                ariaLabel="Branch A"
+                placeholder={t("branch.selectPlaceholder")}
+                ariaLabel={t("branch.branchA")}
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Branch B</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t("branch.branchB")}</label>
               <SelectDropdown
-                options={localBranches.map((b) => ({ value: b.name, label: b.name + (b.name === currentBranch ? " (current)" : "") }))}
+                options={localBranches.map((b) => ({ value: b.name, label: b.name + (b.name === currentBranch ? t("branch.currentSuffix") : "") }))}
                 value={compareBranchB}
                 onChange={setCompareBranchB}
-                placeholder="Select branch"
-                ariaLabel="Branch B"
+                placeholder={t("branch.selectPlaceholder")}
+                ariaLabel={t("branch.branchB")}
               />
             </div>
             <PrimaryButton
               onClick={() => setCompareOpen(true)}
               disabled={!compareBranchB || compareA === compareBranchB}
             >
-              Compare
+              {t("branch.compare")}
             </PrimaryButton>
             {compareOpen && compareBranchB && (
               <Suspense fallback={null}>
@@ -695,9 +739,9 @@ export const BranchManager = memo(function BranchManager({
       )}
       <ConfirmDialog
         open={confirmMerge}
-        title="Merge Branch"
-        message={`Merge "${selectedBranch}" into "${currentBranch}"? This may create conflicts that need manual resolution.`}
-        confirmLabel="Merge"
+        title={t("branch.mergeTitle")}
+        message={t("branch.mergeMsg", { source: selectedBranch, target: currentBranch })}
+        confirmLabel={t("branch.mergeConfirm")}
         confirmColor="green"
         onConfirm={handleConfirmMerge}
         onCancel={handleCancelMerge}
@@ -713,22 +757,35 @@ export const BranchManager = memo(function BranchManager({
       <OperationConfirmDialog
         open={confirmSquash}
         operation="git_squash_commits"
-        targets={[{ path, label: `Last ${squashN} commits` }]}
+        targets={[{ path, label: t("branch.squashLastN", { n: squashN }) }]}
         onConfirm={handleConfirmSquash}
         onCancel={handleCancelSquash}
       />
       <OperationConfirmDialog
         open={confirmRebase}
         operation="git_rebase"
-        targets={rebaseBranch ? [{ path, label: `${currentBranch} onto ${rebaseBranch}` }] : []}
+        targets={rebaseBranch ? [{ path, label: t("branch.rebaseOntoBtn", { current: currentBranch, onto: rebaseBranch }) }] : []}
         onConfirm={handleConfirmRebase}
         onCancel={handleCancelRebase}
       />
 
     </Modal>
 
+    <ContextMenu {...menuProps}>
+      {menuRemote && (
+        <>
+          {menuRemote.name !== currentBranch && (
+            <MenuItem label={t("branch.checkoutLocally")} onClick={() => handleCheckoutRemote(menuRemote.name)} />
+          )}
+          <MenuItem label={t("branch.copyName")} onClick={() => handleCopyRemoteName(menuRemote.name)} />
+          <MenuSeparator />
+          <MenuItem label={t("branch.deleteRemote")} danger onClick={() => setConfirmDeleteRemote(menuRemote.name)} />
+        </>
+      )}
+    </ContextMenu>
+
     {resolveOpen && (
-      <Modal open onClose={() => setResolveOpen(false)} title="Resolve conflicts" maxWidth="max-w-2xl">
+      <Modal open onClose={() => setResolveOpen(false)} title={t("branch.resolveTitle")} width="xl">
         <div className="p-3">
           <Suspense fallback={null}>
             <ConflictResolver

@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef, memo } from "react";
+import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
 import type { BranchInfo, ReviewResult } from "../lib/types";
 import * as api from "../lib/tauri";
@@ -36,6 +37,7 @@ export const AiReviewDialog = memo(function AiReviewDialog({
   onSuccess,
   onError,
 }: AiReviewDialogProps) {
+  const { t } = useTranslation();
   const [tab, setTab] = useState<Tab>("review");
   const [baseBranch, setBaseBranch] = useState("main");
   const [headBranch, setHeadBranch] = useState(currentBranch);
@@ -102,7 +104,7 @@ export const AiReviewDialog = memo(function AiReviewDialog({
       })
       .catch((e) => {
         if (!cancelled && mountedRef.current)
-          onError(errorMessage(e) || "Failed to load review history");
+          onError(errorMessage(e) || t("aiReview.loadHistoryError"));
       })
       .finally(() => {
         if (!cancelled && mountedRef.current) setHistoryLoading(false);
@@ -110,11 +112,11 @@ export const AiReviewDialog = memo(function AiReviewDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, tab, projectPath, onError]);
+  }, [open, tab, projectPath, onError, t]);
 
   const handleReview = useCallback(async () => {
     if (!baseBranch || !headBranch || baseBranch === headBranch) {
-      onError("Please select two different branches");
+      onError(t("aiReview.twoBranches"));
       return;
     }
     setLoading(true);
@@ -151,11 +153,11 @@ export const AiReviewDialog = memo(function AiReviewDialog({
       if (mountedRef.current) {
         setResult(res);
         setIsStreaming(false);
-        onSuccess("Review complete");
+        onSuccess(t("aiReview.complete"));
       }
     } catch (e) {
       if (mountedRef.current) {
-        onError(errorMessage(e) || "Review failed (check terminal for details)");
+        onError(errorMessage(e) || t("aiReview.failed"));
         setIsStreaming(false);
       }
     } finally {
@@ -170,7 +172,7 @@ export const AiReviewDialog = memo(function AiReviewDialog({
       }
       streamedCharsBufferRef.current = 0;
     }
-  }, [projectPath, baseBranch, headBranch, onSuccess, onError]);
+  }, [projectPath, baseBranch, headBranch, onSuccess, onError, t]);
 
   const handleDelete = useCallback(
     async (id: string) => {
@@ -180,17 +182,17 @@ export const AiReviewDialog = memo(function AiReviewDialog({
         if (mountedRef.current) {
           setHistory((prev) => prev.filter((r) => r.id !== id));
           if (expandedId === id) setExpandedId(null);
-          onSuccess("Review deleted");
+          onSuccess(t("aiReview.deleted"));
         }
       } catch (e) {
         if (mountedRef.current) {
-          onError(errorMessage(e) || "Failed to delete review");
+          onError(errorMessage(e) || t("aiReview.deleteError"));
         }
       } finally {
         if (mountedRef.current) setDeletingId(null);
       }
     },
-    [expandedId, onSuccess, onError]
+    [expandedId, onSuccess, onError, t]
   );
 
   const handleViewHistoryReview = useCallback((review: ReviewResult) => {
@@ -202,14 +204,14 @@ export const AiReviewDialog = memo(function AiReviewDialog({
     <Modal
       open={open}
       onClose={onClose}
-      title="AI Code Review"
+      title={t("aiReview.title")}
       subtitle={projectName}
-      maxWidth="max-w-3xl"
+      width="xl"
     >
       <Tabs
         tabs={[
-          { value: "review" as Tab, label: "Review" },
-          { value: "history" as Tab, label: "History" },
+          { value: "review" as Tab, label: t("aiReview.tabReview") },
+          { value: "history" as Tab, label: t("aiReview.tabHistory") },
         ]}
         active={tab}
         onChange={setTab}
@@ -221,7 +223,7 @@ export const AiReviewDialog = memo(function AiReviewDialog({
           <div className="flex items-end gap-3">
             <div className="flex-1">
               <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
-                Base branch
+                {t("aiReview.baseLabel")}
               </label>
               <BranchDropdown
                 currentBranch={baseBranch}
@@ -245,7 +247,7 @@ export const AiReviewDialog = memo(function AiReviewDialog({
 
             <div className="flex-1">
               <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
-                Head branch (review this)
+                {t("aiReview.headLabel")}
               </label>
               <BranchDropdown
                 currentBranch={headBranch}
@@ -263,12 +265,12 @@ export const AiReviewDialog = memo(function AiReviewDialog({
               {loading ? (
                 <>
                   <span className="animate-spin">&#x21BB;</span>
-                  Reviewing...
+                  {t("aiReview.reviewing")}
                 </>
               ) : (
                 <>
                   <AiGenerateIcon size={14} />
-                  Review
+                  {t("aiReview.reviewBtn")}
                 </>
               )}
             </button>
@@ -278,11 +280,11 @@ export const AiReviewDialog = memo(function AiReviewDialog({
           {loading && isStreaming && (
             <div className="flex flex-col items-center justify-center py-12 text-gray-500 dark:text-gray-400">
               <div className="animate-spin text-3xl mb-3">&#x21BB;</div>
-              <div className="text-sm font-medium">Analyzing code with AI...</div>
+              <div className="text-sm font-medium">{t("aiReview.analyzing")}</div>
               <div className="text-xs mt-1">
                 {streamedChars > 0
-                  ? `Received ${streamedChars.toLocaleString()} characters...`
-                  : "Waiting for the first response from the LLM..."}
+                  ? t("aiReview.received", { count: streamedChars.toLocaleString() })
+                  : t("aiReview.waiting")}
               </div>
             </div>
           )}
@@ -297,8 +299,7 @@ export const AiReviewDialog = memo(function AiReviewDialog({
                   {new Date(result.created_at).toLocaleString()}
                 </span>
                 <span className="text-xs text-gray-500 dark:text-gray-400">
-                  {result.stats.files_changed} file
-                  {result.stats.files_changed !== 1 ? "s" : ""} &middot;{" "}
+                  {t("aiReview.filesChanged", { count: result.stats.files_changed })} &middot;{" "}
                   <span className="text-green-600 dark:text-green-400">
                     +{result.stats.total_additions}
                   </span>{" "}
@@ -322,7 +323,7 @@ export const AiReviewDialog = memo(function AiReviewDialog({
           {historyLoading ? (
             <div className="flex flex-col items-center justify-center py-12 text-gray-500 dark:text-gray-400">
               <div className="animate-spin text-2xl mb-3">&#x21BB;</div>
-              <div className="text-sm">Loading history...</div>
+              <div className="text-sm">{t("aiReview.loadingHistory")}</div>
             </div>
           ) : history.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-gray-400 dark:text-gray-500">
@@ -336,9 +337,9 @@ export const AiReviewDialog = memo(function AiReviewDialog({
               >
                 <path d="M8 0a8 8 0 110 16A8 8 0 018 0zm.75 4.75a.75.75 0 00-1.5 0v3.5a.75.75 0 00.37.65l2.5 1.5a.75.75 0 10.76-1.3L8.75 7.72V4.75z" />
               </svg>
-              <div className="text-sm font-medium">No reviews yet</div>
+              <div className="text-sm font-medium">{t("aiReview.noReviews")}</div>
               <div className="text-xs mt-1">
-                Run an AI review to see history here
+                {t("aiReview.noReviewsDesc")}
               </div>
             </div>
           ) : (
@@ -401,8 +402,7 @@ export const AiReviewDialog = memo(function AiReviewDialog({
                           </span>
                           <span>&middot;</span>
                           <span>
-                            {review.stats.files_changed} file
-                            {review.stats.files_changed !== 1 ? "s" : ""}
+                            {t("aiReview.filesChanged", { count: review.stats.files_changed })}
                           </span>
                         </div>
                       </div>
@@ -411,7 +411,7 @@ export const AiReviewDialog = memo(function AiReviewDialog({
                     <div className="flex items-center gap-1 shrink-0">
                       <button
                         onClick={() => handleViewHistoryReview(review)}
-                        title="View in Review tab"
+                        title={t("aiReview.viewTitle")}
                         className="p-1.5 rounded-md text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
                       >
                         <svg
@@ -427,7 +427,7 @@ export const AiReviewDialog = memo(function AiReviewDialog({
                       <button
                         onClick={() => handleDelete(review.id)}
                         disabled={deletingId === review.id}
-                        title="Delete review"
+                        title={t("aiReview.deleteTitle")}
                         className="p-1.5 rounded-md text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors disabled:opacity-50"
                       >
                         {deletingId === review.id ? (

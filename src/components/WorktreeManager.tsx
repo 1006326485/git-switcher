@@ -1,8 +1,13 @@
 import { useState, useCallback, memo } from "react";
+import type { MouseEvent } from "react";
+import { useTranslation } from "react-i18next";
 import * as api from "../lib/tauri";
 import type { WorktreeInfo } from "../lib/types";
 import { parseError } from "../lib/types";
 import { OperationConfirmDialog } from "./OperationConfirmDialog";
+import { useContextMenu } from "../hooks/useContextMenu";
+import { ContextMenu, MenuSeparator } from "./ui/ContextMenu";
+import { MenuItem } from "./ui/primitives";
 
 interface WorktreeManagerProps {
   path: string;
@@ -17,6 +22,7 @@ export const WorktreeManager = memo(function WorktreeManager({
   onError,
   onInfo,
 }: WorktreeManagerProps) {
+  const { t } = useTranslation();
   const [worktrees, setWorktrees] = useState<WorktreeInfo[]>([]);
   const [showList, setShowList] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -25,13 +31,25 @@ export const WorktreeManager = memo(function WorktreeManager({
   const [newBranch, setNewBranch] = useState("");
   const [createBranch, setCreateBranch] = useState(false);
   const [confirmRemoval, setConfirmRemoval] = useState<string | null>(null);
+  const [menuWorktree, setMenuWorktree] = useState<WorktreeInfo | null>(null);
+  const { onContextMenu, close, menuProps } = useContextMenu();
+
+  const openRowMenu = useCallback(
+    (e: MouseEvent, worktree: WorktreeInfo) => {
+      const target = e.target;
+      if (target instanceof Element && target.closest('button, input, textarea, a, [role="button"]')) return;
+      setMenuWorktree(worktree);
+      onContextMenu(e);
+    },
+    [onContextMenu]
+  );
 
   const loadWorktrees = useCallback(async () => {
     try {
       const list = await api.gitListWorktrees(path);
       setWorktrees(list);
     } catch (e) {
-      onError(`Failed to load worktrees: ${parseError(e)}`);
+      onError(t("worktrees.loadFailed", { error: parseError(e) }));
     }
   }, [path, onError]);
 
@@ -48,7 +66,7 @@ export const WorktreeManager = memo(function WorktreeManager({
   const handleAdd = useCallback(async () => {
     if (!newName.trim()) return;
     setLoading(true);
-    onInfo?.("Adding worktree...");
+    onInfo?.(t("worktrees.addingWorktree"));
     try {
       await api.gitAddWorktree(
         path,
@@ -56,7 +74,7 @@ export const WorktreeManager = memo(function WorktreeManager({
         newBranch.trim() || undefined,
         createBranch
       );
-      onSuccess(`Worktree "${newName.trim()}" created`);
+      onSuccess(t("worktrees.added", { name: newName.trim() }));
       setNewName("");
       setNewBranch("");
       setCreateBranch(false);
@@ -67,15 +85,15 @@ export const WorktreeManager = memo(function WorktreeManager({
     } finally {
       setLoading(false);
     }
-  }, [path, newName, newBranch, createBranch, onSuccess, onError, onInfo, loadWorktrees]);
+  }, [path, newName, newBranch, createBranch, onSuccess, onError, onInfo, loadWorktrees, t]);
 
   const handleRemove = useCallback(
     async (name: string) => {
       setLoading(true);
-      onInfo?.(`Removing worktree "${name}"...`);
+      onInfo?.(t("worktrees.removing", { name }));
       try {
         await api.gitRemoveWorktree(path, name);
-        onSuccess(`Worktree "${name}" removed`);
+        onSuccess(t("worktrees.removed", { name }));
         await loadWorktrees();
       } catch (e) {
         onError(parseError(e));
@@ -89,13 +107,13 @@ export const WorktreeManager = memo(function WorktreeManager({
 
   const handlePrune = useCallback(async () => {
     setLoading(true);
-    onInfo?.("Pruning worktrees...");
+    onInfo?.(t("worktrees.pruningWorktrees"));
     try {
       const pruned = await api.gitPruneWorktrees(path);
       if (pruned.length > 0) {
-        onSuccess(`Pruned ${pruned.length} worktree(s): ${pruned.join(", ")}`);
+        onSuccess(t("worktrees.pruned", { count: pruned.length, names: pruned.join(", ") }));
       } else {
-        onSuccess("No prunable worktrees found");
+        onSuccess(t("worktrees.noPrunable"));
       }
       await loadWorktrees();
     } catch (e) {
@@ -117,13 +135,13 @@ export const WorktreeManager = memo(function WorktreeManager({
         <button
           onClick={handleToggleList}
           aria-expanded={showList}
-          aria-label="Toggle worktree list"
+          aria-label={t("worktrees.toggleList")}
           className="flex-1 text-left text-xs font-medium text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 flex items-center gap-1.5 transition-colors"
         >
           <span className={`transition-transform text-[10px] ${showList ? "rotate-90" : ""}`}>
             &#x25B6;
           </span>
-          Worktrees
+          {t("worktrees.title")}
           {worktrees.length > 0 && (
             <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400">
               {worktrees.length}
@@ -136,17 +154,17 @@ export const WorktreeManager = memo(function WorktreeManager({
               onClick={handlePrune}
               disabled={loading}
               className="px-2 py-0.5 rounded text-[10px] font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50 transition-colors"
-              title="Prune stale worktrees"
+              title={t("worktrees.pruneTitle")}
             >
-              Prune
+              {t("worktrees.prune")}
             </button>
             <button
               onClick={() => setShowAddForm(!showAddForm)}
               disabled={loading}
               className="px-2 py-0.5 rounded text-[10px] font-medium bg-blue-100 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-900/40 disabled:opacity-50 transition-colors"
-              title="Add worktree"
+              title={t("worktrees.addTitle")}
             >
-              {showAddForm ? "Cancel" : "+ Add"}
+              {showAddForm ? t("worktrees.cancel") : t("worktrees.add")}
             </button>
           </div>
         )}
@@ -162,16 +180,16 @@ export const WorktreeManager = memo(function WorktreeManager({
                   type="text"
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
-                  placeholder="Worktree name"
-                  aria-label="Worktree name"
+                  placeholder={t("worktrees.namePlaceholder")}
+                  aria-label={t("worktrees.nameAria")}
                   className="flex-1 px-2 py-1 rounded border border-[var(--border-color)] bg-[var(--surface-1)] text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
                 <input
                   type="text"
                   value={newBranch}
                   onChange={(e) => setNewBranch(e.target.value)}
-                  placeholder="Branch (optional)"
-                  aria-label="Branch name"
+                  placeholder={t("worktrees.branchPlaceholder")}
+                  aria-label={t("worktrees.branchAria")}
                   className="flex-1 px-2 py-1 rounded border border-[var(--border-color)] bg-[var(--surface-1)] text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
@@ -183,14 +201,14 @@ export const WorktreeManager = memo(function WorktreeManager({
                     onChange={(e) => setCreateBranch(e.target.checked)}
                     className="rounded"
                   />
-                  Create new branch
+                  {t("worktrees.createBranch")}
                 </label>
                 <button
                   onClick={handleAdd}
                   disabled={!newName.trim() || loading}
                   className="px-3 py-1 rounded text-xs font-medium bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white transition-colors"
                 >
-                  {loading ? "Adding..." : "Create"}
+                  {loading ? t("worktrees.adding") : t("worktrees.create")}
                 </button>
               </div>
             </div>
@@ -199,11 +217,11 @@ export const WorktreeManager = memo(function WorktreeManager({
           {/* Worktree list */}
           {loading && !showAddForm ? (
             <p className="text-xs text-gray-400 dark:text-gray-500 italic py-1">
-              Loading...
+              {t("common.loading")}
             </p>
           ) : worktrees.length === 0 ? (
             <p className="text-xs text-gray-400 dark:text-gray-500 italic py-1">
-              No worktrees
+              {t("worktrees.noWorktrees")}
             </p>
           ) : (
             <div className="space-y-1 max-h-40 overflow-y-auto">
@@ -211,6 +229,7 @@ export const WorktreeManager = memo(function WorktreeManager({
                 <div
                   key={wt.name}
                   className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-[var(--surface-2)] border border-[var(--border-color)] text-xs"
+                  onContextMenu={(e) => openRowMenu(e, wt)}
                 >
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
@@ -224,12 +243,12 @@ export const WorktreeManager = memo(function WorktreeManager({
                       )}
                       {wt.is_locked && (
                         <span className="px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-[10px]">
-                          locked
+                          {t("worktrees.locked")}
                         </span>
                       )}
                       {wt.is_prunable && (
                         <span className="px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 text-[10px]">
-                          prunable
+                          {t("worktrees.prunable")}
                         </span>
                       )}
                     </div>
@@ -245,10 +264,10 @@ export const WorktreeManager = memo(function WorktreeManager({
                       onClick={() => setConfirmRemoval(wt.name)}
                       disabled={loading || wt.is_locked}
                       className="px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800/50 hover:bg-red-200 dark:hover:bg-red-900/40 disabled:opacity-50 transition-colors"
-                      aria-label={`Remove worktree ${wt.name}`}
-                      title={wt.is_locked ? "Cannot remove locked worktree" : "Remove"}
+                      aria-label={t("worktrees.removeAria", { name: wt.name })}
+                      title={wt.is_locked ? t("worktrees.lockedRemove") : t("worktrees.remove")}
                     >
-                      Remove
+                      {t("common.remove")}
                     </button>
                   </div>
                 </div>
@@ -258,6 +277,30 @@ export const WorktreeManager = memo(function WorktreeManager({
         </div>
       )}
     </div>
+      {menuWorktree && (
+        <ContextMenu {...menuProps} onClose={close}>
+          <MenuItem
+            label={t("worktrees.openInFinder")}
+            onClick={() => void api.openInFinder(menuWorktree.path)}
+          />
+          <MenuItem
+            label={t("worktrees.openInTerminal")}
+            onClick={() => void api.openInTerminal(menuWorktree.path)}
+          />
+          <MenuItem
+            label={t("worktrees.copyPath")}
+            onClick={() => void navigator.clipboard.writeText(menuWorktree.path)}
+          />
+          <MenuSeparator />
+          <MenuItem
+            label={t("worktrees.remove")}
+            danger
+            disabled={menuWorktree.is_locked}
+            description={menuWorktree.is_locked ? t("worktrees.lockedRemove") : undefined}
+            onClick={() => setConfirmRemoval(menuWorktree.name)}
+          />
+        </ContextMenu>
+      )}
       {confirmRemoval && (
         <OperationConfirmDialog
           open

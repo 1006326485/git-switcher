@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DestructiveOpKind, DestructiveOpRecord, UndoPlan } from "../lib/types";
 import { parseError } from "../lib/types";
+import { t as translate } from "../lib/i18n";
 import * as api from "../lib/tauri";
 
 /**
@@ -21,29 +22,41 @@ export function planUndo(record: DestructiveOpRecord): UndoPlan {
   return { kind: "manual" };
 }
 
-const OP_LABELS: Record<DestructiveOpKind, string> = {
-  checkout: "branch switch",
-  reset: "reset",
-  merge: "merge",
-  rebase: "rebase",
-  cherry_pick: "cherry-pick",
-  squash: "squash",
-  reword: "reword",
-  drop: "commit drop",
-  revert: "revert",
-  amend: "amend",
+const OP_LABEL_KEYS: Record<
+  DestructiveOpKind,
+  | "history.op.branchSwitch"
+  | "history.op.reset"
+  | "history.op.merge"
+  | "history.op.rebase"
+  | "history.op.cherryPick"
+  | "history.op.squash"
+  | "history.op.reword"
+  | "history.op.commitDrop"
+  | "history.op.revert"
+  | "history.op.amend"
+> = {
+  checkout: "history.op.branchSwitch",
+  reset: "history.op.reset",
+  merge: "history.op.merge",
+  rebase: "history.op.rebase",
+  cherry_pick: "history.op.cherryPick",
+  squash: "history.op.squash",
+  reword: "history.op.reword",
+  drop: "history.op.commitDrop",
+  revert: "history.op.revert",
+  amend: "history.op.amend",
 };
 
 export function opLabel(kind: DestructiveOpKind): string {
-  return OP_LABELS[kind];
+  return translate(OP_LABEL_KEYS[kind]);
 }
 
 /** Human-readable description of what the undo action will do. */
 export function undoPlanLabel(record: DestructiveOpRecord, plan: UndoPlan): string {
   const what = opLabel(record.kind);
-  if (plan.kind === "reset_hard") return `Undo ${what}: reset --hard back to ${plan.target.slice(0, 7)}`;
-  if (plan.kind === "checkout_branch") return `Undo ${what}: switch back to ${plan.branch}`;
-  return `Cannot undo ${what} automatically — recover via ReflogView`;
+  if (plan.kind === "reset_hard") return translate("history.planResetHard", { what, target: plan.target.slice(0, 7) });
+  if (plan.kind === "checkout_branch") return translate("history.planCheckoutBranch", { what, branch: plan.branch });
+  return translate("history.planManual", { what });
 }
 
 export interface UndoPrompt {
@@ -97,15 +110,15 @@ export function useOperationHistory(opts: {
         } else if (plan.kind === "checkout_branch") {
           await api.switchBranch(record.path, plan.branch);
         } else {
-          throw new Error("This operation cannot be undone automatically. Use ReflogView to recover.");
+          throw new Error(translate("history.cannotUndo"));
         }
       });
       setPrompt(null);
-      optsRef.current.onDone(`Undid ${opLabel(record.kind)}`);
+      optsRef.current.onDone(translate("history.undid", { what: opLabel(record.kind) }));
       optsRef.current.onAfterUndo();
     } catch (e) {
       setPrompt(promptRef.current ? { ...promptRef.current, busy: false } : null);
-      optsRef.current.onError(`Undo failed: ${parseError(e)}`, e);
+      optsRef.current.onError(translate("history.undoFailed", { error: parseError(e) }), e);
     }
   }, []);
 

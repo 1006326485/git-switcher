@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, memo } from "react";
+import { useTranslation } from "react-i18next";
 import * as api from "../lib/tauri";
 import type { BranchCompareResult } from "../lib/types";
 import { parseError } from "../lib/types";
@@ -16,6 +17,7 @@ export const BranchCompareView = memo(function BranchCompareView({
   branchB,
   onClose,
 }: BranchCompareViewProps) {
+  const { t } = useTranslation();
   const [result, setResult] = useState<BranchCompareResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -47,9 +49,9 @@ export const BranchCompareView = memo(function BranchCompareView({
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--border-color)]">
           <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-200">
-            Comparing <span className="text-blue-600 dark:text-blue-400">{branchA}</span> → <span className="text-green-600 dark:text-green-400">{branchB}</span>
+            {t("branchCompare.comparing")} <span className="text-blue-600 dark:text-blue-400">{branchA}</span> → <span className="text-green-600 dark:text-green-400">{branchB}</span>
           </h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 text-lg" aria-label="Close">✕</button>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 text-lg" aria-label={t("common.close")}>✕</button>
         </div>
 
         {/* Content */}
@@ -57,14 +59,14 @@ export const BranchCompareView = memo(function BranchCompareView({
           {loading && (
             <div className="flex items-center justify-center py-8">
               <div className="animate-spin rounded-full h-6 w-6 border-2 border-blue-500 border-t-transparent" />
-              <span className="ml-2 text-sm text-gray-500">Comparing branches...</span>
+              <span className="ml-2 text-sm text-gray-500">{t("branchCompare.loading")}</span>
             </div>
           )}
 
           {error && (
             <div className="text-center py-6">
               <p className="text-sm text-red-500 mb-2">{error}</p>
-              <button onClick={load} className="text-xs text-blue-500 hover:underline">Retry</button>
+              <button onClick={load} className="text-xs text-blue-500 hover:underline">{t("common.retry")}</button>
             </div>
           )}
 
@@ -73,10 +75,10 @@ export const BranchCompareView = memo(function BranchCompareView({
               {/* Summary */}
               <div className="flex items-center gap-3 text-xs">
                 <span className="px-2 py-1 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 font-medium">
-                  {result.ahead} ahead
+                  {t("branchCompare.ahead", { count: result.ahead })}
                 </span>
                 <span className="px-2 py-1 rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 font-medium">
-                  {result.behind} behind
+                  {t("branchCompare.behind", { count: result.behind })}
                 </span>
                 <span className="px-2 py-1 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-medium">
                   {result.changed_files.length} file{result.changed_files.length !== 1 ? "s" : ""} changed
@@ -157,7 +159,7 @@ export const BranchCompareView = memo(function BranchCompareView({
 
               {/* No diff */}
               {result.ahead === 0 && result.behind === 0 && result.changed_files.length === 0 && (
-                <p className="text-sm text-gray-500 text-center py-4">Branches are identical</p>
+                <p className="text-sm text-gray-500 text-center py-4">{t("branchCompare.identical")}</p>
               )}
             </>
           )}

@@ -33,100 +33,49 @@ pub struct OperationPreview {
     pub targets: Vec<OperationTarget>,
 }
 
+/// Resolves the confirmation copy for one operation from the catalogue.
+///
+/// Each arm only names its risk and the catalogue stem; the three strings
+/// come from `backend.policy.<stem>{Title,Desc,Confirm}` so the dialog copy
+/// follows the UI language.
 fn policy(operation: &str) -> Result<OperationPolicy, AppError> {
-    let (risk, title, description, confirm_label) = match operation {
-        "git_reset" => (
-            OperationRisk::HistoryRewrite,
-            "Reset repository",
-            "This can rewrite history and discard uncommitted work depending on the selected reset mode.",
-            "Reset",
-        ),
-        "git_clean" => (
-            OperationRisk::Destructive,
-            "Delete untracked files",
-            "This permanently deletes the listed untracked files from the repository.",
-            "Delete files",
-        ),
-        "git_stash_drop" => (
-            OperationRisk::Destructive,
-            "Drop stash",
-            "This permanently removes the selected stash entry.",
-            "Drop stash",
-        ),
-        "delete_branch" | "delete_merged_branches" => (
-            OperationRisk::Destructive,
-            "Delete branch",
-            "This permanently deletes the selected local branch or branches.",
-            "Delete branch",
-        ),
-        "git_remove_worktree" => (
-            OperationRisk::Destructive,
-            "Remove worktree",
-            "This removes the selected worktree directory from Git management.",
-            "Remove worktree",
-        ),
-        "git_delete_tag" => (
-            OperationRisk::Destructive,
-            "Delete tag",
-            "This permanently removes the selected local Git tag.",
-            "Delete tag",
-        ),
-        "git_apply_patch" => (
-            OperationRisk::HistoryRewrite,
-            "Apply patch",
-            "This writes the patch changes into the repository working tree and may create conflicts.",
-            "Apply patch",
-        ),
-        "git_rebase" | "git_squash_commits" | "git_drop_commit" | "git_reword_commit" | "git_amend" => (
-            OperationRisk::HistoryRewrite,
-            "Rewrite history",
-            "This rewrites commit history and should not be used on shared commits without coordination.",
-            "Rewrite history",
-        ),
-        "git_revert" => (
-            OperationRisk::HistoryRewrite,
-            "Revert commit",
-            "This creates a new commit that undoes the selected commit's changes.",
-            "Revert commit",
-        ),
-        "git_push_force" => (
-            OperationRisk::HistoryRewrite,
-            "Force push",
-            "This rewrites the remote branch with --force-with-lease. Commits that exist only on the remote are discarded unless they match the remote-tracking ref.",
-            "Force push",
-        ),
-        "git_delete_remote_branch" => (
-            OperationRisk::Destructive,
-            "Delete remote branch",
-            "This permanently deletes the selected branch on the remote.",
-            "Delete remote branch",
-        ),
-        "git_cherry_pick" | "git_cherry_pick_range" => (
-            OperationRisk::HistoryRewrite,
-            "Cherry-pick commits",
-            "This applies commits to the current branch and may create conflicts.",
-            "Cherry-pick",
-        ),
-        "task_workspace_execute" | "push_all" | "push_ahead" | "sync_all" => (
-            OperationRisk::BatchDestructive,
-            "Run batch Git operation",
-            "This writes repository state across every listed project. Review the exact project set before continuing.",
-            "Run batch operation",
-        ),
+    let (risk, stem) = match operation {
+        "git_reset" => (OperationRisk::HistoryRewrite, "resetRepository"),
+        "git_clean" => (OperationRisk::Destructive, "deleteUntrackedFiles"),
+        "git_stash_drop" => (OperationRisk::Destructive, "dropStash"),
+        "delete_branch" | "delete_merged_branches" => (OperationRisk::Destructive, "deleteBranch"),
+        "git_remove_worktree" => (OperationRisk::Destructive, "removeWorktree"),
+        "git_delete_tag" => (OperationRisk::Destructive, "deleteTag"),
+        "git_apply_patch" => (OperationRisk::HistoryRewrite, "applyPatch"),
+        "git_rebase" | "git_squash_commits" | "git_drop_commit" | "git_reword_commit"
+        | "git_amend" => (OperationRisk::HistoryRewrite, "rewriteHistory"),
+        "git_revert" => (OperationRisk::HistoryRewrite, "revertCommit"),
+        "git_push_force" => (OperationRisk::HistoryRewrite, "forcePush"),
+        "git_delete_remote_branch" => (OperationRisk::Destructive, "deleteRemoteBranch"),
+        "git_cherry_pick" | "git_cherry_pick_range" => {
+            (OperationRisk::HistoryRewrite, "cherryPickCommits")
+        }
+        "task_workspace_execute" | "push_all" | "push_ahead" | "sync_all" => {
+            (OperationRisk::BatchDestructive, "runBatchGitOperation")
+        }
         _ => {
-            return Err(AppError::NotFound(format!(
-                "No destructive-operation policy is registered for '{}'",
-                operation
+            return Err(AppError::NotFound(crate::i18n::tl(
+                "backend.policy.unknownPolicy",
+                &[("operation", operation)],
             )));
         }
     };
 
+    let title_key = format!("backend.policy.{}Title", stem);
+    let description_key = format!("backend.policy.{}Desc", stem);
+    let confirm_label_key = format!("backend.policy.{}Confirm", stem);
+
     Ok(OperationPolicy {
         operation: operation.to_string(),
         risk,
-        title: title.to_string(),
-        description: description.to_string(),
-        confirm_label: confirm_label.to_string(),
+        title: crate::i18n::tl(&title_key, &[]),
+        description: crate::i18n::tl(&description_key, &[]),
+        confirm_label: crate::i18n::tl(&confirm_label_key, &[]),
         requires_confirmation: true,
         allow_skip_confirmation: false,
     })
@@ -138,9 +87,10 @@ pub fn get_operation_preview(
     targets: Vec<OperationTarget>,
 ) -> Result<OperationPreview, AppError> {
     if targets.is_empty() {
-        return Err(AppError::Other(
-            "A destructive operation must name at least one affected target".to_string(),
-        ));
+        return Err(AppError::Other(crate::i18n::tl(
+            "backend.policy.emptyImpact",
+            &[],
+        )));
     }
 
     Ok(OperationPreview {
@@ -180,5 +130,63 @@ mod tests {
             }]
         )
         .is_err());
+    }
+
+    #[test]
+    fn every_policy_stem_resolves_in_both_languages() {
+        use crate::i18n;
+        let stems = [
+            "resetRepository",
+            "deleteUntrackedFiles",
+            "dropStash",
+            "deleteBranch",
+            "removeWorktree",
+            "deleteTag",
+            "applyPatch",
+            "rewriteHistory",
+            "revertCommit",
+            "forcePush",
+            "deleteRemoteBranch",
+            "cherryPickCommits",
+            "runBatchGitOperation",
+        ];
+        for stem in stems {
+            for suffix in ["Title", "Desc", "Confirm"] {
+                let key = format!("backend.policy.{}{}", stem, suffix);
+                let en = i18n::t("en", &key, &[]);
+                assert_ne!(en, key, "missing English copy for {key}");
+                assert_ne!(
+                    i18n::t("zh-CN", &key, &[]),
+                    key,
+                    "missing zh-CN copy for {key}"
+                );
+            }
+        }
+        // The catalogue is the source of the English copy, so pin it byte for
+        // byte — a locale edit must not silently change what users see.
+        assert_eq!(
+            i18n::t("en", "backend.policy.resetRepositoryTitle", &[]),
+            "Reset repository"
+        );
+        assert_eq!(
+            i18n::t("en", "backend.policy.forcePushDesc", &[]),
+            "This rewrites the remote branch with --force-with-lease. Commits that exist only on the remote are discarded unless they match the remote-tracking ref."
+        );
+        assert_eq!(
+            i18n::t("en", "backend.policy.cherryPickCommitsConfirm", &[]),
+            "Cherry-pick"
+        );
+        assert_eq!(
+            i18n::t(
+                "en",
+                "backend.policy.unknownPolicy",
+                &[("operation", "git_whatever")]
+            ),
+            "No destructive-operation policy is registered for 'git_whatever'"
+        );
+        assert_eq!(
+            i18n::t("en", "backend.policy.emptyImpact", &[]),
+            "A destructive operation must name at least one affected target"
+        );
     }
 }

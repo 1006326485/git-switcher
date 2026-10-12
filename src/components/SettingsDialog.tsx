@@ -1,10 +1,12 @@
 import { memo, useState, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { Modal, Tabs } from "./ui/primitives";
 import { GeneralSettings } from "./GeneralSettings";
 import { LlmSettings } from "./LlmSettings";
 import { BackgroundSettings } from "./BackgroundSettings";
 import { CustomCommandsManager } from "./CustomCommandsManager";
 import { CredentialsSettings } from "./CredentialsSettings";
+import { TraySettings } from "./TraySettings";
 import * as api from "../lib/tauri";
 import { parseError } from "../lib/types";
 import { APP_VERSION } from "../lib/appVersion";
@@ -20,7 +22,8 @@ interface SettingsDialogProps {
 }
 
 export const SettingsDialog = memo(function SettingsDialog({ open, onClose, onSuccess, onError, accentColor, onAccentChange }: SettingsDialogProps) {
-  const [tab, setTab] = useState<"general" | "llm" | "background" | "credentials" | "commands" | "data" | "about">("general");
+  const { t } = useTranslation();
+  const [tab, setTab] = useState<"general" | "llm" | "background" | "credentials" | "tray" | "commands" | "data" | "about">("general");
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
 
@@ -33,14 +36,14 @@ export const SettingsDialog = memo(function SettingsDialog({ open, onClose, onSu
       });
       if (filePath) {
         await api.exportAllSettings(filePath);
-        onSuccess(`Settings exported to ${filePath}`);
+        onSuccess(t("settings.data.exportedTo", { path: filePath }));
       }
     } catch (e) {
       onError(parseError(e));
     } finally {
       setExporting(false);
     }
-  }, [onSuccess, onError]);
+  }, [onSuccess, onError, t]);
 
   const handleImport = useCallback(async () => {
     setImporting(true);
@@ -52,7 +55,11 @@ export const SettingsDialog = memo(function SettingsDialog({ open, onClose, onSu
       if (filePath) {
         const result = await api.importAllSettings(filePath as string);
         onSuccess(
-          `Imported: settings applied, ${result.groups_imported} group(s), ${result.projects_imported} project(s), ${result.projects_skipped} skipped`
+          t("settings.data.imported", {
+            groups: result.groups_imported,
+            projects: result.projects_imported,
+            skipped: result.projects_skipped,
+          })
         );
         onClose();
       }
@@ -61,18 +68,19 @@ export const SettingsDialog = memo(function SettingsDialog({ open, onClose, onSu
     } finally {
       setImporting(false);
     }
-  }, [onSuccess, onError, onClose]);
+  }, [onSuccess, onError, onClose, t]);
 
   return (
-    <Modal open={open} onClose={onClose} title="Settings" maxWidth="max-w-lg">
+    <Modal open={open} onClose={onClose} title={t("settings.title")} width="lg">
       <Tabs
         tabs={[
-          { value: "general", label: "General" },
-          { value: "llm", label: "AI Review" },
-          { value: "background", label: "Background" },
-          { value: "credentials", label: "Credentials" },
-          { value: "data", label: "Data" },
-          { value: "about", label: "About" },
+          { value: "general", label: t("settings.tabs.general") },
+          { value: "llm", label: t("settings.tabs.aiReview") },
+          { value: "background", label: t("settings.tabs.background") },
+          { value: "credentials", label: t("settings.tabs.credentials") },
+          { value: "tray", label: t("settings.tabs.statusBar") },
+          { value: "data", label: t("settings.tabs.data") },
+          { value: "about", label: t("settings.tabs.about") },
         ]}
         active={tab}
         onChange={setTab}
@@ -82,38 +90,39 @@ export const SettingsDialog = memo(function SettingsDialog({ open, onClose, onSu
         {tab === "llm" && <LlmSettings onError={onError} />}
         {tab === "background" && <BackgroundSettings onError={onError} />}
         {tab === "credentials" && <CredentialsSettings onError={onError} />}
+        {tab === "tray" && <TraySettings onError={onError} />}
         {tab === "commands" && <CustomCommandsManager onError={onError} />}
         {tab === "data" && (
           <div className="space-y-4">
             <p className="text-sm text-gray-600 dark:text-gray-400">
-              Export all settings, projects, and groups to a JSON file, or import from a previous export.
+              {t("settings.data.description")}
             </p>
             <button
               onClick={handleExport}
               disabled={exporting}
               className="w-full px-4 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium text-sm transition-colors"
             >
-              {exporting ? "Exporting..." : "Export Settings"}
+              {exporting ? t("settings.data.exporting") : t("settings.data.export")}
             </button>
             <button
               onClick={handleImport}
               disabled={importing}
               className="w-full px-4 py-2.5 rounded-lg bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-medium text-sm transition-colors"
             >
-              {importing ? "Importing..." : "Import Settings"}
+              {importing ? t("settings.data.importing") : t("settings.data.import")}
             </button>
             <p className="text-xs text-gray-400 dark:text-gray-500">
-              Existing groups are matched by name; existing projects (by path) are skipped.
+              {t("settings.data.note")}
             </p>
           </div>
         )}
         {tab === "about" && (
           <div className="space-y-3 text-sm text-gray-600 dark:text-gray-400">
-            <p className="font-semibold text-gray-900 dark:text-gray-100">Git Switcher v{APP_VERSION}</p>
-            <p>Multi-repo Git management tool with AI-powered code review.</p>
+            <p className="font-semibold text-gray-900 dark:text-gray-100">{t("settings.about.title", { version: APP_VERSION })}</p>
+            <p>{t("settings.about.tagline")}</p>
             <div className="text-xs text-gray-400">
-              <p>Built with Tauri v2 + React + TypeScript + Rust</p>
-              <p>AI Review uses OpenAI-compatible API (GPT, Claude, Ollama, etc.)</p>
+              <p>{t("settings.about.stack")}</p>
+              <p>{t("settings.about.aiNote")}</p>
             </div>
           </div>
         )}

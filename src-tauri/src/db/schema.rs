@@ -4,9 +4,9 @@ use rusqlite::{params, Connection};
 use std::path::PathBuf;
 
 use crate::models::{
-    CustomCommand, GitCredential, GitProject, Group, OperationLogEntry, ReviewResult, RunPreset,
-    RunPresetItem, TaskExecutionState, TaskStrategy, TaskWorkspace, TaskWorkspaceEntry,
-    TaskWorkspaceEntryDetail, TaskWorkspaceOutcome, TaskWorkspaceStatus,
+    CustomCommand, GitCredential, GitProject, Group, OperationLogEntry, RecentProject,
+    ReviewResult, RunPreset, RunPresetItem, TaskExecutionState, TaskStrategy, TaskWorkspace,
+    TaskWorkspaceEntry, TaskWorkspaceEntryDetail, TaskWorkspaceOutcome, TaskWorkspaceStatus,
 };
 use crate::AppError;
 
@@ -150,6 +150,7 @@ impl Database {
             ("alias", "TEXT"),
             ("sort_order", "INTEGER NOT NULL DEFAULT 0"),
             ("last_active_at", "TEXT"),
+            ("last_opened_at", "TEXT"),
             ("last_commit_hash", "TEXT"),
             ("color", "TEXT"),
             ("description", "TEXT"),
@@ -502,6 +503,46 @@ impl Database {
             )
             .map_err(|e| AppError::Database(format!("Failed to update activity: {}", e)))?;
             Ok(())
+        })
+    }
+
+    /// Records that the project was opened (terminal/finder/editor) so the
+    /// tray's recent list ranks by actual usage.
+    pub fn touch_project_opened(&self, id: &str) -> Result<(), AppError> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "UPDATE projects SET last_opened_at = ?1 WHERE id = ?2",
+                params![chrono::Utc::now().to_rfc3339(), id],
+            )
+            .map_err(|e| AppError::Database(format!("Failed to record open: {}", e)))?;
+            Ok(())
+        })
+    }
+
+    pub fn get_recent_projects(&self, limit: u32) -> Result<Vec<RecentProject>, AppError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, COALESCE(NULLIF(alias, ''), name), path FROM projects
+                     ORDER BY COALESCE(last_opened_at, updated_at) DESC, name
+                     LIMIT ?1",
+                )
+                .map_err(|e| AppError::Database(format!("Failed to prepare statement: {}", e)))?;
+            let projects = stmt
+                .query_map(params![limit as i64], |row| {
+                    Ok(RecentProject {
+                        id: row.get(0)?,
+                        name: row.get(1)?,
+                        path: row.get(2)?,
+                    })
+                })
+                .map_err(|e| AppError::Database(format!("Failed to query recent projects: {}", e)))?
+                .filter_map(|r| {
+                    r.map_err(|e| log::warn!("skipping corrupt project row: {}", e))
+                        .ok()
+                })
+                .collect();
+            Ok(projects)
         })
     }
 

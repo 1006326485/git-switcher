@@ -13,7 +13,12 @@ use super::try_update_activity;
 fn canonicalize_path(path: &str) -> Result<String, AppError> {
     Path::new(path)
         .canonicalize()
-        .map_err(|e| AppError::Other(format!("Invalid path: {}", e)))
+        .map_err(|e| {
+            AppError::Other(crate::i18n::tl(
+                "backend.project.invalidPath",
+                &[("error", e.to_string().as_str())],
+            ))
+        })
         .map(|p| p.to_string_lossy().to_string())
 }
 
@@ -40,12 +45,18 @@ fn import_projects_core(
         let path = match canonicalize_path(&raw_path) {
             Ok(p) => p,
             Err(_) => {
-                errors.push(format!("'{}': path not found", raw_path));
+                errors.push(crate::i18n::tl(
+                    "backend.project.importPathNotFound",
+                    &[("path", raw_path.as_str())],
+                ));
                 continue;
             }
         };
         if !GitService::is_git_repo(&path) {
-            errors.push(format!("'{}': not a git repository", path));
+            errors.push(crate::i18n::tl(
+                "backend.project.importNotGitRepo",
+                &[("path", path.as_str())],
+            ));
             continue;
         }
         if db.project_exists(&path).unwrap_or(false) {
@@ -56,7 +67,13 @@ fn import_projects_core(
         let project = GitProject::new(project_name, path, group_id.to_string());
 
         if let Err(e) = db.insert_project(&project) {
-            errors.push(format!("'{}': {}", project.name, e));
+            errors.push(crate::i18n::tl(
+                "backend.project.importInsertFailed",
+                &[
+                    ("name", project.name.as_str()),
+                    ("error", e.to_string().as_str()),
+                ],
+            ));
             continue;
         }
         match GitService::get_project_detail(&project, group.clone()) {
@@ -70,15 +87,15 @@ fn import_projects_core(
 
     if results.is_empty() {
         if !errors.is_empty() {
-            return Err(AppError::Other(format!(
-                "Import failed: {}",
-                errors.join("; ")
+            return Err(AppError::Other(crate::i18n::tl(
+                "backend.project.importFailed",
+                &[("errors", errors.join("; ").as_str())],
             )));
         }
         if skipped > 0 {
-            return Err(AppError::Other(format!(
-                "All {} project(s) already exist",
-                skipped
+            return Err(AppError::Other(crate::i18n::tl(
+                "backend.project.allAlreadyExist",
+                &[("count", skipped.to_string().as_str())],
             )));
         }
     }
@@ -101,11 +118,17 @@ pub async fn add_project(
         let path = canonicalize_path(&path)?;
 
         if !GitService::is_git_repo(&path) {
-            return Err(AppError::Other("Not a git repository".to_string()));
+            return Err(AppError::Other(crate::i18n::tl(
+                "backend.project.notGitRepo",
+                &[],
+            )));
         }
 
         if db.project_exists(&path)? {
-            return Err(AppError::Other("Project already exists".to_string()));
+            return Err(AppError::Other(crate::i18n::tl(
+                "backend.project.alreadyExists",
+                &[],
+            )));
         }
 
         let group = db.get_group_by_id(&group_id)?;
@@ -154,9 +177,10 @@ pub async fn import_workspace(
     tokio::task::spawn_blocking(move || {
         let folders = WorkspaceService::parse_workspace_file(&file_path)?;
         if folders.is_empty() {
-            return Err(AppError::Other(
-                "No folders found in workspace file".to_string(),
-            ));
+            return Err(AppError::Other(crate::i18n::tl(
+                "backend.project.noWorkspaceFolders",
+                &[],
+            )));
         }
         let entries = folders.into_iter().map(|f| (f.name, f.path));
         import_projects_core(entries, &group_id, &db)
@@ -177,9 +201,10 @@ pub async fn init_git_project(
         let path = canonicalize_path(&path)?;
 
         if db.project_exists(&path)? {
-            return Err(AppError::Other(
-                "Project already exists at this path".to_string(),
-            ));
+            return Err(AppError::Other(crate::i18n::tl(
+                "backend.project.alreadyExistsAtPath",
+                &[],
+            )));
         }
 
         GitService::init_repo(&path)?;
@@ -250,9 +275,10 @@ pub async fn set_project_notes(
             other => other,
         };
         if val.is_some_and(|s| s.len() > 1000) {
-            return Err(AppError::Other(
-                "Notes must be at most 1000 characters".to_string(),
-            ));
+            return Err(AppError::Other(crate::i18n::tl(
+                "backend.project.notesTooLong",
+                &[],
+            )));
         }
         db.update_project_notes(&id, val)
     })
@@ -272,7 +298,12 @@ pub async fn reorder_projects(
 }
 
 #[tauri::command]
-pub async fn open_in_terminal(path: String) -> Result<(), AppError> {
+pub async fn open_in_terminal(path: String, db: State<'_, Database>) -> Result<(), AppError> {
+    touch_project_by_path(&db, &path);
+    open_in_terminal_impl(path).await
+}
+
+pub(crate) async fn open_in_terminal_impl(path: String) -> Result<(), AppError> {
     tokio::task::spawn_blocking(move || {
         #[cfg(target_os = "macos")]
         {
@@ -293,9 +324,9 @@ pub async fn open_in_terminal(path: String) -> Result<(), AppError> {
             // Reject paths containing cmd.exe metacharacters to prevent injection
             const FORBIDDEN: &[char] = &['"', '&', '|', '>', '<', '^', '%', ';', '(', ')'];
             if let Some(c) = path.chars().find(|c| FORBIDDEN.contains(c)) {
-                return Err(AppError::Other(format!(
-                    "Path contains forbidden character '{}' for Windows command line",
-                    c
+                return Err(AppError::Other(crate::i18n::tl(
+                    "backend.project.forbiddenChar",
+                    &[("char", c.to_string().as_str())],
                 )));
             }
             std::process::Command::new("cmd")
@@ -400,12 +431,31 @@ fn spawn_command(program: &str, args: &[&str], label: &str) -> Result<(), AppErr
     std::process::Command::new(program)
         .args(args)
         .spawn()
-        .map_err(|e| AppError::Other(format!("Failed to open {}: {}", label, e)))?;
+        .map_err(|e| {
+            AppError::Other(crate::i18n::tl(
+                "backend.project.failedToOpen",
+                &[("label", label), ("error", e.to_string().as_str())],
+            ))
+        })?;
     Ok(())
 }
 
+/// Ranks the tray's recent list: opening a project from anywhere counts.
+fn touch_project_by_path(db: &Database, path: &str) {
+    if let Ok(project) = db.get_project_by_path(path) {
+        if let Err(e) = db.touch_project_opened(&project.id) {
+            log::warn!("failed to record project open: {}", e);
+        }
+    }
+}
+
 #[tauri::command]
-pub async fn open_in_finder(path: String) -> Result<(), AppError> {
+pub async fn open_in_finder(path: String, db: State<'_, Database>) -> Result<(), AppError> {
+    touch_project_by_path(&db, &path);
+    open_in_finder_impl(path).await
+}
+
+pub(crate) async fn open_in_finder_impl(path: String) -> Result<(), AppError> {
     tokio::task::spawn_blocking(move || {
         #[cfg(target_os = "macos")]
         {
@@ -426,7 +476,12 @@ pub async fn open_in_finder(path: String) -> Result<(), AppError> {
 }
 
 #[tauri::command]
-pub async fn open_in_vscode(path: String) -> Result<(), AppError> {
+pub async fn open_in_vscode(path: String, db: State<'_, Database>) -> Result<(), AppError> {
+    touch_project_by_path(&db, &path);
+    open_in_vscode_impl(path).await
+}
+
+pub(crate) async fn open_in_vscode_impl(path: String) -> Result<(), AppError> {
     tokio::task::spawn_blocking(move || {
         #[cfg(target_os = "macos")]
         {
@@ -441,9 +496,9 @@ pub async fn open_in_vscode(path: String) -> Result<(), AppError> {
             // Reject paths containing cmd.exe metacharacters to prevent injection
             const FORBIDDEN: &[char] = &['"', '&', '|', '>', '<', '^', '%', ';', '(', ')'];
             if let Some(c) = path.chars().find(|c| FORBIDDEN.contains(c)) {
-                return Err(AppError::Other(format!(
-                    "Path contains forbidden character '{}' for Windows command line",
-                    c
+                return Err(AppError::Other(crate::i18n::tl(
+                    "backend.project.forbiddenChar",
+                    &[("char", c.to_string().as_str())],
                 )));
             }
             spawn_command("cmd", &["/C", "code", &path], "VS Code")?;
@@ -459,7 +514,10 @@ pub async fn scan_directory_for_repos(path: String) -> Result<Vec<String>, AppEr
     tokio::task::spawn_blocking(move || {
         let root = Path::new(&path);
         if !root.is_dir() {
-            return Err(AppError::Other("Path is not a directory".to_string()));
+            return Err(AppError::Other(crate::i18n::tl(
+                "backend.project.notDirectory",
+                &[],
+            )));
         }
 
         let skip: Vec<&str> = vec![
@@ -568,12 +626,18 @@ pub async fn bulk_import_projects(
             let path = match canonicalize_path(raw_path) {
                 Ok(p) => p,
                 Err(_) => {
-                    errors.push(format!("'{}': path not found", raw_path));
+                    errors.push(crate::i18n::tl(
+                        "backend.project.importPathNotFound",
+                        &[("path", raw_path.as_str())],
+                    ));
                     continue;
                 }
             };
             if !GitService::is_git_repo(&path) {
-                errors.push(format!("'{}': not a git repository", path));
+                errors.push(crate::i18n::tl(
+                    "backend.project.importNotGitRepo",
+                    &[("path", path.as_str())],
+                ));
                 continue;
             }
             if db.project_exists(&path).unwrap_or(false) {
@@ -584,7 +648,13 @@ pub async fn bulk_import_projects(
             let project = GitProject::new(name, path, group_id.clone());
 
             if let Err(e) = db.insert_project(&project) {
-                errors.push(format!("'{}': {}", project.name, e));
+                errors.push(crate::i18n::tl(
+                    "backend.project.importInsertFailed",
+                    &[
+                        ("name", project.name.as_str()),
+                        ("error", e.to_string().as_str()),
+                    ],
+                ));
                 continue;
             }
             match GitService::get_project_detail(&project, group.clone()) {
@@ -633,7 +703,10 @@ pub async fn import_projects(
         let projects: Vec<GitProject> = serde_json::from_str(&json)
             .map_err(|e| AppError::Other(format!("Failed to parse JSON: {}", e)))?;
         if projects.is_empty() {
-            return Err(AppError::Other("No projects found in JSON".to_string()));
+            return Err(AppError::Other(crate::i18n::tl(
+                "backend.project.noProjectsInJson",
+                &[],
+            )));
         }
         let entries = projects.into_iter().map(|p| (Some(p.name), p.path));
         import_projects_core(entries, &group_id, &db)
@@ -685,6 +758,7 @@ pub fn export_all_settings(
 
 #[tauri::command]
 pub fn import_all_settings(
+    app: tauri::AppHandle,
     path: String,
     store: State<'_, super::settings::SettingsStore>,
     db: State<'_, Database>,
@@ -697,6 +771,7 @@ pub fn import_all_settings(
     let mut settings = data.settings;
     settings.llm.key_in_keychain = false;
     store.update_all(&settings)?;
+    crate::commands::tray::rebuild(&app);
 
     // Import groups: update existing by name, insert new
     let existing_groups = db.get_all_groups()?;

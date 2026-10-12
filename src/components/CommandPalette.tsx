@@ -1,4 +1,5 @@
 import { memo, useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import type { ProjectMatch } from "../hooks/useCommandPalette";
 import type { SearchResult } from "../lib/types";
@@ -28,10 +29,14 @@ interface CommandPaletteProps {
   onAddRecent: (id: string, name: string, lastBranch: string) => void;
 }
 
-const QUICK_TAGS = [
-  { label: "behind", description: "Projects behind remote" },
-  { label: "changes", description: "Projects with modifications" },
-  { label: "stale", description: "Inactive for 30+ days" },
+const QUICK_TAGS: {
+  tag: "behind" | "changes" | "stale";
+  labelKey: "palette.quickBehind" | "palette.quickChanges" | "palette.quickStale";
+  descKey: "palette.quickBehindDesc" | "palette.quickChangesDesc" | "palette.quickStaleDesc";
+}[] = [
+  { tag: "behind", labelKey: "palette.quickBehind", descKey: "palette.quickBehindDesc" },
+  { tag: "changes", labelKey: "palette.quickChanges", descKey: "palette.quickChangesDesc" },
+  { tag: "stale", labelKey: "palette.quickStale", descKey: "palette.quickStaleDesc" },
 ];
 
 const STATUS_COLORS = {
@@ -75,6 +80,7 @@ export const CommandPalette = memo(function CommandPalette({
   onScrollToProject,
   onAddRecent,
 }: CommandPaletteProps) {
+  const { t } = useTranslation();
   const [section, setSection] = useState<"projects" | "commands" | "content">("commands");
   const [projectIdx, setProjectIdx] = useState(0);
   const [cmdIdx, setCmdIdx] = useState(0);
@@ -190,7 +196,10 @@ export const CommandPalette = memo(function CommandPalette({
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape" || ((e.metaKey || e.ctrlKey) && e.key === "w")) {
+        if (e.key === "w") e.preventDefault();
+        onClose();
+      }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
@@ -305,12 +314,8 @@ export const CommandPalette = memo(function CommandPalette({
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={
-            isContentSearch
-              ? "Search across all repositories..."
-              : "Search projects, commands, or / for content search..."
-          }
-          aria-label="Search projects, commands, and content"
+          placeholder={t(isContentSearch ? "palette.searchContent" : "palette.searchHint")}
+          aria-label={t("palette.searchAria")}
           className="w-full px-4 py-3 text-sm bg-transparent border-b border-(--border-color) outline-none text-gray-900 dark:text-gray-100 placeholder-gray-400"
         />
 
@@ -319,12 +324,12 @@ export const CommandPalette = memo(function CommandPalette({
           <div className="flex gap-2 px-4 py-2 border-b border-(--border-color)">
             {QUICK_TAGS.map((tag) => (
               <button
-                key={tag.label}
+                key={tag.tag}
                 className="px-2.5 py-0.5 text-xs rounded-full bg-(--surface-2) text-gray-600 dark:text-gray-300 hover:bg-(--accent) hover:text-white transition-colors"
-                onClick={() => onQueryChange(tag.label)}
-                title={tag.description}
+                onClick={() => onQueryChange(tag.tag)}
+                title={t(tag.descKey)}
               >
-                {tag.label}
+                {t(tag.labelKey)}
               </button>
             ))}
           </div>
@@ -333,35 +338,37 @@ export const CommandPalette = memo(function CommandPalette({
         <div ref={listRef} className="max-h-96 overflow-y-auto">
           {/* Content search results */}
           {isContentSearch && (
-            <div role="listbox" aria-label="Content search results">
+            <div role="listbox" aria-label={t("palette.contentAria")}>
               {contentLoading && (
                 <div className="flex items-center gap-2 px-4 py-3 text-sm text-gray-400">
                   <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                   </svg>
-                  Searching...
+                  {t("palette.searching")}
                 </div>
               )}
 
               {!contentLoading && contentQuery.trim() && contentResults.length === 0 && (
                 <p className="px-4 py-6 text-sm text-gray-400 text-center">
-                  No results found for "{contentQuery}"
+                  {t("palette.noContentFor", { q: contentQuery })}
                 </p>
               )}
 
               {!contentLoading && !contentQuery.trim() && (
                 <p className="px-4 py-6 text-sm text-gray-400 text-center">
-                  Type to search file contents across all repositories
+                  {t("palette.typeToSearch")}
                 </p>
               )}
 
               {!contentLoading && contentResults.length > 0 && (
                 <>
                   <div className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 flex items-center justify-between">
-                    <span>Content Matches</span>
+                    <span>{t("palette.contentMatches")}</span>
                     <span className="normal-case font-normal opacity-70">
-                      {contentResults.length} result{contentResults.length !== 1 ? "s" : ""}
+                      {contentResults.length === 1
+                        ? t("palette.results_one", { count: contentResults.length })
+                        : t("palette.results_other", { count: contentResults.length })}
                     </span>
                   </div>
                   {Array.from(groupedResults).map(([projectName, results]) => (
@@ -412,11 +419,11 @@ export const CommandPalette = memo(function CommandPalette({
 
           {/* Projects section — hidden in content search mode */}
           {!isContentSearch && (recentProjects.length > 0 || matchedProjects.length > 0) && (
-            <div role="listbox" aria-label="Projects">
+            <div role="listbox" aria-label={t("palette.projectsAria")}>
               {recentProjects.length > 0 && !query.trim() && (
                 <>
                   <div className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20">
-                    Recent Projects
+                    {t("palette.recentProjects")}
                   </div>
                   {recentProjects.map((pm, i) => {
                     const { detail, statusColor } = pm;
@@ -519,7 +526,7 @@ export const CommandPalette = memo(function CommandPalette({
 
           {/* Commands section — hidden in content search mode */}
           {!isContentSearch && (
-            <div role="listbox" aria-label="Commands">
+            <div role="listbox" aria-label={t("palette.groupCommands")}>
               <div className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-400 bg-(--surface-2)">
                 Commands
               </div>
@@ -569,7 +576,7 @@ export const CommandPalette = memo(function CommandPalette({
               })}
               {filteredCmds.length === 0 && !hasProjects && (
                 <p className="px-4 py-3 text-sm text-gray-400">
-                  No results found
+                  {t("palette.noResults")}
                 </p>
               )}
             </div>
@@ -578,13 +585,13 @@ export const CommandPalette = memo(function CommandPalette({
 
         {/* Footer hint */}
         <div className="px-4 py-1.5 text-[10px] text-gray-400 border-t border-(--border-color) flex items-center gap-3">
-          <span><kbd className="bg-gray-100 dark:bg-gray-800 px-1 rounded">↑↓</kbd> navigate</span>
-          <span><kbd className="bg-gray-100 dark:bg-gray-800 px-1 rounded">Enter</kbd> select</span>
+          <span><kbd className="bg-gray-100 dark:bg-gray-800 px-1 rounded">↑↓</kbd> {t("palette.navNavigate")}</span>
+          <span><kbd className="bg-gray-100 dark:bg-gray-800 px-1 rounded">Enter</kbd> {t("palette.navSelect")}</span>
           {!isContentSearch && (
-            <span><kbd className="bg-gray-100 dark:bg-gray-800 px-1 rounded">Tab</kbd> switch section</span>
+            <span><kbd className="bg-gray-100 dark:bg-gray-800 px-1 rounded">Tab</kbd> {t("palette.navSection")}</span>
           )}
-          <span><kbd className="bg-gray-100 dark:bg-gray-800 px-1 rounded">/</kbd> content search</span>
-          <span><kbd className="bg-gray-100 dark:bg-gray-800 px-1 rounded">Esc</kbd> close</span>
+          <span><kbd className="bg-gray-100 dark:bg-gray-800 px-1 rounded">/</kbd> {t("palette.navContent")}</span>
+          <span><kbd className="bg-gray-100 dark:bg-gray-800 px-1 rounded">Esc</kbd> {t("palette.navClose")}</span>
         </div>
       </div>
     </div>,

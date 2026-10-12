@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import type { Command } from "../components/CommandPalette";
 import type { ProjectDetail, Theme, ViewMode, ProjectScript, RunPresetItem } from "../lib/types";
 import type { RecentProject } from "./useRecentProjects";
@@ -33,10 +34,14 @@ interface Actions {
   onLaunchWorkspace: (items: RunPresetItem[]) => void;
 }
 
-const QUICK_TAGS = [
-  { label: "behind", description: "Projects behind remote" },
-  { label: "changes", description: "Projects with modifications" },
-  { label: "stale", description: "Inactive for 30+ days" },
+const QUICK_TAGS: {
+  tag: "behind" | "changes" | "stale";
+  labelKey: "cmd.behind" | "cmd.changes" | "cmd.stale";
+  descKey: "cmd.behindDesc" | "cmd.changesDesc" | "cmd.staleDesc";
+}[] = [
+  { tag: "behind", labelKey: "cmd.behind", descKey: "cmd.behindDesc" },
+  { tag: "changes", labelKey: "cmd.changes", descKey: "cmd.changesDesc" },
+  { tag: "stale", labelKey: "cmd.stale", descKey: "cmd.staleDesc" },
 ];
 
 const scriptCache = new Map<string, ProjectScript[]>();
@@ -83,6 +88,7 @@ export function useCommandPalette(
   recent: RecentProject[],
   addRecent: (id: string, name: string, lastBranch: string) => void,
 ) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [runEntries, setRunEntries] = useState<RunEntry[]>([]);
@@ -109,7 +115,7 @@ export function useCommandPalette(
         const workspaceEntries: RunEntry[] = presets.map((p) => ({
           id: `workspace-${p.id}`,
           label: p.name,
-          description: `Workspace · ${p.items.length} terminals`,
+          description: t("cmd.workspaceSuffix", { count: p.items.length }),
           name: p.name,
           command: "",
           projectPath: null,
@@ -159,15 +165,15 @@ export function useCommandPalette(
       // Projects
       {
         id: "add",
-        label: "Add Project",
-        category: "Projects",
+        label: t("cmd.addProject"),
+        category: t("cmd.catProjects"),
         shortcut: "⌘N",
         action: actions.onAddProject,
       },
       {
         id: "refresh",
-        label: "Refresh All",
-        category: "Projects",
+        label: t("cmd.refreshAll"),
+        category: t("cmd.catProjects"),
         shortcut: "⌘R",
         action: actions.onRefreshAll,
       },
@@ -175,26 +181,26 @@ export function useCommandPalette(
       // Git
       {
         id: "fetch",
-        label: "Fetch All",
-        category: "Git",
+        label: t("cmd.fetchAll"),
+        category: t("cmd.catGit"),
         action: actions.onFetchAll,
       },
       {
         id: "pull",
-        label: "Pull All",
-        category: "Git",
+        label: t("cmd.pullAll"),
+        category: t("cmd.catGit"),
         action: actions.onPullAll,
       },
       {
         id: "push",
-        label: "Push All",
-        category: "Git",
+        label: t("cmd.pushAll"),
+        category: t("cmd.catGit"),
         action: actions.onPushAll,
       },
       {
         id: "quick-diff",
-        label: "Quick Diff Overview",
-        category: "Git",
+        label: t("cmd.quickDiff"),
+        category: t("cmd.catGit"),
         shortcut: "⌘D",
         action: actions.onQuickDiff,
       },
@@ -202,43 +208,43 @@ export function useCommandPalette(
       // View
       {
         id: "sidebar",
-        label: "Toggle Sidebar",
-        category: "View",
+        label: t("cmd.toggleSidebar"),
+        category: t("cmd.catView"),
         shortcut: "⌘B",
         action: actions.onToggleSidebar,
       },
       {
         id: "view-card",
-        label: "Card View",
-        category: "View",
+        label: t("cmd.cardView"),
+        category: t("cmd.catView"),
         shortcut: "⌘1",
         action: () => actions.onViewModeChange("card"),
       },
       {
         id: "view-list",
-        label: "List View",
-        category: "View",
+        label: t("cmd.listView"),
+        category: t("cmd.catView"),
         shortcut: "⌘2",
         action: () => actions.onViewModeChange("list"),
       },
       {
         id: "view-compact",
-        label: "Compact View",
-        category: "View",
+        label: t("cmd.compactView"),
+        category: t("cmd.catView"),
         shortcut: "⌘3",
         action: () => actions.onViewModeChange("compact"),
       },
       {
         id: "view-table",
-        label: "Table View",
-        category: "View",
+        label: t("cmd.tableView"),
+        category: t("cmd.catView"),
         shortcut: "⌘4",
         action: () => actions.onViewModeChange("table"),
       },
       {
         id: "view-dashboard",
-        label: "Dashboard View",
-        category: "View",
+        label: t("cmd.dashboardView"),
+        category: t("cmd.catView"),
         shortcut: "⌘5",
         action: () => actions.onViewModeChange("dashboard"),
       },
@@ -246,43 +252,43 @@ export function useCommandPalette(
       // Theme
       {
         id: "theme-light",
-        label: "Light Theme",
-        category: "Theme",
+        label: t("cmd.lightTheme"),
+        category: t("cmd.catTheme"),
         action: () => actions.onThemeChange("light"),
       },
       {
         id: "theme-dark",
-        label: "Dark Theme",
-        category: "Theme",
+        label: t("cmd.darkTheme"),
+        category: t("cmd.catTheme"),
         action: () => actions.onThemeChange("dark"),
       },
       {
         id: "theme-system",
-        label: "System Theme",
-        category: "Theme",
+        label: t("cmd.systemTheme"),
+        category: t("cmd.catTheme"),
         action: () => actions.onThemeChange("system"),
       },
 
       // Data
       {
         id: "export",
-        label: "Export/Import",
-        category: "Data",
+        label: t("cmd.exportImport"),
+        category: t("cmd.catData"),
         shortcut: "⌘E",
         action: actions.onExportImport,
       },
       {
         id: "bulk-import",
-        label: "Bulk Import",
-        category: "Data",
+        label: t("cmd.bulkImport"),
+        category: t("cmd.catData"),
         action: actions.onBulkImport,
       },
 
       // Archive
       {
         id: "export-archive",
-        label: "Export Archive",
-        category: "Archive",
+        label: t("cmd.exportArchive"),
+        category: t("cmd.catArchive"),
         action: () => {},
         _needsProject: true,
         _projectAction: actions.onExportArchive,
@@ -291,8 +297,8 @@ export function useCommandPalette(
       // App
       {
         id: "settings",
-        label: "Settings",
-        category: "App",
+        label: t("cmd.settings"),
+        category: t("cmd.catApp"),
         action: actions.onSettings,
       },
 
@@ -303,7 +309,7 @@ export function useCommandPalette(
           return {
             id: entry.id,
             label: entry.label,
-            category: "Run",
+            category: t("cmd.catRun"),
             description: entry.description,
             action: () => actions.onLaunchWorkspace(items),
           };
@@ -316,7 +322,7 @@ export function useCommandPalette(
           return {
             id: entry.id,
             label: entry.label,
-            category: "Run",
+            category: t("cmd.catRun"),
             description: entry.description,
             action: () => actions.onRunProjectScript(entry.projectPath!, title, script),
           };
@@ -324,7 +330,7 @@ export function useCommandPalette(
         return {
           id: entry.id,
           label: entry.label,
-          category: "Run",
+          category: t("cmd.catRun"),
           description: entry.description,
           action: () => {},
           _needsProject: true,
@@ -336,16 +342,16 @@ export function useCommandPalette(
         };
       }),
     ],
-    [actions, runEntries, projects]
+    [actions, runEntries, projects, t]
   );
 
   const matchedProjects: ProjectMatch[] = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return [];
 
-    const quickTag = QUICK_TAGS.find((t) => t.label === q);
+    const quickTag = QUICK_TAGS.find((t) => t.tag === q);
     const matched = quickTag
-      ? filterByQuickTag(projects, quickTag.label)
+      ? filterByQuickTag(projects, quickTag.tag)
       : projects.filter((p) => matchProject(p, q));
 
     return matched.map((detail) => ({

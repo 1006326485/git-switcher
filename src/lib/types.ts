@@ -1,3 +1,6 @@
+import type { LanguageChoice } from "./i18n";
+import { t } from "./i18n";
+
 export interface GitProject {
   id: string;
   name: string;
@@ -74,8 +77,20 @@ export interface LlmConfig {
   key_in_keychain: boolean;
 }
 
+export interface TraySettings {
+  git_actions: boolean;
+  recent_projects: boolean;
+  quick_launch: boolean;
+  recent_limit: number;
+  /** Pinned run entries: `preset:<id>` or `saved:<id>`. */
+  pinned_commands: string[];
+  notifications: boolean;
+}
+
 export interface AppSettings {
   theme: Theme;
+  /** Interface language: a supported language code, or "system". */
+  language: LanguageChoice;
   auto_refresh: boolean;
   refresh_interval_secs: number;
   view_mode: ViewMode;
@@ -85,6 +100,7 @@ export interface AppSettings {
   terminal_hotkey: string;
   /** Hide the summoned terminal window as soon as it loses focus. */
   terminal_hide_on_blur: boolean;
+  tray: TraySettings;
 }
 
 export interface CommitInfo {
@@ -430,12 +446,18 @@ export interface ErrorSuggestion {
  * Error objects are also handled gracefully.
  */
 export function parseError(error: unknown): string {
-  if (error && typeof error === "object" && "type" in error && "message" in error) {
-    const appErr = error as AppError;
-    return appErr.message;
-  }
-  if (error instanceof Error) return error.message;
   if (typeof error === "string") return error;
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object") {
+    const rec = error as Record<string, unknown>;
+    if (typeof rec.message === "string" && rec.message) return rec.message;
+    try {
+      const json = JSON.stringify(error);
+      if (json && json !== "{}") return json;
+    } catch {
+      /* fall through */
+    }
+  }
   return String(error);
 }
 
@@ -460,15 +482,19 @@ export function getErrorHint(error: unknown): string | null {
 /**
  * Get recovery suggestions for an error. Returns actionable suggestions
  * that can be displayed in the UI to help users fix common git issues.
+ *
+ * NOTE: matching is on lower-cased English substrings only — the backend
+ * sends English messages regardless of the UI language, so this keeps
+ * working after the interface switches. The returned copy is translated.
  */
 export function getSuggestions(error: unknown, operation?: string): ErrorSuggestion[] {
   const msg = parseError(error).toLowerCase();
 
   if (msg.includes("push rejected") || msg.includes("rejected") || msg.includes("failed to push")) {
     return [{
-      title: "Remote has newer commits",
-      description: "Pull remote changes first, then push again.",
-      action_label: "Pull now",
+      title: t("errors.suggestions.remoteNewer.title"),
+      description: t("errors.suggestions.remoteNewer.description"),
+      action_label: t("errors.suggestions.remoteNewer.action"),
       action_type: "pull",
     }];
   }
@@ -476,15 +502,15 @@ export function getSuggestions(error: unknown, operation?: string): ErrorSuggest
   if (msg.includes("merge conflict") || msg.includes("conflict") && msg.includes("merge")) {
     return [
       {
-        title: "Merge conflict detected",
-        description: "Resolve conflicts file by file (ours/theirs/both per hunk), then commit.",
-        action_label: "Resolve conflicts",
+        title: t("errors.suggestions.mergeConflict.title"),
+        description: t("errors.suggestions.mergeConflict.resolveDescription"),
+        action_label: t("errors.suggestions.mergeConflict.resolveAction"),
         action_type: "resolve_conflicts",
       },
       {
-        title: "Merge conflict detected",
-        description: "Manually resolve conflicts in the listed files, then commit.",
-        action_label: "Abort merge",
+        title: t("errors.suggestions.mergeConflict.title"),
+        description: t("errors.suggestions.mergeConflict.manualDescription"),
+        action_label: t("errors.suggestions.mergeConflict.abortAction"),
         action_type: "abort_merge",
       },
     ];
@@ -493,15 +519,15 @@ export function getSuggestions(error: unknown, operation?: string): ErrorSuggest
   if (msg.includes("dirty") || msg.includes("uncommitted changes") || msg.includes("working tree")) {
     return [
       {
-        title: "Uncommitted changes in the way",
-        description: "Stash your changes before this operation, or commit them first.",
-        action_label: "Stash changes",
+        title: t("errors.suggestions.dirty.title"),
+        description: t("errors.suggestions.dirty.stashDescription"),
+        action_label: t("errors.suggestions.dirty.stashAction"),
         action_type: "stash",
       },
       {
-        title: "Commit first",
-        description: "Commit your current changes before continuing.",
-        action_label: "Commit changes",
+        title: t("errors.suggestions.dirty.commitTitle"),
+        description: t("errors.suggestions.dirty.commitDescription"),
+        action_label: t("errors.suggestions.dirty.commitAction"),
         action_type: "commit",
       },
     ];
@@ -509,36 +535,36 @@ export function getSuggestions(error: unknown, operation?: string): ErrorSuggest
 
   if (msg.includes("detached head")) {
     return [{
-      title: "Detached HEAD state",
-      description: "Create a new branch to save your work before switching.",
-      action_label: "Create branch",
+      title: t("errors.suggestions.detached.title"),
+      description: t("errors.suggestions.detached.description"),
+      action_label: t("errors.suggestions.detached.action"),
       action_type: "checkout",
     }];
   }
 
   if (msg.includes("not found") || msg.includes("unknown revision") || msg.includes("does not exist")) {
     return [{
-      title: "Branch not found",
-      description: "Fetch from remote to get the latest branch list, then try again.",
-      action_label: "Fetch from remote",
+      title: t("errors.suggestions.notFound.title"),
+      description: t("errors.suggestions.notFound.description"),
+      action_label: t("errors.suggestions.notFound.action"),
       action_type: "fetch",
     }];
   }
 
   if (msg.includes("nothing to commit") || msg.includes("no changes")) {
     return [{
-      title: "No changes to commit",
-      description: "Make some changes to your files first.",
-      action_label: "View files",
+      title: t("errors.suggestions.empty.title"),
+      description: t("errors.suggestions.empty.description"),
+      action_label: t("errors.suggestions.empty.action"),
       action_type: "discard",
     }];
   }
 
   if (msg.includes("timed out") || msg.includes("timeout")) {
     return [{
-      title: "Operation timed out",
-      description: "Check your network connection and try again.",
-      action_label: "Retry",
+      title: t("errors.suggestions.timeout.title"),
+      description: t("errors.suggestions.timeout.description"),
+      action_label: t("errors.suggestions.timeout.action"),
       action_type: operation === "push" ? "pull" : "fetch",
     }];
   }

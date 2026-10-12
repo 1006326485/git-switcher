@@ -1,5 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import type { ViewMode } from "../lib/types";
+import { parseError } from "../lib/types";
+import { t as translate } from "../lib/i18n";
 import { getSettings, updateSettings } from "../lib/tauri";
 
 export function useAppSettings(onError: (msg: string) => void) {
@@ -18,7 +20,7 @@ export function useAppSettings(onError: (msg: string) => void) {
           committedViewMode.current = s.view_mode;
         }
       })
-      .catch((e) => onError(`Failed to load view mode: ${e}`));
+      .catch((e) => onError(translate("errors.loadViewMode", { error: parseError(e) })));
     return () => {
       cancelled = true;
     };
@@ -45,7 +47,7 @@ export function useAppSettings(onError: (msg: string) => void) {
         setSettingsVersion((v) => v + 1);
       } catch (e) {
         setViewModeState(prev);
-        onError(`Failed to save view mode: ${e}`);
+        onError(translate("errors.saveViewMode", { error: parseError(e) }));
       }
     },
     [onError]

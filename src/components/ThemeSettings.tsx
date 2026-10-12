@@ -1,14 +1,15 @@
 import { memo } from "react";
+import { useTranslation } from "react-i18next";
 
-const ACCENT_PRESETS = [
-  { id: "blue", color: "#3b82f6", label: "Blue" },
-  { id: "green", color: "#22c55e", label: "Green" },
-  { id: "purple", color: "#a855f7", label: "Purple" },
-  { id: "red", color: "#ef4444", label: "Red" },
-  { id: "orange", color: "#f97316", label: "Orange" },
-  { id: "pink", color: "#ec4899", label: "Pink" },
-  { id: "teal", color: "#14b8a6", label: "Teal" },
-  { id: "indigo", color: "#6366f1", label: "Indigo" },
+const ACCENT_META: { id: string; color: string; labelKey: "settings.theme.blue" | "settings.theme.green" | "settings.theme.purple" | "settings.theme.red" | "settings.theme.orange" | "settings.theme.pink" | "settings.theme.teal" | "settings.theme.indigo" }[] = [
+  { id: "blue", color: "#3b82f6", labelKey: "settings.theme.blue" },
+  { id: "green", color: "#22c55e", labelKey: "settings.theme.green" },
+  { id: "purple", color: "#a855f7", labelKey: "settings.theme.purple" },
+  { id: "red", color: "#ef4444", labelKey: "settings.theme.red" },
+  { id: "orange", color: "#f97316", labelKey: "settings.theme.orange" },
+  { id: "pink", color: "#ec4899", labelKey: "settings.theme.pink" },
+  { id: "teal", color: "#14b8a6", labelKey: "settings.theme.teal" },
+  { id: "indigo", color: "#6366f1", labelKey: "settings.theme.indigo" },
 ];
 
 interface ThemeSettingsProps {
@@ -20,11 +21,12 @@ export const ThemeSettings = memo(function ThemeSettings({
   accentColor,
   onAccentChange,
 }: ThemeSettingsProps) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-3">
-      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Accent Color</h3>
+      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">{t("settings.theme.accentColor")}</h3>
       <div className="flex items-center gap-2 flex-wrap">
-        {ACCENT_PRESETS.map((preset) => (
+        {ACCENT_META.map((preset) => (
           <button
             key={preset.id}
             onClick={() => onAccentChange(preset.id)}
@@ -37,8 +39,8 @@ export const ThemeSettings = memo(function ThemeSettings({
               backgroundColor: preset.color,
               outlineColor: accentColor === preset.id ? preset.color : undefined,
             }}
-            title={preset.label}
-            aria-label={`${preset.label} accent color`}
+            title={t(preset.labelKey)}
+            aria-label={t("settings.theme.accentAria", { label: t(preset.labelKey) })}
           >
             {accentColor === preset.id && (
               <svg width="14" height="14" viewBox="0 0 16 16" fill="white">

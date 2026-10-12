@@ -1,4 +1,5 @@
 import { memo, useState, useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import type { ErrorSuggestion } from "../lib/types";
 
 interface ErrorRecoveryBannerProps {
@@ -27,6 +28,7 @@ export const ErrorRecoveryBanner = memo(function ErrorRecoveryBanner({
   onDismiss,
   autoDismissMs = 30000,
 }: ErrorRecoveryBannerProps) {
+  const { t } = useTranslation();
   const [dismissed, setDismissed] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -68,7 +70,7 @@ export const ErrorRecoveryBanner = memo(function ErrorRecoveryBanner({
       </div>
       <button
         onClick={() => { setDismissed(true); onDismiss(); }}
-        aria-label="Dismiss recovery suggestions"
+        aria-label={t("toast.dismissRecovery")}
         className="shrink-0 text-amber-400 hover:text-amber-600 dark:hover:text-amber-300 transition-colors mt-0.5"
       >
         ✕

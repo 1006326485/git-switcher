@@ -1,4 +1,6 @@
-import { memo, useCallback, useMemo } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { flushSync } from "react-dom";
+import { useTranslation } from "react-i18next";
 import {
   DndContext,
   closestCenter,
@@ -16,20 +18,50 @@ import {
 } from "@dnd-kit/sortable";
 import type { ProjectDetail, ViewMode, SortOption } from "../lib/types";
 import { ProjectCard } from "./ProjectCard";
+import {
+  cardExpandInFromLeft,
+  cardExpandInFromRight,
+  prefersReducedMotion,
+  CARD_EXPAND_MS,
+} from "./ui/primitives";
 import { ProjectList } from "./ProjectList";
 import { ProjectCompact } from "./ProjectCompact";
 import { ProjectTable } from "./ProjectTable";
 import { DashboardView, type DashboardFilter } from "./DashboardView";
 import { SkeletonRow, SkeletonCard, SkeletonTable } from "./ui/Skeleton";
 
-const SORT_LABELS: Record<SortOption, string> = {
-  custom: "Custom Order",
-  "name-asc": "Name A→Z",
-  "name-desc": "Name Z→A",
-  modified: "Last Modified",
-  changes: "Most Changes",
-  branch: "Branch Name",
+const SORT_KEYS: Record<SortOption, "custom" | "nameAsc" | "nameDesc" | "modified" | "changes" | "branch"> = {
+  custom: "custom",
+  "name-asc": "nameAsc",
+  "name-desc": "nameDesc",
+  modified: "modified",
+  changes: "changes",
+  branch: "branch",
 };
+
+/**
+ * Columns the card grid paints at the current viewport, mirroring the
+ * Tailwind breakpoints below (md=768px, xl=1280px, 2xl=1536px). Used to find
+ * the visual row of the card being expanded, so it can take that whole row
+ * and slide in from the correct side.
+ */
+function cardGridColumns(width: number) {
+  return width >= 1536 ? 4 : width >= 1280 ? 3 : width >= 768 ? 2 : 1;
+}
+
+/**
+ * Collapse animates by handing the reflow to the browser (see the View
+ * Transition rules in styles/globals.css). Older WebKit has no
+ * startViewTransition, and asking for reduced motion means the collapse should
+ * just snap — both fall back to folding the panel in place first.
+ */
+function canSmoothReflow() {
+  return (
+    typeof document !== "undefined" &&
+    typeof document.startViewTransition === "function" &&
+    !prefersReducedMotion()
+  );
+}
 
 interface ProjectGridProps {
   projects: ProjectDetail[];
@@ -58,6 +90,65 @@ export const ProjectGrid = memo(function ProjectGrid({
   onDashboardDrillDown,
   focusedIndex,
 }: ProjectGridProps) {
+  const { t } = useTranslation();
+  // Card view: project whose Git Operations panel is open, making its card
+  // span the whole grid row (null = nothing expanded). Other views
+  // self-manage their panel state.
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  // The card whose panel is folding shut. It keeps `col-span-full` and its
+  // row-start `order` for one animation cycle, otherwise the grid reflows
+  // before the body has finished collapsing.
+  const [closingId, setClosingId] = useState<string | null>(null);
+  const [columns, setColumns] = useState(() =>
+    typeof window === "undefined" ? 1 : cardGridColumns(window.innerWidth)
+  );
+
+  const handleToggleGitOps = useCallback(
+    (id: string) => {
+      if (expandedId === id) {
+        // Collapse: drop the full-row span on this very frame so the browser
+        // can interpolate the reflow (card shrinking, siblings sliding back)
+        // between the two states. The DOM update has to be flushed inside the
+        // update callback, otherwise React commits after the old state has
+        // already been captured and nothing moves.
+        setClosingId(null);
+        if (canSmoothReflow()) {
+          // A newer toggle skips the running transition, which rejects
+          // `finished`; that is the expected outcome of an interruption, not
+          // an error worth surfacing in the console.
+          document
+            .startViewTransition(() => flushSync(() => setExpandedId(null)))
+            .finished?.catch(() => {});
+        } else {
+          // No view transitions (older WebKit, or reduced motion): fold the
+          // panel shut in place first, reflowing only once it is done.
+          setClosingId(id);
+          setExpandedId(null);
+        }
+      } else {
+        // Expanding another card supersedes any fold still in flight.
+        setClosingId(null);
+        setExpandedId(id);
+      }
+    },
+    [expandedId]
+  );
+
+  useEffect(() => {
+    if (!closingId) return;
+    const timer = window.setTimeout(
+      () => setClosingId(null),
+      prefersReducedMotion() ? 0 : CARD_EXPAND_MS
+    );
+    return () => window.clearTimeout(timer);
+  }, [closingId]);
+
+  useEffect(() => {
+    const onResize = () => setColumns(cardGridColumns(window.innerWidth));
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 8 },
@@ -146,10 +237,10 @@ export const ProjectGrid = memo(function ProjectGrid({
               <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
             </svg>
             <h3 className="text-lg font-medium text-gray-600 dark:text-gray-400 mb-2">
-              No matching projects
+              {t("grid.emptyTitle")}
             </h3>
             <p className="text-sm text-gray-500 dark:text-gray-500 max-w-md">
-              No projects match the current filters. Try changing your search, group, or status filter.
+              {t("grid.emptyDesc")}
             </p>
           </>
         ) : (
@@ -172,11 +263,11 @@ export const ProjectGrid = memo(function ProjectGrid({
 
             <div>
               <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                Welcome to Git Switcher
+                {t("grid.welcomeTitle")}
               </h3>
               <p className="text-sm text-gray-500 dark:text-gray-400">
-                Manage all your Git repositories from one place.<br />
-                Get started by adding your first project.
+                {t("grid.welcomeDesc")}<br />
+                {t("grid.welcomeDesc2")}
               </p>
             </div>
 
@@ -191,8 +282,8 @@ export const ProjectGrid = memo(function ProjectGrid({
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
                   </svg>
                 </div>
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Add Project</span>
-                <span className="text-xs text-gray-400 dark:text-gray-500">Browse to a Git repo</span>
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{t("grid.addProjectTitle")}</span>
+                <span className="text-xs text-gray-400 dark:text-gray-500">{t("grid.addProjectDesc")}</span>
               </button>
 
               <button
@@ -204,8 +295,8 @@ export const ProjectGrid = memo(function ProjectGrid({
                     <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5m6 4.125l2.25 2.25m0 0l2.25 2.25M12 13.875l2.25-2.25M12 13.875l-2.25 2.25M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
                   </svg>
                 </div>
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Bulk Import</span>
-                <span className="text-xs text-gray-400 dark:text-gray-500">Scan a directory</span>
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{t("grid.bulkImportTitle")}</span>
+                <span className="text-xs text-gray-400 dark:text-gray-500">{t("grid.bulkImportDesc")}</span>
               </button>
 
               <button
@@ -217,14 +308,14 @@ export const ProjectGrid = memo(function ProjectGrid({
                     <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m3.75 9v6m3-3H9m1.5-12H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
                   </svg>
                 </div>
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Drag & Drop</span>
-                <span className="text-xs text-gray-400 dark:text-gray-500">Drop a folder here</span>
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{t("grid.dragDrop")}</span>
+                <span className="text-xs text-gray-400 dark:text-gray-500">{t("grid.dragDropDesc")}</span>
               </button>
             </div>
 
             {/* Keyboard hint */}
             <p className="text-xs text-gray-400 dark:text-gray-500">
-              Tip: Press <kbd className="px-1.5 py-0.5 rounded bg-[var(--surface-2)] border border-[var(--border-color)] font-mono text-[11px]">⌘ N</kbd> to add, <kbd className="px-1.5 py-0.5 rounded bg-[var(--surface-2)] border border-[var(--border-color)] font-mono text-[11px]">⌘ K</kbd> for command palette, <kbd className="px-1.5 py-0.5 rounded bg-[var(--surface-2)] border border-[var(--border-color)] font-mono text-[11px]">⌘ /</kbd> for shortcuts
+              {t("grid.tipPart1")} <kbd className="px-1.5 py-0.5 rounded bg-[var(--surface-2)] border border-[var(--border-color)] font-mono text-[11px]">⌘ N</kbd> {t("grid.tipPart2")} <kbd className="px-1.5 py-0.5 rounded bg-[var(--surface-2)] border border-[var(--border-color)] font-mono text-[11px]">⌘ K</kbd> {t("grid.tipPart3")} <kbd className="px-1.5 py-0.5 rounded bg-[var(--surface-2)] border border-[var(--border-color)] font-mono text-[11px]">⌘ /</kbd> {t("grid.tipPart4")}
             </p>
           </div>
         )}
@@ -237,12 +328,12 @@ export const ProjectGrid = memo(function ProjectGrid({
 
   const sortBanner = sortBy && sortBy !== "custom" && onSortChange ? (
     <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[var(--surface-2)] px-3 py-2 text-xs text-gray-600 dark:text-gray-400">
-      <span>Sorted by: {SORT_LABELS[sortBy]} · Drag &amp; drop disabled</span>
+      <span>{t("grid.sortedBy", { label: t(`sortOrder.${SORT_KEYS[sortBy]}`) })} </span>
       <button
         onClick={() => onSortChange("custom")}
         className="px-2 py-0.5 rounded text-[11px] font-medium hover:bg-gray-300/40 dark:hover:bg-gray-600/40 transition-colors"
       >
-        Reset
+        {t("grid.reset")}
       </button>
     </div>
   ) : null;
@@ -258,14 +349,76 @@ export const ProjectGrid = memo(function ProjectGrid({
       case "table":
         return <ProjectTable projects={projects} focusedIndex={focusedIndex} />;
       case "card":
-      default:
+      default: {
+        // Expanding Git Operations makes the card itself take the whole grid
+        // row (`col-span-full`) with the panel body still inside the card, so
+        // the card, its border and its content stay one unit. A bare
+        // full-row span would leave a hole mid-row, so the expanded card is
+        // moved to the start of its visual row through CSS `order`; DOM
+        // order is untouched and dnd-kit keeps sorting the logical list.
+        const expandedIndex = expandedId
+          ? projects.findIndex((p) => p.project.id === expandedId)
+          : -1;
+        // A card that is folding shut still owns the row until its body has
+        // actually collapsed, so the reflow lands on the final frame instead
+        // of cutting the panel off mid-fold.
+        const closingIndex =
+          closingId && expandedIndex < 0
+            ? projects.findIndex((p) => p.project.id === closingId)
+            : -1;
+        const activeIndex = expandedIndex >= 0 ? expandedIndex : closingIndex;
+        const rowStartIndex =
+          activeIndex >= 0 ? activeIndex - (activeIndex % columns) : -1;
+        // The expanded card slides in from the half of the row it sits in
+        // (single-column grids always resolve to the left).
+        const directionClass =
+          activeIndex >= 0 && activeIndex % columns >= columns / 2
+            ? cardExpandInFromRight
+            : cardExpandInFromLeft;
+
         return (
           <div className="grid grid-cols-1 gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 items-start">
-            {projects.map((detail, index) => (
-              <ProjectCard key={detail.project.id} detail={detail} sortable={sortable} projectIndex={index} isFocused={focusedIndex === index} />
-            ))}
+            {projects.map((detail, index) => {
+              const expanded = expandedIndex === index;
+              const collapsing = closingIndex === index;
+              // A bijection over [0..n): the expanded card takes the row's
+              // first slot and every card it displaced slides one slot later,
+              // so everything else keeps its position.
+              const order =
+                expanded || collapsing
+                  ? rowStartIndex
+                  : activeIndex > index && index >= rowStartIndex
+                    ? index + 1
+                    : index;
+
+              return (
+                <div
+                  key={detail.project.id}
+                  className={`min-w-0 ${expanded || collapsing ? "col-span-full" : ""}${expanded ? ` ${directionClass}` : ""}`}
+                  style={{
+                    ...(order === index ? {} : { order }),
+                    // Every card is its own view-transition group, so on
+                    // collapse the browser tweens each box back to its own
+                    // slot — the expanded one shrinking, the siblings it
+                    // pushed down sliding home — instead of teleporting.
+                    viewTransitionName: `gitops-card-${detail.project.id}`,
+                  }}
+                >
+                  <ProjectCard
+                    detail={detail}
+                    sortable={sortable}
+                    projectIndex={index}
+                    isFocused={focusedIndex === index}
+                    gitOpsOpen={expanded}
+                    gitOpsClosing={collapsing}
+                    onToggleGitOps={() => handleToggleGitOps(detail.project.id)}
+                  />
+                </div>
+              );
+            })}
           </div>
         );
+      }
     }
   })();
 

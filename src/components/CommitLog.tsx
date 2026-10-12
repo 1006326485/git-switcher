@@ -1,23 +1,27 @@
 import { useState, useEffect, useCallback, memo, useRef, lazy, Suspense } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import * as api from "../lib/tauri";
 import type { LogEntry } from "../lib/types";
 import { parseError } from "../lib/types";
 import { CommitGraph } from "./CommitGraph";
 import { OperationConfirmDialog } from "./OperationConfirmDialog";
-import { Modal } from "./ui/primitives";
+import { Modal, MenuItem } from "./ui/primitives";
+import { ContextMenu, MenuSeparator } from "./ui/ContextMenu";
+import { useContextMenu } from "../hooks/useContextMenu";
 
 const ConflictResolver = lazy(() => import("./ConflictResolver").then((m) => ({ default: m.ConflictResolver })));
 
 const ROW_HEIGHT = 28;
 
-function formatRelativeTime(timestamp: number): string {
+function formatRelativeTime(t: TFunction, timestamp: number): string {
   const now = Date.now() / 1000;
   const diff = now - timestamp;
-  if (diff < 60) return "just now";
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
+  if (diff < 60) return t("commitLog.justNow");
+  if (diff < 3600) return t("commitLog.mAgo", { count: Math.floor(diff / 60) });
+  if (diff < 86400) return t("commitLog.hAgo", { count: Math.floor(diff / 3600) });
+  if (diff < 604800) return t("commitLog.dAgo", { count: Math.floor(diff / 86400) });
   return new Date(timestamp * 1000).toLocaleDateString();
 }
 
@@ -30,18 +34,42 @@ interface CommitLogProps {
 }
 
 export const CommitLog = memo(function CommitLog({ path, onSuccess, onError, onRefresh, limit = 500 }: CommitLogProps) {
+  const { t } = useTranslation();
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cherryPicking, setCherryPicking] = useState<string | null>(null);
   const [confirmCherryPick, setConfirmCherryPick] = useState<LogEntry | null>(null);
   const [selectedHashes, setSelectedHashes] = useState<Set<string>>(new Set());
+  // Explicit range endpoints set from the row context menu. Deliberately kept
+  // apart from `selectedHashes`: changing the selection must not drop them, and
+  // they only feed the range cherry-pick while both are set.
+  const [rangeStart, setRangeStart] = useState<string | null>(null);
+  const [rangeEnd, setRangeEnd] = useState<string | null>(null);
   const [confirmRangePick, setConfirmRangePick] = useState<{ from: string; to: string; count: number } | null>(null);
   const [cherryPickConflicts, setCherryPickConflicts] = useState<string[] | null>(null);
   const [abortingCherryPick, setAbortingCherryPick] = useState(false);
   const [resolveOpen, setResolveOpen] = useState(false);
 
   const parentRef = useRef<HTMLDivElement>(null);
+  const rowMenu = useContextMenu();
+  const [menuEntry, setMenuEntry] = useState<LogEntry | null>(null);
+
+  const closeRowMenu = useCallback(() => {
+    setMenuEntry(null);
+    rowMenu.close();
+  }, [rowMenu]);
+
+  const handleRowContextMenu = useCallback((e: React.MouseEvent, entry: LogEntry) => {
+    const target = e.target as HTMLElement | null;
+    if (target?.closest?.('button, input, textarea, a, [role="button"]')) return;
+    setMenuEntry(entry);
+    rowMenu.onContextMenu(e);
+  }, [rowMenu]);
+
+  const copyRowText = useCallback((text: string, okMsg: string) => {
+    navigator.clipboard.writeText(text).then(() => onSuccess?.(okMsg)).catch((err) => onError?.(String(err), err, path));
+  }, [onSuccess, onError, path]);
 
   const virtualizer = useVirtualizer({
     count: entries.length,
@@ -77,20 +105,24 @@ export const CommitLog = memo(function CommitLog({ path, onSuccess, onError, onR
     });
   }, []);
 
-  const clearSelection = useCallback(() => setSelectedHashes(new Set()), []);
+  const clearSelection = useCallback(() => {
+    setSelectedHashes(new Set());
+    setRangeStart(null);
+    setRangeEnd(null);
+  }, []);
 
   const handleCherryPick = useCallback(async (entry: LogEntry) => {
     setCherryPicking(entry.hash);
     setConfirmCherryPick(null);
     try {
       await api.gitCherryPick(path, entry.hash);
-      onSuccess?.(`Cherry-picked ${entry.short_hash}`);
+      onSuccess?.(t("commitLog.cherryPicked", { hash: entry.short_hash }));
       await Promise.all([load(), onRefresh?.()]);
     } catch (e) {
       const msg = parseError(e);
       if (msg.includes("conflict")) {
         const files = await api.gitListConflicts(path).catch(() => []);
-        setCherryPickConflicts(files.length > 0 ? files : ["Unknown conflict"]);
+        setCherryPickConflicts(files.length > 0 ? files : [t("commitLog.unknownConflict")]);
       } else {
         onError?.(msg, e, path);
       }
@@ -104,7 +136,7 @@ export const CommitLog = memo(function CommitLog({ path, onSuccess, onError, onR
     setCherryPicking(from);
     try {
       const result = await api.gitCherryPickRange(path, from, to);
-      if (result.success) { onSuccess?.("Cherry-pick range completed"); } else { onError?.(result.message); }
+      if (result.success) { onSuccess?.(t("commitLog.rangeDone")); } else { onError?.(result.message); }
       if (result.conflicts.length > 0) {
         setCherryPickConflicts(result.conflicts);
       }
@@ -124,6 +156,20 @@ export const CommitLog = memo(function CommitLog({ path, onSuccess, onError, onR
     const to = entries[indices[0]].hash;
     setConfirmRangePick({ from, to, count: indices.length });
   }, [selectedHashes, entries]);
+
+  // The log lists newest first, so the older endpoint (higher index) is the
+  // `from` base of `from..to` — same convention as openRangeCherryPick.
+  const openEndpointRangeCherryPick = useCallback(() => {
+    if (!rangeStart || !rangeEnd || rangeStart === rangeEnd) return;
+    const startIndex = entries.findIndex((e) => e.hash === rangeStart);
+    const endIndex = entries.findIndex((e) => e.hash === rangeEnd);
+    if (startIndex < 0 || endIndex < 0) return;
+    const fromIndex = Math.max(startIndex, endIndex);
+    const toIndex = Math.min(startIndex, endIndex);
+    setConfirmRangePick({ from: entries[fromIndex].hash, to: entries[toIndex].hash, count: fromIndex - toIndex + 1 });
+  }, [rangeStart, rangeEnd, entries]);
+
+  const hasBothRangeEndpoints = !!rangeStart && !!rangeEnd && rangeStart !== rangeEnd;
 
   const handleAbortCherryPick = useCallback(async () => {
     setAbortingCherryPick(true);
@@ -151,13 +197,13 @@ export const CommitLog = memo(function CommitLog({ path, onSuccess, onError, onR
     return (
       <div className="text-center py-4">
         <p className="text-xs text-red-500 mb-2">{error}</p>
-        <button onClick={load} className="text-xs text-blue-500 hover:underline">Retry</button>
+        <button onClick={load} className="text-xs text-blue-500 hover:underline">{t("common.retry")}</button>
       </div>
     );
   }
 
   if (entries.length === 0) {
-    return <p className="text-xs text-gray-400 text-center py-4">No commits</p>;
+    return <p className="text-xs text-gray-400 text-center py-4">{t("commitLog.noCommits")}</p>;
   }
 
   const maxLane = Math.max(...entries.map((e) => e.lane), 0);
@@ -222,7 +268,7 @@ export const CommitLog = memo(function CommitLog({ path, onSuccess, onError, onR
               disabled={abortingCherryPick}
               className="px-2 py-0.5 rounded text-xs bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 transition-colors"
             >
-              {abortingCherryPick ? "Aborting..." : "Abort Cherry-pick"}
+              {abortingCherryPick ? t("commitLog.aborting") : t("commitLog.abortCherryPick")}
             </button>
           </div>
           <ul className="text-[11px] text-red-600 dark:text-red-400 space-y-0.5 pl-3 list-disc">
@@ -257,6 +303,7 @@ export const CommitLog = memo(function CommitLog({ path, onSuccess, onError, onR
                   key={entry.hash}
                   data-index={virtualRow.index}
                   ref={virtualizer.measureElement}
+                  onContextMenu={(e) => handleRowContextMenu(e, entry)}
                   className={`flex items-center gap-1 hover:bg-gray-50 dark:hover:bg-gray-700/50 group ${isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""}`}
                   style={{
                     position: "absolute",
@@ -293,7 +340,7 @@ export const CommitLog = memo(function CommitLog({ path, onSuccess, onError, onR
 
                   {/* Hash */}
                   <button
-                    onClick={() => navigator.clipboard.writeText(entry.hash).then(() => onSuccess?.("Copied commit hash"))}
+                    onClick={() => navigator.clipboard.writeText(entry.hash).then(() => onSuccess?.(t("commitLog.copiedHash")))}
                     className="text-gray-500 shrink-0 w-14 hover:text-blue-500 dark:hover:text-blue-400 transition-colors cursor-pointer text-left"
                     title={`Copy ${entry.hash}`}
                   >
@@ -312,7 +359,7 @@ export const CommitLog = memo(function CommitLog({ path, onSuccess, onError, onR
                     className="px-1.5 py-0.5 rounded text-[10px] opacity-0 group-hover:opacity-100 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/50 hover:bg-amber-200 dark:hover:bg-amber-900/50 disabled:opacity-50 transition-all shrink-0"
                     title={`Cherry-pick ${entry.short_hash}`}
                   >
-                    {isCherryPicking ? "..." : "Cherry-pick"}
+                    {isCherryPicking ? "..." : t("commitLog.cherryPick")}
                   </button>
 
                   {/* Author + time */}
@@ -320,7 +367,7 @@ export const CommitLog = memo(function CommitLog({ path, onSuccess, onError, onR
                     {entry.author}
                   </span>
                   <span className="text-gray-400 shrink-0 w-14 text-right">
-                    {formatRelativeTime(entry.timestamp)}
+                    {formatRelativeTime(t, entry.timestamp)}
                   </span>
                 </div>
               );
@@ -328,6 +375,43 @@ export const CommitLog = memo(function CommitLog({ path, onSuccess, onError, onR
           </div>
         </div>
       </div>
+
+      <ContextMenu open={!!menuEntry && !!rowMenu.anchor} anchor={rowMenu.anchor ?? { x: 0, y: 0 }} onClose={closeRowMenu}>
+        {menuEntry && (
+          <>
+            {selectedHashes.has(menuEntry.hash) ? (
+              <MenuItem label={t("commitLog.deselectCommit")} onClick={() => toggleSelect(menuEntry.hash)} />
+            ) : (
+              <MenuItem label={t("commitLog.selectCommit")} onClick={() => toggleSelect(menuEntry.hash)} />
+            )}
+            {selectedHashes.size > 1 && (
+              <MenuItem label={t("commitLog.clearSelection")} onClick={clearSelection} />
+            )}
+            <MenuSeparator />
+            <MenuItem label={t("commitLog.copyHash")} onClick={() => copyRowText(menuEntry.short_hash, t("commitLog.copiedHash"))} />
+            <MenuItem label={t("commitLog.copyFullHash")} onClick={() => copyRowText(menuEntry.hash, t("commitLog.copiedFullHash"))} />
+            <MenuItem label={t("commitLog.copyMessage")} onClick={() => copyRowText(menuEntry.message, t("commitLog.copiedMessage"))} />
+            <MenuSeparator />
+            <MenuItem label={t("commitLog.cherryPickEllipsis")} onClick={() => setConfirmCherryPick(menuEntry)} />
+            <MenuSeparator />
+            <MenuItem
+              label={rangeStart === menuEntry.hash ? t("commitLog.unsetRangeStart") : t("commitLog.rangeStart")}
+              onClick={() => setRangeStart((prev) => (prev === menuEntry.hash ? null : menuEntry.hash))}
+            />
+            <MenuItem
+              label={rangeEnd === menuEntry.hash ? t("commitLog.unsetRangeEnd") : t("commitLog.rangeEnd")}
+              onClick={() => setRangeEnd((prev) => (prev === menuEntry.hash ? null : menuEntry.hash))}
+            />
+            {hasBothRangeEndpoints ? (
+              <MenuItem label={t("commitLog.cherryPickRangeEllipsis")} onClick={openEndpointRangeCherryPick} />
+            ) : (
+              selectedHashes.size > 1 && (
+                <MenuItem label={t("commitLog.cherryPickRangeEllipsis")} onClick={openRangeCherryPick} />
+              )
+            )}
+          </>
+        )}
+      </ContextMenu>
 
       {confirmCherryPick && (
         <OperationConfirmDialog
@@ -350,7 +434,7 @@ export const CommitLog = memo(function CommitLog({ path, onSuccess, onError, onR
       )}
 
       {resolveOpen && (
-        <Modal open onClose={() => setResolveOpen(false)} title="Resolve conflicts" maxWidth="max-w-2xl">
+        <Modal open onClose={() => setResolveOpen(false)} title={t("commitLog.resolveConflicts")} width="xl">
           <div className="p-3">
             <Suspense fallback={null}>
               <ConflictResolver

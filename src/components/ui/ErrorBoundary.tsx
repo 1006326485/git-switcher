@@ -1,4 +1,5 @@
 import { Component, type ReactNode } from "react";
+import { t } from "../../lib/i18n";
 
 interface Props {
   children: ReactNode;
@@ -32,16 +33,16 @@ export class ErrorBoundary extends Component<Props, State> {
         <div className="flex flex-col items-center justify-center p-8 text-center">
           <div className="text-red-500 text-4xl mb-4">⚠</div>
           <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
-            Something went wrong
+            {t("ui.errorBoundary.title")}
           </h2>
           <p className="text-sm text-gray-500 dark:text-gray-400 mb-4 max-w-md">
-            {this.state.error?.message || "An unexpected error occurred"}
+            {this.state.error?.message || t("ui.errorBoundary.fallbackMessage")}
           </p>
           <button
             onClick={this.handleReload}
             className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors"
           >
-            Try Again
+            {t("ui.errorBoundary.retry")}
           </button>
         </div>
       );

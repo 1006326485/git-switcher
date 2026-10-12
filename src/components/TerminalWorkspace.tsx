@@ -1,4 +1,13 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+} from "react";
 import * as api from "../lib/tauri";
 import {
   parseError,
@@ -10,15 +19,19 @@ import { useTerminal } from "../hooks/useTerminal";
 import { useTheme } from "../hooks/useTheme";
 import {
   findCommandSession,
-  latestSessionOfProject,
+  preferredSessionOfProject,
   projectKeys,
   sessionsOfProject,
+  type TerminalSessionState,
   type TerminalTabsState,
 } from "../lib/terminalTabs";
+import { useTranslation } from "react-i18next";
 import { Modal, DropdownMenu, MenuItem, KbdBadge } from "./ui/primitives";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { SelectDropdown } from "./ui/SelectDropdown";
 import { CloseIcon, PlusIcon, TerminalIcon } from "./ui/icons";
+import { ContextMenu, MenuSeparator } from "./ui/ContextMenu";
+import { useContextMenu } from "../hooks/useContextMenu";
 
 const HOME_TARGET = "__home__";
 
@@ -51,6 +64,7 @@ interface TerminalCanvasProps {
   onAttach: (id: string, container: HTMLElement) => void;
   onDetach: (id: string) => void;
   onFit: (id: string) => void;
+  onContextMenu: (e: ReactMouseEvent) => void;
 }
 
 const TerminalCanvas = memo(function TerminalCanvas({
@@ -59,6 +73,7 @@ const TerminalCanvas = memo(function TerminalCanvas({
   onAttach,
   onDetach,
   onFit,
+  onContextMenu,
 }: TerminalCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -77,7 +92,13 @@ const TerminalCanvas = memo(function TerminalCanvas({
     return () => observer.disconnect();
   }, [id, active, onFit]);
 
-  return <div ref={containerRef} className={`absolute inset-0 ${active ? "" : "hidden"}`} />;
+  return (
+    <div
+      ref={containerRef}
+      onContextMenu={onContextMenu}
+      className={`absolute inset-0 ${active ? "" : "hidden"}`}
+    />
+  );
 });
 
 export const TerminalWorkspace = memo(function TerminalWorkspace({
@@ -94,6 +115,7 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
     activeProject,
     openTerminal,
     closeTerminal,
+    closeProjectTerminals,
     restartTerminal,
     closeAllTerminals,
     selectTerminal,
@@ -105,8 +127,15 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
     detachTerminal,
     fitTerminal,
     focusTerminal,
+    getSelection,
+    selectAll,
+    clearScreen,
+    sendInput,
     setTerminalDark,
+    activeByProject,
   } = useTerminal();
+  const { t } = useTranslation();
+  const fallbackTitle = t("terminal.title");
   const { theme } = useTheme();
   const [error, setError] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
@@ -116,18 +145,28 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
   const [saveName, setSaveName] = useState("");
   const [projects, setProjects] = useState<ProjectDetail[]>([]);
   const [projectFilter, setProjectFilter] = useState("");
+  const [menuSession, setMenuSession] = useState<TerminalSessionState | null>(null);
+  const [menuProject, setMenuProject] = useState<{ key: string; cwd: string; title: string } | null>(null);
+  const tabMenu = useContextMenu();
+  const sidebarMenu = useContextMenu();
+  // The canvas is the one surface where a live text selection is the reason to
+  // open the menu (to copy it), so it must not inherit the selection guard.
+  const canvasMenu = useContextMenu();
+  // Text captured when the canvas menu opened, so the Copy item's state and the
+  // text it copies stay consistent even if the selection changes afterwards.
+  const [canvasSelection, setCanvasSelection] = useState("");
   const consumedInitial = useRef<TerminalLaunchTarget | null>(null);
   const consumedWorkspace = useRef<number | null>(null);
+  const [newMenuSignal, setNewMenuSignal] = useState(0);
 
   const dark =
     theme === "dark" ||
     (theme === "system" && (window.matchMedia?.("(prefers-color-scheme: dark)")?.matches ?? false));
 
-  const state: TerminalTabsState = { sessions, activeId, activeProject };
+  const state: TerminalTabsState = { sessions, activeId, activeProject, activeByProject };
   const keys = projectKeys(state);
   const activeGroup = activeProject != null ? sessionsOfProject(state, activeProject) : [];
-  const activeGroupTitle = activeGroup[0]?.projectTitle || "Terminal";
-  const activeSession = sessions.find((s) => s.id === activeId) ?? null;
+  const activeGroupTitle = activeGroup[0]?.projectTitle || fallbackTitle;
 
   useEffect(() => {
     setTerminalDark(dark);
@@ -138,7 +177,7 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
     if (!q) return keys;
     return keys.filter((key) => {
       const group = sessionsOfProject(state, key);
-      const title = group[0]?.projectTitle || "Terminal";
+      const title = group[0]?.projectTitle || fallbackTitle;
       return title.toLowerCase().includes(q) || (group[0]?.cwd || "").toLowerCase().includes(q);
     });
   }, [keys, projectFilter, state]);
@@ -178,7 +217,7 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
       void handleNewTerminal(initial.cwd, initial.title, initial.tabTitle, initial.command);
       return;
     }
-    const existing = latestSessionOfProject(state, initial.cwd);
+    const existing = preferredSessionOfProject(state, initial.cwd);
     if (existing) {
       selectTerminal(existing.id);
       fitTerminal(existing.id);
@@ -197,6 +236,7 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
     sessions,
     activeId,
     activeProject,
+    state,
   ]);
 
   useEffect(() => {
@@ -209,6 +249,29 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
       if (e.metaKey && !e.ctrlKey && !e.altKey) {
+        if (e.code === "KeyN") {
+          e.preventDefault();
+          e.stopPropagation();
+          setNewMenuSignal((s) => s + 1);
+          return;
+        }
+        if (e.code === "KeyW") {
+          if (activeId == null) return;
+          e.preventDefault();
+          e.stopPropagation();
+          void closeTerminal(activeId);
+          return;
+        }
+        if (e.code === "ArrowUp" || e.code === "ArrowDown") {
+          e.preventDefault();
+          selectAdjacentProject(e.code === "ArrowUp" ? -1 : 1);
+          return;
+        }
+        if (e.code === "ArrowLeft" || e.code === "ArrowRight") {
+          e.preventDefault();
+          selectAdjacentTerminal(e.code === "ArrowLeft" ? -1 : 1);
+          return;
+        }
         const digit = /^Digit([1-9])$/.exec(e.code);
         if (digit) {
           e.preventDefault();
@@ -216,31 +279,17 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
         }
         return;
       }
-      if (!e.altKey || e.metaKey || e.ctrlKey) return;
-      if (e.code === "ArrowUp" || e.code === "ArrowDown") {
-        e.preventDefault();
-        selectAdjacentProject(e.code === "ArrowUp" ? -1 : 1);
-        return;
-      }
-      if (e.code === "ArrowLeft" || e.code === "ArrowRight") {
-        e.preventDefault();
-        selectAdjacentTerminal(e.code === "ArrowLeft" ? -1 : 1);
-        return;
-      }
-      const digit = /^Digit([1-9])$/.exec(e.code);
-      if (digit) {
-        e.preventDefault();
-        selectTerminalByIndex(Number(digit[1]) - 1);
+      if (e.altKey && !e.metaKey && !e.ctrlKey) {
+        const digit = /^Digit([1-9])$/.exec(e.code);
+        if (digit) {
+          e.preventDefault();
+          selectTerminalByIndex(Number(digit[1]) - 1);
+        }
       }
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [open, selectAdjacentProject, selectTerminalByIndex, selectAdjacentTerminal]);
-
-  const handleOpenSystemTerminal = useCallback(() => {
-    if (!activeSession?.cwd) return;
-    api.openInTerminal(activeSession.cwd).catch((e) => setError(parseError(e)));
-  }, [activeSession]);
+  }, [open, activeId, closeTerminal, selectAdjacentProject, selectTerminalByIndex, selectAdjacentTerminal]);
 
   const loadPresets = useCallback(() => {
     api
@@ -259,7 +308,7 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
 
   const projectOptions = useMemo(
     () => [
-      { value: HOME_TARGET, label: "Home — default shell", hint: "~", hintStyle: "text" as const },
+      { value: HOME_TARGET, label: t("terminal.homeOption"), hint: "~", hintStyle: "text" as const },
       ...projects.map((p) => ({
         value: p.project.path,
         label: p.project.name,
@@ -267,7 +316,7 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
         hintStyle: "text" as const,
       })),
     ],
-    [projects]
+    [projects, t]
   );
 
   const handleNewInProject = useCallback(
@@ -275,7 +324,7 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
       const project = projects.find((p) => p.project.path === value);
       void handleNewTerminal(
         project ? project.project.path : "",
-        project?.project.name || "Terminal"
+        project?.project.name || fallbackTitle
       );
     },
     [projects, handleNewTerminal]
@@ -343,6 +392,98 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
     [loadPresets]
   );
 
+  const handleTabContextMenu = useCallback(
+    (e: ReactMouseEvent, s: TerminalSessionState) => {
+      // No `button` skip here: the tab title is content, and the WebView's
+      // native menu is suppressed globally, so skipping would leave a dead
+      // area with no menu at all.
+      setMenuSession(s);
+      sidebarMenu.close();
+      tabMenu.onContextMenu(e);
+    },
+    [sidebarMenu.close, tabMenu.onContextMenu]
+  );
+
+  const handleProjectContextMenu = useCallback(
+    (e: ReactMouseEvent, key: string) => {
+      const target = e.target;
+      if (
+        target instanceof Element &&
+        target.closest('button, input, textarea, a, [role="button"]')
+      ) {
+        return;
+      }
+      setMenuProject({
+        key,
+        cwd: sessionsOfProject(state, key)[0]?.cwd || "",
+        title: sessionsOfProject(state, key)[0]?.projectTitle || fallbackTitle,
+      });
+      tabMenu.close();
+      sidebarMenu.onContextMenu(e);
+    },
+    [sidebarMenu.onContextMenu, state, tabMenu.close]
+  );
+
+  const handleCopyTabPath = useCallback(() => {
+    const path = menuSession?.cwd;
+    if (!path) return;
+    navigator.clipboard.writeText(path).catch((e) => setError(parseError(e)));
+  }, [menuSession]);
+
+  const handleCloseOtherTabs = useCallback(() => {
+    const current = menuSession;
+    if (!current) return;
+    for (const s of activeGroup) {
+      if (s.id !== current.id) void closeTerminal(s.id);
+    }
+  }, [menuSession, activeGroup, closeTerminal]);
+
+  const handleCanvasContextMenu = useCallback(
+    (e: ReactMouseEvent) => {
+      // xterm renders a helper <textarea> for IME/keys, but its CSS parks it
+      // off-screen with zero size (`.xterm-helper-textarea`), so a real
+      // right-click lands on the screen/canvas. The standard skip list already
+      // covers it and any future in-canvas control, and a hit preserves the
+      // native menu. The menu always acts on the active session: hidden
+      // canvases are display:none and cannot receive the event.
+      const target = e.target;
+      if (
+        target instanceof Element &&
+        target.closest('button, input, textarea, a, [role="button"]')
+      ) {
+        return;
+      }
+      setCanvasSelection(activeId ? getSelection(activeId) : "");
+      tabMenu.close();
+      sidebarMenu.close();
+      canvasMenu.onContextMenu(e);
+    },
+    [activeId, canvasMenu.onContextMenu, getSelection, sidebarMenu.close, tabMenu.close]
+  );
+
+  const handleCanvasCopy = useCallback(() => {
+    if (!canvasSelection) return;
+    navigator.clipboard.writeText(canvasSelection).catch((e) => setError(parseError(e)));
+  }, [canvasSelection]);
+
+  const handleCanvasPaste = useCallback(() => {
+    if (!activeId) return;
+    navigator.clipboard
+      .readText()
+      .then((text) => {
+        if (text) sendInput(activeId, text);
+      })
+      .catch((e) => setError(parseError(e)));
+  }, [activeId, sendInput]);
+
+  const handleCanvasSelectAll = useCallback(() => {
+    if (activeId) selectAll(activeId);
+  }, [activeId, selectAll]);
+
+  const handleCanvasClear = useCallback(() => {
+    if (activeId) clearScreen(activeId);
+  }, [activeId, clearScreen]);
+
   return (
     <>
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--surface-1)]">
@@ -357,14 +498,14 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
           className="flex items-center gap-2.5 min-w-0 flex-1"
         >
           <TerminalIcon size={16} />
-          <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 shrink-0">Terminal</h2>
+          <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 shrink-0">{t("terminal.title")}</h2>
           {headerExtra}
         </div>
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close"
+            aria-label={t("common.close")}
             className="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
           >
             <CloseIcon />
@@ -377,20 +518,21 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
         <div className="w-52 shrink-0 border-r border-[var(--border-color)] flex flex-col">
           <div className="px-3 pt-3 pb-1.5 flex items-center gap-1.5">
             <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
-              Projects
+              {t("terminal.projects")}
             </span>
             {keys.length > 1 && (
-              <KbdBadge label="⌥↑↓" size="sm" title="Switch project group" />
+              <KbdBadge label={t("terminal.switchGroupBadge")} size="sm" title={t("terminal.switchGroup")} />
             )}
             <div className="ml-auto w-16">
               <SelectDropdown
                 options={projectOptions}
                 value=""
                 onChange={handleNewInProject}
-                placeholder="New"
-                ariaLabel="New terminal in project"
+                placeholder={t("terminal.newPlaceholder")}
+                ariaLabel={t("terminal.newAria")}
                 disabled={opening}
                 size="sm"
+                openSignal={newMenuSignal}
               />
             </div>
           </div>
@@ -400,8 +542,8 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
                 type="text"
                 value={projectFilter}
                 onChange={(e) => setProjectFilter(e.target.value)}
-                placeholder="Filter…"
-                aria-label="Filter projects"
+                placeholder={t("terminal.filterPlaceholder")}
+                aria-label={t("terminal.filterAria")}
                 className="w-full px-2 py-1 text-xs rounded-md bg-[var(--surface-2)] border border-[var(--border-color)] text-gray-700 dark:text-gray-200 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
               />
             </div>
@@ -409,12 +551,13 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
           <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-2 space-y-0.5">
             {visibleKeys.map((key) => {
               const group = sessionsOfProject(state, key);
-              const title = group[0]?.projectTitle || "Terminal";
+              const title = group[0]?.projectTitle || fallbackTitle;
               const hasExited = group.some((s) => s.exited);
               return (
                 <div
                   key={key}
                   onClick={() => setActiveProject(key)}
+                  onContextMenu={(e) => handleProjectContextMenu(e, key)}
                   title={group[0]?.cwd || title}
                   className={`group flex items-center gap-1.5 rounded-md px-2 py-1.5 cursor-pointer ${
                     key === activeProject
@@ -426,7 +569,7 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
                     {title}
                   </span>
                   {hasExited && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" title="Exited" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" title={t("terminal.exited")} />
                   )}
                   <span className="text-[10px] text-gray-400 tabular-nums shrink-0">
                     {group.length}
@@ -442,27 +585,27 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
                   type="button"
                   className="w-full text-left px-2 py-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
                 >
-                  Workspaces
+                  {t("terminal.workspaces")}
                 </button>
               }
             >
               {presets.length === 0 && (
-                <div className="px-3 py-2 text-xs text-gray-400">No workspaces saved</div>
+                <div className="px-3 py-2 text-xs text-gray-400">{t("terminal.noWorkspaces")}</div>
               )}
               {presets.map((p) => (
                 <div key={p.id} className="group flex items-center">
                   <div className="flex-1 min-w-0">
                     <MenuItem
                       label={p.name}
-                      description={`${p.items.length} terminals`}
+                      description={t("terminal.terminalsCount", { count: p.items.length })}
                       onClick={() => void launchWorkspace(p.items)}
                     />
                   </div>
                   <button
                     type="button"
                     onClick={() => void handleDeletePreset(p.id)}
-                    aria-label={`Delete ${p.name}`}
-                    title="Delete"
+                    aria-label={t("terminal.deleteAria", { name: p.name })}
+                    title={t("terminal.delete")}
                     className="p-1 mr-2 rounded text-gray-400 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
                   >
                     <CloseIcon size={10} />
@@ -479,24 +622,16 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
                 }}
                 className="w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors aria-disabled:opacity-50"
               >
-                Save Workspace…
+                {t("terminal.saveWorkspace")}
               </button>
             </DropdownMenu>
-            <button
-              type="button"
-              onClick={handleOpenSystemTerminal}
-              disabled={!activeSession?.cwd}
-              className="w-full text-left px-2 py-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors disabled:opacity-50"
-            >
-              Open in System Terminal
-            </button>
             {sessions.length > 0 && (
               <button
                 type="button"
                 onClick={() => setKillAllOpen(true)}
                 className="w-full text-left px-2 py-1 text-xs text-gray-500 dark:text-gray-400 hover:text-red-500 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
               >
-                Kill All
+                {t("terminal.killAll")}
               </button>
             )}
           </div>
@@ -508,13 +643,14 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
             {activeGroup.map((s) => (
               <div
                 key={s.id}
+                onContextMenu={(e) => handleTabContextMenu(e, s)}
                 onMouseDown={(e) => {
                   if (e.button === 1) e.preventDefault();
                 }}
                 onAuxClick={(e) => {
                   if (e.button === 1) void closeTerminal(s.id);
                 }}
-                title={`${s.cwd || s.title} — middle-click to close`}
+                title={t("terminal.middleClickClose", { path: s.cwd || s.title })}
                 className={`group flex items-center gap-1 rounded-md pl-2 pr-1 py-1 text-xs shrink-0 ${
                   s.id === activeId
                     ? "bg-[var(--surface-2)] text-gray-900 dark:text-gray-100 font-medium shadow-sm"
@@ -529,7 +665,7 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
                   <span className="truncate">{s.title}</span>
                   {s.exited && (
                     <span className="text-[9px] uppercase tracking-wide px-1 py-0.5 rounded bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400">
-                      exited
+                      {t("terminal.exitedBadge")}
                     </span>
                   )}
                 </button>
@@ -537,8 +673,8 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
                   <button
                     type="button"
                     onClick={() => void restartTerminal(s.id)}
-                    aria-label={`Restart ${s.title}`}
-                    title="Restart"
+                    aria-label={t("terminal.restartAria", { title: s.title })}
+                    title={t("terminal.restart")}
                     className="p-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-400 transition-colors opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
                   >
                     <svg aria-hidden="true" width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
@@ -550,7 +686,7 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
                 <button
                   type="button"
                   onClick={() => void closeTerminal(s.id)}
-                  aria-label={`Close ${s.title}`}
+                  aria-label={t("terminal.closeAria", { title: s.title })}
                   className="p-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-400 transition-colors"
                 >
                   <CloseIcon size={10} />
@@ -562,8 +698,8 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
                 type="button"
                 onClick={() => void handleNewTerminal(activeGroup[0].cwd, activeGroupTitle)}
                 disabled={opening}
-                title="New terminal"
-                aria-label="New terminal"
+                title={t("terminal.newTerminal")}
+                aria-label={t("terminal.newTerminal")}
                 className="p-1 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors shrink-0 disabled:opacity-50"
               >
                 <PlusIcon />
@@ -572,9 +708,9 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
             {activeGroup.length > 1 && (
               <span className="shrink-0 ml-1">
                 <KbdBadge
-                  label="⌥←→"
+                  label="⌘←→"
                   size="sm"
-                  title="Switch tabs — ⌥1…9 to jump, middle-click to close"
+                  title={t("terminal.switchTabs")}
                 />
               </span>
             )}
@@ -590,14 +726,14 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
           <div className="relative flex-1 min-h-0 bg-[var(--surface-2)]">
             {sessions.length === 0 ? (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
-                <span className="text-sm text-gray-400">No terminals open</span>
+                <span className="text-sm text-gray-400">{t("terminal.noTerminals")}</span>
                 <button
                   type="button"
-                  onClick={() => void handleNewTerminal("", "Terminal")}
+                  onClick={() => void handleNewTerminal("", fallbackTitle)}
                   disabled={opening}
                   className="px-3 py-1.5 text-xs rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white transition-colors disabled:opacity-50"
                 >
-                  New Terminal
+                  {t("terminal.newTerminalButton")}
                 </button>
               </div>
             ) : (
@@ -609,6 +745,7 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
                   onAttach={attachTerminal}
                   onDetach={detachTerminal}
                   onFit={fitTerminal}
+                  onContextMenu={handleCanvasContextMenu}
                 />
               ))
             )}
@@ -616,19 +753,125 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
         </div>
       </div>
     </div>
+    <ContextMenu {...tabMenu.menuProps} minWidth={200}>
+      {menuSession && (
+        <>
+          <MenuItem
+            label={t("terminal.newTerminal")}
+            disabled={!menuSession.cwd}
+            onClick={() => void handleNewTerminal(menuSession.cwd, menuSession.projectTitle)}
+          />
+          <MenuItem
+            label={t("terminal.openInFinder")}
+            disabled={!menuSession.cwd}
+            onClick={() => {
+              if (menuSession.cwd)
+                api.openInFinder(menuSession.cwd).catch((e) => setError(parseError(e)));
+            }}
+          />
+          <MenuItem
+            label={t("terminal.systemTerminal")}
+            disabled={!menuSession.cwd}
+            onClick={() => {
+              if (menuSession.cwd)
+                api.openInTerminal(menuSession.cwd).catch((e) => setError(parseError(e)));
+            }}
+          />
+          <MenuItem label={t("terminal.copyPath")} disabled={!menuSession.cwd} onClick={handleCopyTabPath} />
+          <MenuSeparator />
+          <MenuItem
+            label={t("terminal.restart")}
+            disabled={!menuSession.command}
+            onClick={() => void restartTerminal(menuSession.id)}
+          />
+          <MenuItem label={t("common.close")} onClick={() => void closeTerminal(menuSession.id)} />
+          <MenuSeparator />
+          <MenuItem
+            label={t("terminal.closeOthers")}
+            danger
+            disabled={activeGroup.every((s) => s.id === menuSession.id)}
+            onClick={handleCloseOtherTabs}
+          />
+        </>
+      )}
+    </ContextMenu>
+    <ContextMenu {...sidebarMenu.menuProps} minWidth={200}>
+      {menuProject && (
+        <>
+          <MenuItem
+            label={t("terminal.newTerminal")}
+            disabled={!menuProject.cwd}
+            onClick={() => void handleNewTerminal(menuProject.cwd, menuProject.title)}
+          />
+          <MenuItem
+            label={t("terminal.openInFinder")}
+            disabled={!menuProject.cwd}
+            onClick={() => {
+              if (menuProject.cwd)
+                api.openInFinder(menuProject.cwd).catch((e) => setError(parseError(e)));
+            }}
+          />
+          <MenuItem
+            label={t("terminal.systemTerminal")}
+            disabled={!menuProject.cwd}
+            onClick={() => {
+              if (menuProject.cwd)
+                api.openInTerminal(menuProject.cwd).catch((e) => setError(parseError(e)));
+            }}
+          />
+          <MenuItem
+            label={t("terminal.copyPath")}
+            disabled={!menuProject.cwd}
+            onClick={() => {
+              if (!menuProject.cwd) return;
+              navigator.clipboard.writeText(menuProject.cwd).catch((e) => setError(parseError(e)));
+            }}
+          />
+          <MenuSeparator />
+          <MenuItem
+            label={t("terminal.closeAllTerminals")}
+            danger
+            disabled={!sessions.some((s) => s.projectKey === menuProject.key)}
+            onClick={() => void closeProjectTerminals(menuProject.key)}
+          />
+        </>
+      )}
+    </ContextMenu>
+    <ContextMenu {...canvasMenu.menuProps} minWidth={180}>
+      <MenuItem
+        label={t("terminal.canvasCopy")}
+        disabled={!canvasSelection}
+        onClick={handleCanvasCopy}
+      />
+      <MenuItem
+        label={t("terminal.canvasPaste")}
+        disabled={!activeId}
+        onClick={handleCanvasPaste}
+      />
+      <MenuItem
+        label={t("terminal.canvasSelectAll")}
+        disabled={!activeId}
+        onClick={handleCanvasSelectAll}
+      />
+      <MenuItem
+        label={t("terminal.canvasClear")}
+        disabled={!activeId}
+        onClick={handleCanvasClear}
+      />
+    </ContextMenu>
     <Modal
       open={saveOpen}
       onClose={() => setSaveOpen(false)}
-      title="Save Workspace"
-      subtitle={`${sessions.length} terminals`}
+      title={t("terminal.saveWorkspaceModal")}
+      subtitle={t("terminal.terminalsCount", { count: sessions.length })}
     >
       <div className="p-4 space-y-3">
         <input
           type="text"
           value={saveName}
           onChange={(e) => setSaveName(e.target.value)}
-          placeholder="Workspace name"
-          aria-label="Workspace name"
+          placeholder={t("terminal.workspaceNamePlaceholder")}
+          aria-label={t("terminal.workspaceNamePlaceholder")}
           autoFocus
           className="w-full px-2.5 py-1.5 text-sm rounded-md bg-[var(--surface-2)] border border-[var(--border-color)] text-gray-800 dark:text-gray-200 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
         />
@@ -638,7 +881,7 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
             onClick={() => setSaveOpen(false)}
             className="px-3 py-1.5 text-xs rounded-md bg-[var(--surface-2)] text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
           >
-            Cancel
+            {t("common.cancel")}
           </button>
           <button
             type="button"
@@ -646,16 +889,16 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
             disabled={!saveName.trim()}
             className="px-3 py-1.5 text-xs rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white transition-colors disabled:opacity-50"
           >
-            Save
+            {t("common.save")}
           </button>
         </div>
       </div>
     </Modal>
     <ConfirmDialog
       open={killAllOpen}
-      title="Kill all terminals?"
-      message={`This closes all ${sessions.length} terminal sessions across every project.`}
-      confirmLabel="Kill All"
+      title={t("terminal.killAllTitle")}
+      message={t("terminal.killAllMessage", { count: sessions.length })}
+      confirmLabel={t("terminal.killAll")}
       size="sm"
       onConfirm={async () => {
         await closeAllTerminals();

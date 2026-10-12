@@ -1,11 +1,24 @@
 import { useState, useCallback, useEffect, memo, lazy, Suspense } from "react";
+import { useTranslation } from "react-i18next";
 import * as api from "../lib/tauri";
 import type { GitFileEntry, StashInfo } from "../lib/types";
 import { DiffViewer } from "./DiffViewer";
 import { AiGenerateIcon } from "./ui/icons";
 import { OperationConfirmDialog } from "./OperationConfirmDialog";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { ContextMenu, MenuSeparator } from "./ui/ContextMenu";
+import { MenuItem, expandBodyAnimation, expandBodyExitAnimation, usePresence } from "./ui/primitives";
+import { useContextMenu } from "../hooks/useContextMenu";
 
 const StashManager = lazy(() => import("./StashManager").then((m) => ({ default: m.StashManager })));
+const FileHistoryView = lazy(() => import("./FileHistoryView").then((m) => ({ default: m.FileHistoryView })));
+const BlameView = lazy(() => import("./BlameView").then((m) => ({ default: m.BlameView })));
+
+// Interactive controls keep the native context menu; the custom file menu only
+// opens when the event target misses these (mirrors ProjectRowShell).
+const FILE_MENU_SKIP = 'button, input, textarea, a, [role="button"]';
+
+type FileMenuTarget = { kind: "file"; file: GitFileEntry } | { kind: "container" } | null;
 
 interface GitOpsPanelProps {
   path: string;
@@ -14,28 +27,37 @@ interface GitOpsPanelProps {
   onError: (msg: string) => void;
   onInfo?: (msg: string) => void;
   /**
-   * Controlled open state. Card view hosts the panel in its own grid cell
-   * (see ProjectGrid) so expanding it never deforms sibling cards; other
-   * list-style views leave it undefined and the panel self-manages.
+   * Controlled open state. Card view lifts it to the grid so the expanded
+   * card can take its whole row (see ProjectGrid); other list-style views
+   * leave it undefined and the panel self-manages.
    */
   open?: boolean;
   /** Controlled toggle handler (used together with `open`). */
   onToggle?: () => void;
   /** Set false when the trigger button is rendered elsewhere. */
   showTrigger?: boolean;
+  /** Extra classes for the expanded content wrapper. */
+  className?: string;
+  /** Inline style for the expanded content wrapper. */
+  style?: React.CSSProperties;
   /**
-   * Set true when the panel content is hosted elsewhere (card view renders
-   * it in a dedicated grid cell). The in-place instance then acts as the
-   * trigger button only, keeping the host card's height unchanged.
+   * Wide layout: content is grouped into two columns (left = actions + stash
+   * + files, right = commit form + diff preview) instead of one vertical
+   * stack. Used by the card view, where the expanded card spans a whole
+   * grid row; narrower views keep the linear layout.
    */
-  triggerOnly?: boolean;
+  columns?: boolean;
 }
 
-export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSuccess, onError, onInfo, open: openProp, onToggle, showTrigger = true, triggerOnly = false }: GitOpsPanelProps) {
+export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSuccess, onError, onInfo, open: openProp, onToggle, showTrigger = true, className, style, columns = false }: GitOpsPanelProps) {
   // Controlled or self-managed open state.
+  const { t } = useTranslation();
   const [internalOpen, setInternalOpen] = useState(false);
   const isControlled = openProp !== undefined;
   const open = isControlled ? openProp : internalOpen;
+  // `open` false unmounts the body below; hold it for one exit cycle so the
+  // fold animation has something to run on instead of vanishing in a frame.
+  const { present: bodyPresent, closing: bodyClosing } = usePresence(open);
   const [commitMsg, setCommitMsg] = useState("");
   const [files, setFiles] = useState<GitFileEntry[]>([]);
   const [loadingOps, setLoadingOps] = useState<Set<string>>(new Set());
@@ -51,13 +73,18 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
   const [confirmStashDrop, setConfirmStashDrop] = useState<number | null>(null);
   const [confirmForcePush, setConfirmForcePush] = useState(false);
   const [stashManagerOpen, setStashManagerOpen] = useState(false);
+  const [fileMenuTarget, setFileMenuTarget] = useState<FileMenuTarget>(null);
+  const [confirmDiscard, setConfirmDiscard] = useState<GitFileEntry | null>(null);
+  const [blameFile, setBlameFile] = useState<string | null>(null);
+  const [historyFile, setHistoryFile] = useState<string | null>(null);
+  const fileMenu = useContextMenu();
 
   const loadFiles = useCallback(async () => {
     try {
       const f = await api.gitGetFiles(path);
       setFiles(f);
     } catch (e) {
-      onError(`Failed to load files: ${e}`);
+      onError(t("panelToast.loadFiles", { error: String(e) }));
     }
   }, [path, onError]);
 
@@ -66,7 +93,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
       const list = await api.gitStashList(path);
       setStashList(list);
     } catch (e) {
-      onError(`Failed to load stash list: ${e}`);
+      onError(t("panelToast.loadStash", { error: String(e) }));
     }
   }, [path, onError]);
 
@@ -76,7 +103,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
       const diff = await api.gitGetStagedDiff(path);
       setStagedDiff(diff);
     } catch (e) {
-      onError(`Failed to load diff: ${e}`);
+      onError(t("panelToast.loadDiff", { error: String(e) }));
     } finally {
       setLoadingDiff(false);
     }
@@ -99,7 +126,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
   const handleAction = useCallback(
     async (name: string, fn: () => Promise<void>, successMsg?: string) => {
       setLoadingOps((prev) => new Set(prev).add(name));
-      const label = { fetch: "Fetching", pull: "Pulling", push: "Pushing", force_push: "Force pushing", stash: "Stashing", pop: "Popping", stash_drop: "Dropping", stage_all: "Staging all", unstage_all: "Unstaging all", stash_apply: "Applying stash" }[name] ?? name;
+      const label = (t(`panelActing.${name}`, { defaultValue: name }) as string) ?? name;
       onInfo?.(`${label}...`);
       try {
         await fn();
@@ -115,7 +142,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
         });
       }
     },
-    [onRefresh, onSuccess, onError, loadFiles, loadStashList]
+    [onRefresh, onSuccess, onError, loadFiles, loadStashList, t]
   );
 
   const handleCommit = useCallback(async () => {
@@ -123,7 +150,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
     setLoadingOps((prev) => new Set(prev).add("commit"));
     try {
       const hash = await api.gitCommit(path, commitMsg.trim());
-      onSuccess(`Committed: ${hash.slice(0, 7)}`);
+      onSuccess(t("panelToast.committed", { hash: hash.slice(0, 7) }));
       setCommitMsg("");
       setStagedDiff(null);
       await Promise.all([onRefresh(), loadFiles()]);
@@ -136,7 +163,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
         return next;
       });
     }
-  }, [path, commitMsg, onRefresh, onSuccess, onError, loadFiles]);
+  }, [path, commitMsg, onRefresh, onSuccess, onError, loadFiles, t]);
 
   const handleStage = useCallback(
     async (filePath: string) => {
@@ -176,20 +203,20 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
     [path, loadFiles, onError]
   );
 
-  const handleStageAll = useCallback(() => handleAction("stage_all", async () => { await api.gitStageAll(path); }, "All files staged"), [handleAction, path]);
-  const handleUnstageAll = useCallback(() => handleAction("unstage_all", async () => { await api.gitUnstageAll(path); }, "All files unstaged"), [handleAction, path]);
-  const handleFetch = useCallback(() => handleAction("fetch", async () => { await api.gitFetch(path); }, "Fetch completed"), [handleAction, path]);
-  const handlePull = useCallback(() => handleAction("pull", async () => { await api.gitPull(path); }, "Pull completed"), [handleAction, path]);
-  const handlePush = useCallback(() => handleAction("push", async () => { await api.gitPush(path); }, "Push completed"), [handleAction, path]);
-  const handleForcePush = useCallback(() => handleAction("force_push", async () => { await api.gitPush(path, undefined, true); }, "Force push completed"), [handleAction, path]);
-  const handlePop = useCallback(() => handleAction("pop", async () => { await api.gitStashPop(path); }, "Stash popped"), [handleAction, path]);
+  const handleStageAll = useCallback(() => handleAction("stage_all", async () => { await api.gitStageAll(path); }, t("panelToast.staged")), [handleAction, path, t]);
+  const handleUnstageAll = useCallback(() => handleAction("unstage_all", async () => { await api.gitUnstageAll(path); }, t("panelToast.unstaged")), [handleAction, path, t]);
+  const handleFetch = useCallback(() => handleAction("fetch", async () => { await api.gitFetch(path); }, t("app.fetchCompleted")), [handleAction, path, t]);
+  const handlePull = useCallback(() => handleAction("pull", async () => { await api.gitPull(path); }, t("app.pullCompleted")), [handleAction, path, t]);
+  const handlePush = useCallback(() => handleAction("push", async () => { await api.gitPush(path); }, t("app.pushCompleted")), [handleAction, path, t]);
+  const handleForcePush = useCallback(() => handleAction("force_push", async () => { await api.gitPush(path, undefined, true); }, t("panelToast.forcePushed", { defaultValue: "Force push completed" })), [handleAction, path, t]);
+  const handlePop = useCallback(() => handleAction("pop", async () => { await api.gitStashPop(path); }, t("panelToast.stashPopped", { defaultValue: "Stash popped" })), [handleAction, path, t]);
 
   const handleStash = useCallback(() => {
     const msg = stashMsg.trim();
     return handleAction("stash", async () => {
       await api.gitStash(path, msg || undefined);
-    }, "Stashed changes");
-  }, [handleAction, path, stashMsg]);
+    }, t("panelToast.stashed", { defaultValue: "Stashed changes" }));
+  }, [handleAction, path, stashMsg, t]);
 
   const handleGenerateMsg = useCallback(async () => {
     setGeneratingMsg(true);
@@ -204,17 +231,53 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
   }, [path, onError]);
 
   const handleStashPopAt = useCallback(
-    (index: number) => handleAction("pop", async () => { await api.gitStashPop(path, index); }, `Stash@{${index}} popped`),
-    [handleAction, path]
+    (index: number) => handleAction("pop", async () => { await api.gitStashPop(path, index); }, `${t("gitops.stashDiffPrefix")}{${index}} ${t("panelToast.poppedSuffix", { defaultValue: "popped" })}`),
+    [handleAction, path, t]
   );
   const handleStashApply = useCallback(
-    (index: number) => handleAction("stash_apply", async () => { await api.gitStashApply(path, index); }, `Stash@{${index}} applied`),
-    [handleAction, path]
+    (index: number) => handleAction("stash_apply", async () => { await api.gitStashApply(path, index); }, `${t("gitops.stashDiffPrefix")}{${index}} ${t("panelToast.appliedSuffix", { defaultValue: "applied" })}`),
+    [handleAction, path, t]
   );
   const handleStashDrop = useCallback(
-    (index: number) => handleAction("stash_drop", async () => { await api.gitStashDrop(path, index); }, `Stash@{${index}} dropped`),
-    [handleAction, path]
+    (index: number) => handleAction("stash_drop", async () => { await api.gitStashDrop(path, index); }, `${t("gitops.stashDiffPrefix")}{${index}} ${t("panelToast.droppedSuffix", { defaultValue: "dropped" })}`),
+    [handleAction, path, t]
   );
+
+  const handleDiscard = useCallback(
+    (file: GitFileEntry) => handleAction("discard", async () => { await api.gitDiscardFile(path, file.path); }, `${t("gitops.stashDiffPrefix")}${file.path}`),
+    [handleAction, path, t]
+  );
+
+  const handleCopyPath = useCallback(
+    async (filePath: string) => {
+      try {
+        await navigator.clipboard.writeText(filePath);
+      } catch (e) {
+        onError(String(e));
+      }
+    },
+    [onError]
+  );
+
+  // Both the file rows and the list container open the same custom menu;
+  // interactive targets fall through to the native menu and text selections
+  // are exempted by useContextMenu.
+  const openFileMenu = useCallback(
+    (e: React.MouseEvent, target: FileMenuTarget) => {
+      const el = e.target as HTMLElement | null;
+      if (el?.closest(FILE_MENU_SKIP)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setFileMenuTarget(target);
+      fileMenu.onContextMenu(e);
+    },
+    [fileMenu.onContextMenu]
+  );
+
+  const closeFileMenu = useCallback(() => {
+    fileMenu.close();
+    setFileMenuTarget(null);
+  }, [fileMenu.close]);
 
   const handleToggleStashList = useCallback(async () => {
     const next = !showStashList;
@@ -241,87 +304,94 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
       <button
         onClick={handleToggle}
         aria-expanded={open}
-        aria-label="Toggle git operations"
+        aria-label={t("panel.toggle")}
         className="w-full px-4 py-2 text-xs text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800/50 flex items-center gap-2 transition-colors"
       >
         <span className={`transition-transform ${open ? "rotate-90" : ""}`}>&#x25B6;</span>
-        Git Operations
+        {t("panel.trigger")}
       </button>
     </div>
     )}
 
-    {open && !triggerOnly && (
-      <div className="px-4 pb-3 space-y-3">
+    {bodyPresent && (
+      <div className={`grid ${bodyClosing ? expandBodyExitAnimation : expandBodyAnimation}`}>
+      <div className="overflow-hidden min-w-0">
+      <div
+        className={`px-4 pb-3 ${columns ? "grid gap-3 md:grid-cols-2 md:items-start" : "space-y-3"}${className ? ` ${className}` : ""}`}
+        style={style}
+      >
+          {/* Left column (wide card): sync/stash actions, stash list, files */}
+          <div className="space-y-3 min-w-0">
           {/* Action buttons */}
           <div className="flex flex-wrap gap-1.5 min-w-0">
             <button
               onClick={handleFetch}
               disabled={isLoading("fetch")}
-              aria-label="Fetch from remote"
+              aria-label={t("gitops.fetchAria")}
               className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-[var(--surface-2)] text-gray-700 dark:text-gray-300 border border-[var(--border-color)] hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50 transition-colors duration-150 active:scale-[0.98]"
             >
-              {isLoading("fetch") ? "Fetching..." : "Fetch"}
+              {isLoading("fetch") ? t("gitops.fetchLoading") : t("gitops.fetch")}
             </button>
             <button
               onClick={handlePull}
               disabled={isLoading("pull")}
-              aria-label="Pull from remote"
+              aria-label={t("gitops.pullAria")}
               className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-blue-100 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800/50 hover:bg-blue-200 dark:hover:bg-blue-900/40 disabled:opacity-50 transition-colors duration-150 active:scale-[0.98]"
             >
-              {isLoading("pull") ? "Pulling..." : "Pull"}
+              {isLoading("pull") ? t("gitops.pullLoading") : t("gitops.pull")}
             </button>
             <button
               onClick={handlePush}
               disabled={isLoading("push")}
-              aria-label="Push to remote"
+              aria-label={t("gitops.pushAria")}
               className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-green-100 dark:bg-green-900/20 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800/50 hover:bg-green-200 dark:hover:bg-green-900/40 disabled:opacity-50 transition-colors duration-150 active:scale-[0.98]"
             >
-              {isLoading("push") ? "Pushing..." : "Push"}
+              {isLoading("push") ? t("gitops.pushLoading") : t("gitops.push")}
             </button>
             <button
               onClick={() => setConfirmForcePush(true)}
               disabled={isLoading("force_push")}
-              aria-label="Force push to remote"
+              aria-label={t("panel.forcePushAria")}
               className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-red-100 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800/50 hover:bg-red-200 dark:hover:bg-red-900/40 disabled:opacity-50 transition-colors duration-150 active:scale-[0.98]"
             >
-              {isLoading("force_push") ? "Force Pushing..." : "Force Push"}
+              {isLoading("force_push") ? t("panel.forcePushLoading") : t("panel.forcePush")}
             </button>
             <button
               onClick={handleStash}
               disabled={isLoading("stash")}
-              aria-label="Stash changes"
+              aria-label={t("gitops.stashAria")}
               className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-amber-100 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/50 hover:bg-amber-200 dark:hover:bg-amber-900/40 disabled:opacity-50 transition-colors duration-150 active:scale-[0.98]"
             >
-              {isLoading("stash") ? "Stashing..." : "Stash"}
+              {isLoading("stash") ? t("gitops.stashLoading") : t("gitops.stash")}
             </button>
             <input
               type="text"
               value={stashMsg}
               onChange={(e) => setStashMsg(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleStash()}
-              placeholder="Stash message (optional)"
-              aria-label="Stash message"
+              placeholder={t("gitops.stashMsgPlaceholder")}
+              aria-label={t("gitops.stashMsgAria")}
               className="px-2 py-1 rounded-lg border border-[var(--border-color)] bg-[var(--surface-1)] text-xs min-w-0 flex-1 basis-24 focus:outline-none focus:ring-2 focus:ring-yellow-500"
             />
             <button
               onClick={handlePop}
               disabled={isLoading("pop")}
-              aria-label="Pop stash"
+              aria-label={t("gitops.popAria")}
               className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-purple-100 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/50 hover:bg-purple-200 dark:hover:bg-purple-900/40 disabled:opacity-50 transition-colors duration-150 active:scale-[0.98]"
             >
-              {isLoading("pop") ? "Popping..." : "Pop"}
+              {isLoading("pop") ? t("gitops.popLoading") : t("gitops.pop")}
             </button>
             <button
               onClick={handleToggleStashList}
-              aria-label="Toggle stash list"
+              aria-label={t("gitops.toggleStashList")}
               aria-expanded={showStashList}
               className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-[var(--surface-2)] text-gray-700 dark:text-gray-300 border border-[var(--border-color)] hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors duration-150 active:scale-[0.98]"
             >
-              Stash List {stashList.length > 0 ? `(${stashList.length})` : ""}
+              {t("gitops.stashList", { count: stashList.length })}
             </button>
             <button
               onClick={() => setStashManagerOpen(true)}
-              aria-label="Open stash manager"
+              aria-label={t("panel.openStashManager", { defaultValue: "Open stash manager" })}
               className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-[var(--surface-2)] text-gray-700 dark:text-gray-300 border border-[var(--border-color)] hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors duration-150 active:scale-[0.98]"
             >
               Stash Manager
@@ -332,7 +402,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
           {showStashList && (
             <div className="space-y-1 max-h-32 overflow-y-auto">
               {stashList.length === 0 ? (
-                <p className="text-xs text-gray-400 dark:text-gray-500 italic">No stash entries</p>
+                <p className="text-xs text-gray-400 dark:text-gray-500 italic">{t("gitops.noStash")}</p>
               ) : (
                 stashList.map((s) => (
                   <div key={s.index} className="flex items-center gap-2 text-xs">
@@ -346,28 +416,28 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
                       onClick={() => handleStashApply(s.index)}
                       disabled={isLoading("stash_apply")}
                       className="px-1.5 py-0.5 rounded-lg bg-blue-100 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800/50 hover:bg-blue-200 dark:hover:bg-blue-900/40 disabled:opacity-50 transition-colors duration-150 active:scale-[0.98]"
-                      aria-label={`Apply stash@{${s.index}}`}
-                      title="Apply"
+                      aria-label={`${t("gitops.applyStashPrefix")}{${s.index}}`}
+                      title={t("gitops.apply")}
                     >
-                      Apply
+                      {t("gitops.apply")}
                     </button>
                     <button
                       onClick={() => handleStashPopAt(s.index)}
                       disabled={isLoading("pop")}
                       className="px-1.5 py-0.5 rounded-lg bg-purple-100 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/50 hover:bg-purple-200 dark:hover:bg-purple-900/40 disabled:opacity-50 transition-colors duration-150 active:scale-[0.98]"
-                      aria-label={`Pop stash@{${s.index}}`}
-                      title="Pop"
+                      aria-label={`${t("gitops.popStashPrefix")}{${s.index}}`}
+                      title={t("gitops.pop")}
                     >
-                      Pop
+                      {t("gitops.pop")}
                     </button>
                     <button
                       onClick={() => setConfirmStashDrop(s.index)}
                       disabled={isLoading("stash_drop")}
                       className="px-1.5 py-0.5 rounded-lg bg-red-100 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800/50 hover:bg-red-200 dark:hover:bg-red-900/40 disabled:opacity-50 transition-colors duration-150 active:scale-[0.98]"
-                      aria-label={`Drop stash@{${s.index}}`}
-                      title="Drop"
+                      aria-label={`${t("gitops.dropStashPrefix")}{${s.index}}`}
+                      title={t("gitops.dropStash")}
                     >
-                      Drop
+                      {t("gitops.dropStash")}
                     </button>
                   </div>
                 ))
@@ -384,22 +454,29 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
                   onClick={handleStageAll}
                   disabled={isLoading("stage_all")}
                   className="px-2 py-0.5 rounded-lg text-xs font-medium bg-green-100 dark:bg-green-900/20 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800/50 hover:bg-green-200 dark:hover:bg-green-900/40 disabled:opacity-50 transition-colors duration-150 active:scale-[0.98]"
-                  aria-label="Stage all files"
+                  aria-label={t("panel.stageAllAria")}
                 >
-                  {isLoading("stage_all") ? "Staging..." : "Stage All"}
+                  {isLoading("stage_all") ? t("panel.staging") : t("panel.stageAll")}
                 </button>
                 <button
                   onClick={handleUnstageAll}
                   disabled={isLoading("unstage_all")}
                   className="px-2 py-0.5 rounded-lg text-xs font-medium bg-red-100 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800/50 hover:bg-red-200 dark:hover:bg-red-900/40 disabled:opacity-50 transition-colors duration-150 active:scale-[0.98]"
-                  aria-label="Unstage all files"
+                  aria-label={t("panel.unstageAllAria")}
                 >
-                  {isLoading("unstage_all") ? "Unstaging..." : "Unstage All"}
+                  {isLoading("unstage_all") ? t("panel.unstaging") : t("panel.unstageAll")}
                 </button>
               </div>
-              <div className="max-h-32 overflow-y-auto">
+              <div
+                className="max-h-32 overflow-y-auto"
+                onContextMenu={(e) => openFileMenu(e, { kind: "container" })}
+              >
                 {files.map((f) => (
-                  <div key={f.path} className="flex items-center gap-2 text-xs">
+                  <div
+                    key={f.path}
+                    className="flex items-center gap-2 text-xs"
+                    onContextMenu={(e) => openFileMenu(e, { kind: "file", file: f })}
+                  >
                     <span
                       className={`w-14 text-center px-1.5 py-0.5 rounded font-mono ${
                         f.status === "untracked"
@@ -426,7 +503,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
                     <button
                       onClick={() => setDiffFile(f.path)}
                       className="flex-1 truncate text-gray-700 dark:text-gray-300 font-mono text-left hover:underline hover:text-blue-600 dark:hover:text-blue-400"
-                      title="View diff"
+                      title={t("panel.viewDiff")}
                     >
                       {f.path}
                     </button>
@@ -435,8 +512,8 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
                         onClick={() => handleStage(f.path)}
                         disabled={stagingFiles.has(f.path)}
                         className="px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/50 disabled:opacity-50"
-                        aria-label={`Stage ${f.path}`}
-                        title="Stage"
+                        aria-label={t("panel.stageAria", { path: f.path })}
+                        title={t("panel.stage")}
                       >
                         {stagingFiles.has(f.path) ? "..." : "+"}
                       </button>
@@ -445,8 +522,8 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
                         onClick={() => handleUnstage(f.path)}
                         disabled={stagingFiles.has(f.path)}
                         className="px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 hover:bg-red-200 dark:hover:bg-red-900/50 disabled:opacity-50"
-                        aria-label={`Unstage ${f.path}`}
-                        title="Unstage"
+                        aria-label={t("panel.unstageAria", { path: f.path })}
+                        title={t("panel.unstage")}
                       >
                         {stagingFiles.has(f.path) ? "..." : "-"}
                       </button>
@@ -456,7 +533,10 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
             </div>
             </div>
           )}
+          </div>
 
+          {/* Right column (wide card): commit form + staged diff preview */}
+          <div className="space-y-3 min-w-0">
           {/* Commit form */}
           <div className="flex flex-wrap gap-2 min-w-0">
             <input
@@ -464,16 +544,16 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
               value={commitMsg}
               onChange={(e) => setCommitMsg(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleCommit()}
-              placeholder="Commit message..."
-              aria-label="Commit message"
+              placeholder={t("panel.commitPlaceholder")}
+              aria-label={t("panel.commitAria")}
               className="flex-1 min-w-0 px-3 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--surface-1)] text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <div className="flex gap-2 shrink-0">
               <button
                 onClick={handleGenerateMsg}
                 disabled={generatingMsg}
-                title="Generate commit message with AI"
-                aria-label="Generate commit message with AI"
+                title={t("panel.genMsg")}
+                aria-label={t("panel.genMsg")}
                 className="px-2 py-1.5 rounded-lg text-xs font-medium bg-purple-100 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/50 hover:bg-purple-200 dark:hover:bg-purple-900/40 disabled:opacity-50 transition-colors duration-150 active:scale-[0.98]"
               >
                 {generatingMsg ? (
@@ -484,19 +564,19 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
               </button>
               <button
                 onClick={handleToggleDiff}
-                title="Preview staged diff"
-                aria-label="Preview staged diff"
+                title={t("panel.previewDiff")}
+                aria-label={t("panel.previewDiff")}
                 aria-expanded={showDiff}
                 className={`px-2 py-1.5 rounded-lg text-xs font-medium transition-colors duration-150 active:scale-[0.98] ${showDiff ? "bg-teal-200 dark:bg-teal-800/50 text-teal-800 dark:text-teal-200 border border-teal-300 dark:border-teal-700/50" : "bg-teal-100 dark:bg-teal-900/20 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800/50 hover:bg-teal-200 dark:hover:bg-teal-900/40"}`}
               >
-                {showDiff ? "Hide Diff" : "Preview Diff"}
+                {showDiff ? t("panel.hideDiff") : t("panel.showPreviewDiff")}
               </button>
               <button
                 onClick={handleCommit}
                 disabled={!commitMsg.trim() || isLoading("commit")}
                 className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:bg-gray-400 text-white transition-colors duration-150 active:scale-[0.98]"
               >
-                {isLoading("commit") ? "Committing..." : "Commit"}
+                {isLoading("commit") ? t("panel.commitLoading") : t("panel.commit")}
               </button>
             </div>
           </div>
@@ -505,21 +585,21 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
           {showDiff && (
             <div className="rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 overflow-hidden">
               <div className="flex items-center justify-between px-3 py-1.5 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-                <span className="text-xs font-medium text-gray-600 dark:text-gray-400">Staged Changes</span>
+                <span className="text-xs font-medium text-gray-600 dark:text-gray-400">{t("panel.stagedChanges")}</span>
                 <button
                   onClick={loadStagedDiff}
                   disabled={loadingDiff}
                   className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 disabled:opacity-50"
-                  aria-label="Refresh diff"
+                  aria-label={t("panel.refreshDiff")}
                 >
-                  {loadingDiff ? "Loading..." : "Refresh"}
+                  {loadingDiff ? t("common.loading") : t("panel.refresh")}
                 </button>
               </div>
               <pre className="select-text p-3 text-xs font-mono max-h-48 overflow-y-auto whitespace-pre-wrap break-all text-gray-800 dark:text-gray-200">
                 {stagedDiff === null ? (
-                  <span className="text-gray-400 italic">Loading...</span>
+                  <span className="text-gray-400 italic">{t("panel.loadingDiff")}</span>
                 ) : stagedDiff.length === 0 ? (
-                  <span className="text-gray-400 italic">No staged changes</span>
+                  <span className="text-gray-400 italic">{t("panel.noStaged")}</span>
                 ) : (
                   stagedDiff.split("\n").map((line, i) => (
                     <span
@@ -542,6 +622,9 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
               </pre>
             </div>
           )}
+          </div>
+      </div>
+      </div>
       </div>
     )}
 
@@ -581,6 +664,69 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
           }}
           onCancel={() => setConfirmForcePush(false)}
         />
+      )}
+
+      {confirmDiscard !== null && (
+        <ConfirmDialog
+          open
+          title={t("panel.discardTitle")}
+          message={t("panel.discardMessage", { path, file: confirmDiscard.path })}
+          confirmLabel={t("panel.discard")}
+          confirmColor="red"
+          onConfirm={async () => {
+            await handleDiscard(confirmDiscard);
+            setConfirmDiscard(null);
+          }}
+          onCancel={() => setConfirmDiscard(null)}
+        />
+      )}
+
+      {fileMenuTarget?.kind === "file" && (
+        <ContextMenu
+          open={fileMenu.anchor !== null && confirmDiscard === null}
+          anchor={fileMenu.anchor ?? { x: 0, y: 0 }}
+          onClose={closeFileMenu}
+        >
+          {fileMenuTarget.file.status === "untracked" ? (
+            <MenuItem label={t("panel.stage")} onClick={() => handleStage(fileMenuTarget.file.path)} />
+          ) : (
+            <MenuItem label={t("panel.unstage")} onClick={() => handleUnstage(fileMenuTarget.file.path)} />
+          )}
+          {fileMenuTarget.file.status !== "untracked" && (
+            <>
+              <MenuItem label={t("menu.tool.blame")} onClick={() => setBlameFile(fileMenuTarget.file.path)} />
+              <MenuItem label={t("menu.tool.fileHistory")} onClick={() => setHistoryFile(fileMenuTarget.file.path)} />
+            </>
+          )}
+          <MenuItem label={t("panel.viewDiff")} onClick={() => setDiffFile(fileMenuTarget.file.path)} />
+          <MenuItem label={t("panel.copyPath")} onClick={() => void handleCopyPath(fileMenuTarget.file.path)} />
+          <MenuSeparator />
+          <MenuItem label={t("panel.discardEllipsis")} danger onClick={() => setConfirmDiscard(fileMenuTarget.file)} />
+        </ContextMenu>
+      )}
+
+      {fileMenuTarget?.kind === "container" && (
+        <ContextMenu
+          open={fileMenu.anchor !== null}
+          anchor={fileMenu.anchor ?? { x: 0, y: 0 }}
+          onClose={closeFileMenu}
+        >
+          <MenuItem label={t("panel.stageAll")} onClick={handleStageAll} />
+          <MenuItem label={t("panel.unstageAll")} onClick={handleUnstageAll} />
+          <MenuItem label={t("panel.previewDiff")} onClick={() => void handleToggleDiff()} />
+        </ContextMenu>
+      )}
+
+      {blameFile && (
+        <Suspense fallback={null}>
+          <BlameView path={path} filePath={blameFile} onClose={() => setBlameFile(null)} />
+        </Suspense>
+      )}
+
+      {historyFile && (
+        <Suspense fallback={null}>
+          <FileHistoryView path={path} filePath={historyFile} onClose={() => setHistoryFile(null)} />
+        </Suspense>
       )}
     </>
   );

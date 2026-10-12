@@ -1,4 +1,5 @@
 import { memo } from "react";
+import { useTranslation } from "react-i18next";
 import type { UndoPrompt } from "../hooks/useOperationHistory";
 import { undoPlanLabel } from "../hooks/useOperationHistory";
 
@@ -15,6 +16,7 @@ export const OperationUndoCard = memo(function OperationUndoCard({
   onUndo: () => void;
   onDismiss: () => void;
 }) {
+  const { t } = useTranslation();
   const label = undoPlanLabel(prompt.record, prompt.plan);
   const undoable = prompt.plan.kind !== "manual";
 
@@ -32,15 +34,15 @@ export const OperationUndoCard = memo(function OperationUndoCard({
           <button
             onClick={onUndo}
             disabled={prompt.busy}
-            aria-label="Undo last operation"
+            aria-label={t("history.undoLastOp")}
             className="ml-1 px-2 py-0.5 rounded text-xs font-semibold bg-blue-200 dark:bg-blue-800 text-blue-800 dark:text-blue-200 hover:bg-blue-300 dark:hover:bg-blue-700 transition-colors disabled:opacity-50"
           >
-            {prompt.busy ? "Undoing…" : "Undo"}
+            {prompt.busy ? t("history.undoing") : t("history.undo")}
           </button>
         )}
         <button
           onClick={onDismiss}
-          aria-label="Dismiss undo prompt"
+          aria-label={t("history.dismissUndo")}
           className="ml-1 opacity-60 hover:opacity-100 transition-opacity"
         >
           ✕
@@ -48,8 +50,7 @@ export const OperationUndoCard = memo(function OperationUndoCard({
       </div>
       {!undoable && (
         <p className="text-xs opacity-80">
-          This change is not safely reversible from here. Open ReflogView (project context menu → Tools) to
-          recover a previous state.
+          {t("history.notReversible")}
         </p>
       )}
     </div>

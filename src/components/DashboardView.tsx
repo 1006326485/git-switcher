@@ -1,5 +1,7 @@
 import { memo, useCallback, useMemo, useState } from "react";
 import type { ProjectDetail, BranchHealthReport } from "../lib/types";
+import { useTranslation } from "react-i18next";
+import { t as translate } from "../lib/i18n";
 import { analyzeBranchHealth } from "../lib/tauri";
 import { BranchHealthPanel } from "./BranchHealthPanel";
 
@@ -11,6 +13,7 @@ interface DashboardViewProps {
 }
 
 export const DashboardView = memo(function DashboardView({ projects, onDrillDown }: DashboardViewProps) {
+  const { t } = useTranslation();
   const [healthReports, setHealthReports] = useState<
     Array<{ projectName: string; path: string; report: BranchHealthReport }>
   >([]);
@@ -38,7 +41,7 @@ export const DashboardView = memo(function DashboardView({ projects, onDrillDown
       );
       setHealthReports(results);
     } catch (e) {
-      setHealthError(e instanceof Error ? e.message : "Failed to load branch health");
+      setHealthError(e instanceof Error ? e.message : translate("dashboard.loadHealthFailed"));
     } finally {
       setHealthLoading(false);
     }
@@ -149,8 +152,8 @@ export const DashboardView = memo(function DashboardView({ projects, onDrillDown
                     : "text-amber-800 dark:text-amber-200"
                 }`}>
                   {hasConflictRisk
-                    ? `${stats.conflictRisk.length} project${stats.conflictRisk.length !== 1 ? "s" : ""} at conflict risk`
-                    : `${stats.behind} project${stats.behind !== 1 ? "s" : ""} behind remote`}
+                    ? t("dashboard.conflictRiskTitle", { count: stats.conflictRisk.length })
+                    : t("dashboard.behindTitle", { count: stats.behind })}
                 </p>
                 <p className={`text-xs ${
                   hasConflictRisk
@@ -158,8 +161,8 @@ export const DashboardView = memo(function DashboardView({ projects, onDrillDown
                     : "text-amber-600 dark:text-amber-400"
                 }`}>
                   {hasConflictRisk
-                    ? "Local changes may conflict when pulling. Review before syncing."
-                    : `${stats.totalBehind} commit${stats.totalBehind !== 1 ? "s" : ""} to pull from remote`}
+                    ? t("dashboard.conflictRiskDesc")
+                    : t("dashboard.behindDesc", { count: stats.totalBehind })}
                 </p>
               </div>
             </div>
@@ -172,7 +175,7 @@ export const DashboardView = memo(function DashboardView({ projects, onDrillDown
                     : "bg-amber-600 hover:bg-amber-700 text-white"
                 }`}
               >
-                View projects
+                {t("dashboard.viewProjects")}
               </button>
               {!hasConflictRisk && (
                 <button
@@ -190,7 +193,7 @@ export const DashboardView = memo(function DashboardView({ projects, onDrillDown
       {/* Summary cards */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
         <StatCard
-          label="Total Projects"
+          label={t("dashboard.cardTotal")}
           value={stats.total}
           color="blue"
           icon={
@@ -199,10 +202,10 @@ export const DashboardView = memo(function DashboardView({ projects, onDrillDown
             </svg>
           }
           onClick={() => drillDown("all")}
-          actionLabel={`View all ${stats.total} project${stats.total === 1 ? "" : "s"}`}
+          actionLabel={t("dashboard.actionViewAll", { count: stats.total })}
         />
         <StatCard
-          label="With Changes"
+          label={t("dashboard.cardChanges")}
           value={stats.withChanges}
           color="yellow"
           icon={
@@ -211,10 +214,10 @@ export const DashboardView = memo(function DashboardView({ projects, onDrillDown
             </svg>
           }
           onClick={() => drillDown("modified")}
-          actionLabel={`View ${stats.withChanges} project${stats.withChanges === 1 ? "" : "s"} with changes`}
+          actionLabel={t("dashboard.actionViewChanges", { count: stats.withChanges })}
         />
         <StatCard
-          label="Ahead"
+          label={t("dashboard.cardAhead")}
           value={stats.ahead}
           color="green"
           icon={
@@ -223,10 +226,10 @@ export const DashboardView = memo(function DashboardView({ projects, onDrillDown
             </svg>
           }
           onClick={() => drillDown("ahead")}
-          actionLabel={`View ${stats.ahead} project${stats.ahead === 1 ? "" : "s"} ahead of remote`}
+          actionLabel={t("dashboard.actionViewAhead", { count: stats.ahead })}
         />
         <StatCard
-          label="Behind"
+          label={t("dashboard.cardBehind")}
           value={stats.behind}
           color="red"
           icon={
@@ -235,7 +238,7 @@ export const DashboardView = memo(function DashboardView({ projects, onDrillDown
             </svg>
           }
           onClick={() => drillDown("behind")}
-          actionLabel={`View ${stats.behind} project${stats.behind === 1 ? "" : "s"} behind remote`}
+          actionLabel={t("dashboard.actionViewBehind", { count: stats.behind })}
         />
       </div>
 
@@ -259,9 +262,9 @@ export const DashboardView = memo(function DashboardView({ projects, onDrillDown
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5m.75-9l3-3 2.148 2.148A12.061 12.061 0 0116.5 7.605" />
             </svg>
-            <span className="text-sm font-medium">Analyze branch health</span>
+            <span className="text-sm font-medium">{t("dashboard.analyzeHealth")}</span>
           </div>
-          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Identifies merged, stale, and behind branches</p>
+          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{t("dashboard.analyzeHealthDesc")}</p>
         </button>
       ) : (
         <BranchHealthPanel
@@ -277,34 +280,34 @@ export const DashboardView = memo(function DashboardView({ projects, onDrillDown
 
       {/* File changes summary */}
       <div className="bg-(--surface-1) rounded-xl border border-(--border-color) p-4">
-        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">File Changes</h3>
+        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">{t("dashboard.fileChanges")}</h3>
         <div className="grid grid-cols-3 gap-4 text-center">
           <div>
             <div className="text-2xl font-bold tracking-tight tabular-nums text-yellow-600 dark:text-yellow-400">{stats.totalModified}</div>
-            <div className="text-xs text-gray-500">Modified</div>
+            <div className="text-xs text-gray-500">{t("dashboard.modified")}</div>
           </div>
           <div>
             <div className="text-2xl font-bold tracking-tight tabular-nums text-green-600 dark:text-green-400">{stats.totalStaged}</div>
-            <div className="text-xs text-gray-500">Staged</div>
+            <div className="text-xs text-gray-500">{t("dashboard.staged")}</div>
           </div>
           <div>
             <div className="text-2xl font-bold tracking-tight tabular-nums text-gray-600 dark:text-gray-400">{stats.totalUntracked}</div>
-            <div className="text-xs text-gray-500">Untracked</div>
+            <div className="text-xs text-gray-500">{t("dashboard.untracked")}</div>
           </div>
         </div>
       </div>
 
       {/* Sync status */}
       <div className="bg-(--surface-1) rounded-xl border border-(--border-color) p-4">
-        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Sync Status</h3>
+        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">{t("dashboard.syncStatus")}</h3>
         <div className="grid grid-cols-2 gap-4 text-center">
           <div>
             <div className="text-2xl font-bold tracking-tight tabular-nums text-green-600 dark:text-green-400">{stats.totalAhead}</div>
-            <div className="text-xs text-gray-500">Commits Ahead</div>
+            <div className="text-xs text-gray-500">{t("dashboard.commitsAhead")}</div>
           </div>
           <div>
             <div className="text-2xl font-bold tracking-tight tabular-nums text-red-600 dark:text-red-400">{stats.totalBehind}</div>
-            <div className="text-xs text-gray-500">Commits Behind</div>
+            <div className="text-xs text-gray-500">{t("dashboard.commitsBehind")}</div>
           </div>
         </div>
       </div>
@@ -312,12 +315,12 @@ export const DashboardView = memo(function DashboardView({ projects, onDrillDown
       {/* Top branches */}
       {stats.topBranches.length > 0 && (
         <div className="bg-(--surface-1) rounded-xl border border-(--border-color) p-4">
-          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Active Branches</h3>
+          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">{t("dashboard.activeBranches")}</h3>
           <div className="space-y-2">
             {stats.topBranches.map(([branch, count]) => (
               <div key={branch} className="flex min-w-0 items-center justify-between gap-3 text-sm">
                 <span className="min-w-0 truncate font-mono text-gray-700 dark:text-gray-300" title={branch}>{branch}</span>
-                <span className="shrink-0 text-gray-500">{count} project{count !== 1 ? "s" : ""}</span>
+                <span className="shrink-0 text-gray-500">{t("dashboard.projectsSuffix", { count })}</span>
               </div>
             ))}
           </div>
@@ -328,7 +331,8 @@ export const DashboardView = memo(function DashboardView({ projects, onDrillDown
       {stats.conflictRisk.length > 0 && (
         <div className="bg-(--surface-1) rounded-xl border border-red-200 dark:border-red-900 p-4">
           <SectionAction
-            label="Conflict Risk"
+            label={t("dashboard.sectionConflictRisk")}
+            sectionLabel={t("dashboard.sectionLabelConflictRisk")}
             count={stats.conflictRisk.length}
             onClick={() => drillDown("behind")}
             tone="danger"
@@ -343,7 +347,7 @@ export const DashboardView = memo(function DashboardView({ projects, onDrillDown
               >
                 <span className="min-w-0 truncate text-gray-700 dark:text-gray-300" title={p.project.alias || p.project.name}>{p.project.alias || p.project.name}</span>
                 <div className="flex gap-2 text-xs">
-                  <span className="text-red-600">behind {p.status.behind}</span>
+                  <span className="text-red-600">{t("dashboard.behindCount", { count: p.status.behind })}</span>
                   {p.status.modified > 0 && <span className="text-yellow-600">{p.status.modified}M</span>}
                 </div>
               </button>
@@ -356,7 +360,8 @@ export const DashboardView = memo(function DashboardView({ projects, onDrillDown
       {stats.stale.length > 0 && (
         <div className="bg-(--surface-1) rounded-xl border border-(--border-color) p-4">
           <SectionAction
-            label="Inactive Projects"
+            label={t("dashboard.sectionInactive")}
+            sectionLabel={t("dashboard.sectionLabelInactive")}
             count={stats.stale.length}
             onClick={() => drillDown("stale")}
           />
@@ -371,8 +376,8 @@ export const DashboardView = memo(function DashboardView({ projects, onDrillDown
                 <span className="min-w-0 truncate text-gray-700 dark:text-gray-300" title={p.project.alias || p.project.name}>{p.project.alias || p.project.name}</span>
                 <span className="text-xs text-gray-500">
                   {p.project.last_active_at
-                    ? `${Math.floor((Date.now() - new Date(p.project.last_active_at).getTime()) / (1000 * 60 * 60 * 24))}d ago`
-                    : "never"}
+                    ? t("dashboard.daysAgo", { count: Math.floor((Date.now() - new Date(p.project.last_active_at).getTime()) / (1000 * 60 * 60 * 24)) })
+                    : t("dashboard.never")}
                 </span>
               </button>
             ))}
@@ -384,7 +389,8 @@ export const DashboardView = memo(function DashboardView({ projects, onDrillDown
       {stats.withChangesList.length > 0 && (
         <div className="bg-(--surface-1) rounded-xl border border-(--border-color) p-4">
           <SectionAction
-            label="Needs Attention"
+            label={t("dashboard.sectionNeedsAttention")}
+            sectionLabel={t("dashboard.sectionLabelNeedsAttention")}
             count={stats.withChangesList.length}
             onClick={() => drillDown("modified")}
           />
@@ -416,24 +422,27 @@ export const DashboardView = memo(function DashboardView({ projects, onDrillDown
 function SectionAction({
   label,
   count,
+  sectionLabel,
   onClick,
   tone = "default",
 }: {
   label: string;
   count: number;
+  sectionLabel: string;
   onClick: () => void;
   tone?: "default" | "danger";
 }) {
   const color = tone === "danger" ? "text-red-600 dark:text-red-400" : "text-gray-700 dark:text-gray-300";
+  const { t } = useTranslation();
   return (
     <button
       type="button"
       onClick={onClick}
       className={`mb-3 flex w-full items-center justify-between gap-3 text-left text-sm font-semibold ${color} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--accent) focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900`}
-      aria-label={`View ${count} ${label.toLowerCase()}`}
+      aria-label={t("dashboard.sectionViewPrefix", { count, label: sectionLabel })}
     >
       <span>{label} ({count})</span>
-      <span className="text-xs font-medium text-(--accent)">View projects →</span>
+      <span className="text-xs font-medium text-(--accent)">{t("dashboard.sectionViewAll")}</span>
     </button>
   );
 }
@@ -472,7 +481,7 @@ function StatCard({
         <span className={`${textColors[color]} opacity-60`}>{icon}</span>
       </div>
       <div className={`text-4xl font-bold tracking-tight tabular-nums ${textColors[color]}`}>{value}</div>
-      {onClick && <span className={`mt-2 block text-xs font-medium ${textColors[color]}`}>View projects →</span>}
+      {onClick && <span className={`mt-2 block text-xs font-medium ${textColors[color]}`}>{translate("dashboard.sectionViewAll")}</span>}
     </>
   );
 
@@ -484,7 +493,7 @@ function StatCard({
       type="button"
       onClick={onClick}
       className={`${className} cursor-pointer transition-transform hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--accent) focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900`}
-      aria-label={actionLabel ?? `View ${value} ${label.toLowerCase()}`}
+      aria-label={actionLabel ?? translate("dashboard.viewActionFallback", { value, label: label.toLowerCase() })}
     >
       {content}
     </button>
@@ -492,6 +501,7 @@ function StatCard({
 }
 
 function BranchDistribution({ branches }: { branches: [string, number][] }) {
+  const { t } = useTranslation();
   const total = branches.reduce((sum, [, count]) => sum + count, 0);
   const palette = [
     "bg-blue-500", "bg-green-500", "bg-amber-500", "bg-purple-500", "bg-pink-500",
@@ -500,7 +510,7 @@ function BranchDistribution({ branches }: { branches: [string, number][] }) {
   return (
     <div className="bg-(--surface-1) rounded-xl border border-(--border-color) p-4">
       <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
-        Branch Distribution
+        {t("dashboard.branchDistribution")}
       </h3>
       <div className="flex rounded-full h-3 overflow-hidden mb-3">
         {branches.map(([branch, count], i) => (
@@ -508,7 +518,7 @@ function BranchDistribution({ branches }: { branches: [string, number][] }) {
             key={branch}
             className={`${palette[i % palette.length]} transition-all duration-500`}
             style={{ width: `${(count / total) * 100}%` }}
-            title={`${branch}: ${count} projects`}
+            title={t("dashboard.branchProjects", { branch, count })}
           />
         ))}
       </div>
@@ -526,6 +536,7 @@ function BranchDistribution({ branches }: { branches: [string, number][] }) {
 }
 
 function SyncRing({ ahead, behind, synced }: { ahead: number; behind: number; synced: number }) {
+  const { t } = useTranslation();
   const total = ahead + behind + synced;
   if (total === 0) return null;
 
@@ -555,15 +566,15 @@ function SyncRing({ ahead, behind, synced }: { ahead: number; behind: number; sy
         <div className="space-y-1.5 text-sm">
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-green-500" />
-            <span className="text-gray-600 dark:text-gray-400">Ahead: {ahead}</span>
+            <span className="text-gray-600 dark:text-gray-400">{t("dashboard.aheadLabel")}: {ahead}</span>
           </div>
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-red-500" />
-            <span className="text-gray-600 dark:text-gray-400">Behind: {behind}</span>
+            <span className="text-gray-600 dark:text-gray-400">{t("dashboard.behindLabel")}: {behind}</span>
           </div>
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-gray-500" />
-            <span className="text-gray-600 dark:text-gray-400">Synced: {synced}</span>
+            <span className="text-gray-600 dark:text-gray-400">{t("dashboard.syncedLabel")}: {synced}</span>
           </div>
         </div>
       </div>
@@ -572,6 +583,7 @@ function SyncRing({ ahead, behind, synced }: { ahead: number; behind: number; sy
 }
 
 function ChangeHeatBar({ projects }: { projects: ProjectDetail[] }) {
+  const { t } = useTranslation();
   const withChanges = projects
     .filter((p) => p.status.modified + p.status.staged + p.status.untracked > 0)
     .sort(
@@ -592,7 +604,7 @@ function ChangeHeatBar({ projects }: { projects: ProjectDetail[] }) {
   return (
     <div className="bg-(--surface-1) rounded-xl border border-(--border-color) p-4">
       <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
-        Change Activity
+        {t("dashboard.changeActivity")}
       </h3>
       <div className="space-y-2">
         {withChanges.map((p) => {
@@ -607,17 +619,17 @@ function ChangeHeatBar({ projects }: { projects: ProjectDetail[] }) {
                 <div
                   className="bg-yellow-500 transition-all duration-500"
                   style={{ width: `${(p.status.modified / total) * pct}%` }}
-                  title={`${p.status.modified} modified`}
+                  title={t("dashboard.titleModified", { count: p.status.modified })}
                 />
                 <div
                   className="bg-green-500 transition-all duration-500"
                   style={{ width: `${(p.status.staged / total) * pct}%` }}
-                  title={`${p.status.staged} staged`}
+                  title={t("dashboard.titleStaged", { count: p.status.staged })}
                 />
                 <div
                   className="bg-gray-400 transition-all duration-500"
                   style={{ width: `${(p.status.untracked / total) * pct}%` }}
-                  title={`${p.status.untracked} untracked`}
+                  title={t("dashboard.titleUntracked", { count: p.status.untracked })}
                 />
               </div>
               <span className="text-xs text-gray-500 w-8 text-right">{total}</span>

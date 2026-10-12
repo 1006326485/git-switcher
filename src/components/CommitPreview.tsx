@@ -1,4 +1,5 @@
 import { useState, useEffect, memo } from "react";
+import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import { gitGetLog } from "../lib/tauri";
 import type { CommitInfo } from "../lib/types";
@@ -11,6 +12,7 @@ interface CommitPreviewProps {
 }
 
 export const CommitPreview = memo(function CommitPreview({ path, anchorRef, onClose }: CommitPreviewProps) {
+  const { t } = useTranslation();
   const [commits, setCommits] = useState<CommitInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [pos, setPos] = useState({ top: 0, left: 0 });
@@ -51,10 +53,10 @@ export const CommitPreview = memo(function CommitPreview({ path, anchorRef, onCl
     const diffMins = Math.floor(diffMs / 60000);
     const diffHours = Math.floor(diffMins / 60);
     const diffDays = Math.floor(diffHours / 24);
-    if (diffMins < 1) return "just now";
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays < 30) return `${diffDays}d ago`;
+    if (diffMins < 1) return t("commitPreview.justNow");
+    if (diffMins < 60) return t("commitPreview.mAgo", { count: diffMins });
+    if (diffHours < 24) return t("commitPreview.hAgo", { count: diffHours });
+    if (diffDays < 30) return t("commitPreview.dAgo", { count: diffDays });
     return date.toLocaleDateString();
   };
 
@@ -64,12 +66,12 @@ export const CommitPreview = memo(function CommitPreview({ path, anchorRef, onCl
       className={`select-text origin-top-left bg-[var(--surface-1)] border border-[var(--border-color)] rounded-xl shadow-lg p-3 min-w-[280px] max-w-[360px] ${popoverAnimation}`}
     >
       <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2 uppercase tracking-wider">
-        Recent Commits
+        {t("commitPreview.recentCommits")}
       </div>
       {loading ? (
-        <div className="text-xs text-gray-400">Loading...</div>
+        <div className="text-xs text-gray-400">{t("common.loading")}</div>
       ) : commits.length === 0 ? (
-        <div className="text-xs text-gray-400 italic">No commits</div>
+        <div className="text-xs text-gray-400 italic">{t("commitLog.noCommits")}</div>
       ) : (
         <div className="space-y-1.5">
           {commits.map((c) => (

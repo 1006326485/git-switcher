@@ -1,4 +1,5 @@
 import { useMemo, useCallback, useState, memo } from "react";
+import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import type { BranchInfo } from "../lib/types";
 import { useDropdownPortal } from "../hooks/useDropdownPortal";
@@ -22,6 +23,7 @@ export const BranchDropdown = memo(function BranchDropdown({
   allowCurrent,
   variant = "default",
 }: BranchDropdownProps) {
+  const { t } = useTranslation();
   const [copiedBranch, setCopiedBranch] = useState<string | null>(null);
 
   const {
@@ -39,19 +41,19 @@ export const BranchDropdown = memo(function BranchDropdown({
     const tags = filtered.filter((b) => b.is_tag);
     const items: { type: "header" | "branch"; label?: string; branch?: BranchInfo }[] = [];
     if (local.length > 0) {
-      items.push({ type: "header", label: "Local" });
+      items.push({ type: "header", label: t("branchMenu.local") });
       for (const b of local) items.push({ type: "branch", branch: b });
     }
     if (remote.length > 0) {
-      items.push({ type: "header", label: "Remote" });
+      items.push({ type: "header", label: t("branchMenu.remote") });
       for (const b of remote) items.push({ type: "branch", branch: b });
     }
     if (tags.length > 0) {
-      items.push({ type: "header", label: "Tags" });
+      items.push({ type: "header", label: t("branchMenu.tags") });
       for (const b of tags) items.push({ type: "branch", branch: b });
     }
     return items;
-  }, [branches, search]);
+  }, [branches, search, t]);
 
   const selectableIndices = useMemo(
     () => flatItems.reduce<number[]>((acc, item, i) => {
@@ -129,7 +131,7 @@ export const BranchDropdown = memo(function BranchDropdown({
     <div ref={triggerRef} className="relative">
       {variant === "compact" ? (
         <button
-          aria-label={`Branch: ${currentBranch}. Click to switch.`}
+          aria-label={t("branchMenu.branchAriaCompact", { branch: currentBranch })}
           aria-haspopup="listbox"
           aria-expanded={open}
           onClick={handleToggle}
@@ -140,7 +142,7 @@ export const BranchDropdown = memo(function BranchDropdown({
         </button>
       ) : (
         <button
-          aria-label={`Branch: ${currentBranch}. Click to switch branch.`}
+          aria-label={t("branchMenu.branchAria", { branch: currentBranch })}
           aria-haspopup="listbox"
           aria-expanded={open}
           onClick={handleToggle}
@@ -174,8 +176,8 @@ export const BranchDropdown = memo(function BranchDropdown({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Search branches..."
-              aria-label="Search branches"
+              placeholder={t("branchMenu.searchPlaceholder")}
+              aria-label={t("branchMenu.searchAria")}
               autoCapitalize="off"
               autoCorrect="off"
               autoComplete="off"
@@ -183,10 +185,10 @@ export const BranchDropdown = memo(function BranchDropdown({
               className="w-full px-2 py-1.5 text-sm rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
-          <div ref={listRef} role="listbox" aria-label="Branches" className="overflow-y-auto max-h-65">
+          <div ref={listRef} role="listbox" aria-label={t("branchMenu.listAria")} className="overflow-y-auto max-h-65">
             {flatItems.length === 0 ? (
               <div className="px-3 py-4 text-sm text-gray-500 dark:text-gray-400 text-center">
-                No branches found
+                {t("branchMenu.empty")}
               </div>
             ) : (
               flatItems.map((item, i) => {
@@ -241,9 +243,9 @@ export const BranchDropdown = memo(function BranchDropdown({
                     <button
                       onClick={(e) => { e.stopPropagation(); copyBranchName(b.name); }}
                       className="opacity-0 group-hover:opacity-100 px-1 py-0.5 rounded text-[10px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition-all shrink-0"
-                      title="Copy branch name"
+                      title={t("branchMenu.copyTitle")}
                     >
-                      {copiedBranch === b.name ? "✓" : "Copy"}
+                      {copiedBranch === b.name ? "✓" : t("branchMenu.copyLabel")}
                     </button>
                   </button>
                 );

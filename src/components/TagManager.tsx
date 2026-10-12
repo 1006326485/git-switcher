@@ -1,8 +1,12 @@
 import { useState, useEffect, useCallback, memo } from "react";
+import type { MouseEvent } from "react";
+import { useTranslation } from "react-i18next";
 import * as api from "../lib/tauri";
 import type { TagInfo } from "../lib/types";
 import { parseError } from "../lib/types";
-import { Modal, Tabs, PrimaryButton } from "./ui/primitives";
+import { useContextMenu } from "../hooks/useContextMenu";
+import { Modal, Tabs, PrimaryButton, MenuItem } from "./ui/primitives";
+import { ContextMenu, MenuSeparator } from "./ui/ContextMenu";
 import { OperationConfirmDialog } from "./OperationConfirmDialog";
 
 interface TagManagerProps {
@@ -20,6 +24,7 @@ export const TagManager = memo(function TagManager({
   onSuccess,
   onError,
 }: TagManagerProps) {
+  const { t } = useTranslation();
   const [tab, setTab] = useState<"create" | "delete">("create");
   const [tagName, setTagName] = useState("");
   const [tagMessage, setTagMessage] = useState("");
@@ -28,6 +33,7 @@ export const TagManager = memo(function TagManager({
   const [loading, setLoading] = useState(false);
   const [loadingTags, setLoadingTags] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [checkingOut, setCheckingOut] = useState(false);
 
   const loadTags = useCallback(async () => {
     if (!open) return;
@@ -53,7 +59,7 @@ export const TagManager = memo(function TagManager({
     setLoading(true);
     try {
       await api.gitCreateTag(path, tagName.trim(), tagMessage.trim() || undefined);
-      onSuccess(`Created tag "${tagName.trim()}"`);
+      onSuccess(t("tag.created", { name: tagName.trim() }));
       setTagName("");
       setTagMessage("");
       await loadTags();
@@ -62,14 +68,14 @@ export const TagManager = memo(function TagManager({
     } finally {
       setLoading(false);
     }
-  }, [path, tagName, tagMessage, loadTags, onSuccess, onError]);
+  }, [path, tagName, tagMessage, loadTags, onSuccess, onError, t]);
 
   const handleDelete = useCallback(async () => {
     if (!selectedTag) return;
     setLoading(true);
     try {
       await api.gitDeleteTag(path, selectedTag);
-      onSuccess(`Deleted tag "${selectedTag}"`);
+      onSuccess(t("tag.deleted", { name: selectedTag }));
       setSelectedTag("");
       await loadTags();
     } catch (e) {
@@ -77,7 +83,65 @@ export const TagManager = memo(function TagManager({
     } finally {
       setLoading(false);
     }
-  }, [path, selectedTag, loadTags, onSuccess, onError]);
+  }, [path, selectedTag, loadTags, onSuccess, onError, t]);
+
+  const [menuTag, setMenuTag] = useState<TagInfo | null>(null);
+  const {
+    onContextMenu: openTagMenu,
+    close: closeTagMenu,
+    menuProps: tagMenuProps,
+  } = useContextMenu();
+
+  const handleRowContextMenu = useCallback(
+    (e: MouseEvent<HTMLButtonElement>, tag: TagInfo) => {
+      const inner = (e.target as Element).closest('button, input, textarea, a, [role="button"]');
+      if (inner && inner !== e.currentTarget) return;
+      setMenuTag(tag);
+      openTagMenu(e);
+      e.preventDefault();
+    },
+    [openTagMenu]
+  );
+
+  const handlePushTag = useCallback(
+    async (tag: TagInfo) => {
+      try {
+        await api.gitPushTag(path, tag.name);
+        onSuccess(t("tag.pushedTag", { name: tag.name }));
+      } catch (e) {
+        onError(parseError(e));
+      }
+    },
+    [path, onSuccess, onError, t]
+  );
+
+  const handleCopyTagName = useCallback(
+    async (name: string) => {
+      try {
+        await navigator.clipboard.writeText(name);
+        onSuccess(t("tag.copiedName", { name }));
+      } catch (e) {
+        onError(parseError(e));
+      }
+    },
+    [onSuccess, onError, t]
+  );
+
+  const handleCheckoutTag = useCallback(
+    async (tag: TagInfo) => {
+      setCheckingOut(true);
+      try {
+        // switch_branch accepts tags: it checks out refs/tags/{name}, leaving a detached HEAD.
+        await api.switchBranch(path, tag.name);
+        onSuccess(t("tag.checkedOut", { name: tag.name }));
+      } catch (e) {
+        onError(parseError(e));
+      } finally {
+        setCheckingOut(false);
+      }
+    },
+    [path, onSuccess, onError, t]
+  );
 
   const openConfirmDelete = useCallback(() => setConfirmDelete(true), []);
   const handleConfirmDelete = useCallback(() => {
@@ -87,11 +151,11 @@ export const TagManager = memo(function TagManager({
   const handleCancelDelete = useCallback(() => setConfirmDelete(false), []);
 
   return (
-    <Modal open={open} onClose={onClose} title="Tag Manager">
+    <Modal open={open} onClose={onClose} title={t("tag.title")} width="lg">
       <Tabs
         tabs={[
-          { value: "create", label: "Create" },
-          { value: "delete", label: "Delete" },
+          { value: "create", label: t("tag.tabCreate") },
+          { value: "delete", label: t("tag.tabDelete") },
         ]}
         active={tab}
         onChange={setTab}
@@ -102,7 +166,7 @@ export const TagManager = memo(function TagManager({
           <div className="space-y-4">
             <div>
               <label htmlFor="tag-name" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Tag Name
+                {t("tag.nameLabel")}
               </label>
               <input
                 id="tag-name"
@@ -115,13 +179,13 @@ export const TagManager = memo(function TagManager({
             </div>
             <div>
               <label htmlFor="tag-message" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Message (optional, creates annotated tag)
+                {t("tag.messageLabel")}
               </label>
               <textarea
                 id="tag-message"
                 value={tagMessage}
                 onChange={(e) => setTagMessage(e.target.value)}
-                placeholder="Release notes..."
+                placeholder={t("tag.messagePlaceholder")}
                 rows={3}
                 className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400 resize-none"
               />
@@ -130,7 +194,7 @@ export const TagManager = memo(function TagManager({
               onClick={handleCreate}
               disabled={!tagName.trim() || loading}
             >
-              {loading ? "Creating..." : "Create Tag"}
+              {loading ? t("tag.creating") : t("tag.create")}
             </PrimaryButton>
           </div>
         )}
@@ -138,19 +202,20 @@ export const TagManager = memo(function TagManager({
         {tab === "delete" && (
           <div className="space-y-4">
             {loadingTags ? (
-              <p className="text-sm text-gray-500 dark:text-gray-400">Loading tags...</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">{t("tag.loadingTags")}</p>
             ) : tags.length === 0 ? (
-              <p className="text-sm text-gray-500 dark:text-gray-400">No tags found.</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">{t("tag.empty")}</p>
             ) : (
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Select Tag to Delete
+                  {t("tag.selectLabel")}
                 </label>
                 <div className="max-h-60 overflow-y-auto space-y-1 rounded-lg border border-gray-200 dark:border-gray-700 p-2">
                   {tags.map((tag) => (
                     <button
                       key={tag.name}
                       onClick={() => setSelectedTag(tag.name)}
+                      onContextMenu={(e) => handleRowContextMenu(e, tag)}
                       className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
                         selectedTag === tag.name
                           ? "bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300"
@@ -173,11 +238,32 @@ export const TagManager = memo(function TagManager({
               onClick={openConfirmDelete}
               disabled={!selectedTag || loading}
             >
-              {loading ? "Deleting..." : `Delete Tag "${selectedTag}"`}
+              {loading ? t("tag.deleting") : t("tag.deleteTag", { name: selectedTag })}
             </PrimaryButton>
           </div>
         )}
       </div>
+
+      {menuTag && (
+        <ContextMenu {...tagMenuProps} onClose={closeTagMenu}>
+          <MenuItem
+            label={t("tag.checkoutTag")}
+            disabled={checkingOut}
+            onClick={() => handleCheckoutTag(menuTag)}
+          />
+          <MenuItem label={t("tag.pushTag")} onClick={() => handlePushTag(menuTag)} />
+          <MenuItem label={t("tag.copyName")} onClick={() => handleCopyTagName(menuTag.name)} />
+          <MenuSeparator />
+          <MenuItem
+            label={t("tag.delete")}
+            danger
+            onClick={() => {
+              setSelectedTag(menuTag.name);
+              openConfirmDelete();
+            }}
+          />
+        </ContextMenu>
+      )}
 
       <OperationConfirmDialog
         open={confirmDelete}

@@ -1,4 +1,5 @@
 import { memo, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 export interface AutoFetchFailure {
   name: string;
@@ -23,6 +24,7 @@ export const OfflineBanner = memo(function OfflineBanner({
   onRetry,
   onDismissFailures,
 }: OfflineBannerProps) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -37,10 +39,10 @@ export const OfflineBanner = memo(function OfflineBanner({
           </span>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
-              You are offline
+              {t("offline.title")}
             </p>
             <p className="text-xs text-amber-700 dark:text-amber-300">
-              Background refresh is paused and git operations may fail until the connection returns.
+              {t("offline.description")}
             </p>
           </div>
         </div>
@@ -56,14 +58,14 @@ export const OfflineBanner = memo(function OfflineBanner({
           </span>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
-              Auto-fetch failed for {failures.length} project{failures.length === 1 ? "" : "s"}
+              {t("offline.autoFetchFailed", { count: failures.length })}
             </p>
             <button
               onClick={() => setExpanded((v) => !v)}
               className="mt-1 text-xs font-semibold text-amber-700 dark:text-amber-300 underline underline-offset-2"
               aria-expanded={expanded}
             >
-              {expanded ? "Hide details" : "Show details"}
+              {expanded ? t("offline.hideDetails") : t("offline.showDetails")}
             </button>
             {expanded && (
               <ul className="mt-2 space-y-1">
@@ -80,13 +82,13 @@ export const OfflineBanner = memo(function OfflineBanner({
                 onClick={onRetry}
                 className="px-2 py-0.5 rounded text-xs font-semibold bg-amber-200 dark:bg-amber-800 text-amber-800 dark:text-amber-200 hover:bg-amber-300 dark:hover:bg-amber-700 transition-colors"
               >
-                Retry
+                {t("common.retry")}
               </button>
               <button
                 onClick={onDismissFailures}
                 className="px-2 py-0.5 rounded text-xs font-semibold text-amber-700 dark:text-amber-300 hover:bg-amber-200/60 dark:hover:bg-amber-800/60 transition-colors"
               >
-                Dismiss
+                {t("common.dismiss")}
               </button>
             </div>
           </div>

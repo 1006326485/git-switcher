@@ -245,6 +245,58 @@ fn spawn_reader_thread(app: AppHandle, id: String, mut reader: Box<dyn Read + Se
     });
 }
 
+fn spawn_registered_session(
+    app: &AppHandle,
+    cwd: &str,
+    cols: u16,
+    rows: u16,
+    title: Option<String>,
+    project_title: Option<String>,
+    command: Option<String>,
+) -> Result<SessionMeta, AppError> {
+    let (session, reader) = TerminalSession::spawn(cwd, cols, rows)?;
+    let state = app.state::<TerminalManager>();
+    let id = Uuid::new_v4().to_string();
+    let meta = SessionMeta {
+        id: id.clone(),
+        title: title.unwrap_or_else(default_shell_name),
+        project_key: cwd.to_string(),
+        project_title: project_title.unwrap_or_else(|| "Terminal".to_string()),
+        cwd: cwd.to_string(),
+        command,
+        exited: false,
+    };
+    state.insert(session, meta.clone());
+    spawn_reader_thread(app.clone(), id, reader);
+    broadcast_sessions(app, &state);
+    Ok(meta)
+}
+
+/// Tray quick-launch: opens a session and types `command` into it, without
+/// any window open. Every window picks the new tab up via `terminal-sessions`.
+pub fn open_and_run(
+    app: &AppHandle,
+    cwd: &str,
+    project_title: &str,
+    title: &str,
+    command: Option<&str>,
+) -> Result<SessionMeta, AppError> {
+    let meta = spawn_registered_session(
+        app,
+        cwd,
+        80,
+        24,
+        Some(title.to_string()),
+        Some(project_title.to_string()),
+        command.map(|c| c.to_string()),
+    )?;
+    if let Some(cmd) = command {
+        let state = app.state::<TerminalManager>();
+        state.write(&meta.id, &format!("{}\r", cmd))?;
+    }
+    Ok(meta)
+}
+
 #[tauri::command]
 pub async fn terminal_open(
     app: AppHandle,
@@ -255,22 +307,7 @@ pub async fn terminal_open(
     project_title: Option<String>,
     command: Option<String>,
 ) -> Result<SessionMeta, AppError> {
-    let (session, reader) = TerminalSession::spawn(&cwd, cols, rows)?;
-    let state = app.state::<TerminalManager>();
-    let id = Uuid::new_v4().to_string();
-    let meta = SessionMeta {
-        id: id.clone(),
-        title: title.unwrap_or_else(default_shell_name),
-        project_key: cwd.clone(),
-        project_title: project_title.unwrap_or_else(|| "Terminal".to_string()),
-        cwd,
-        command,
-        exited: false,
-    };
-    state.insert(session, meta.clone());
-    spawn_reader_thread(app.clone(), id, reader);
-    broadcast_sessions(&app, &state);
-    Ok(meta)
+    spawn_registered_session(&app, &cwd, cols, rows, title, project_title, command)
 }
 
 #[tauri::command]

@@ -1,8 +1,11 @@
 import { useState, useEffect, useCallback, useRef, memo } from "react";
+import { useTranslation } from "react-i18next";
 import { ThemeSettings } from "./ThemeSettings";
+import { LanguageSettings } from "./LanguageSettings";
 import type { AppSettings, Theme, ViewMode } from "../lib/types";
 import { getSettings, updateSettingsPartial } from "../lib/tauri";
 import { formatHotkey } from "../lib/hotkey";
+import { applyLanguageChoice, type LanguageChoice } from "../lib/i18n";
 
 interface GeneralSettingsProps {
   onError: (msg: string) => void;
@@ -10,21 +13,34 @@ interface GeneralSettingsProps {
   onAccentChange?: (color: string) => void;
 }
 
-const THEME_OPTIONS: { value: Theme; label: string; icon: string }[] = [
-  { value: "light", label: "Light", icon: "☀️" },
-  { value: "dark", label: "Dark", icon: "🌙" },
-  { value: "system", label: "System", icon: "💻" },
+const THEME_META: {
+  value: Theme;
+  icon: string;
+  labelKey: "settings.general.themeLight" | "settings.general.themeDark" | "settings.general.themeSystem";
+}[] = [
+  { value: "light", icon: "☀️", labelKey: "settings.general.themeLight" },
+  { value: "dark", icon: "🌙", labelKey: "settings.general.themeDark" },
+  { value: "system", icon: "💻", labelKey: "settings.general.themeSystem" },
 ];
 
-const VIEW_MODE_OPTIONS: { value: ViewMode; label: string }[] = [
-  { value: "card", label: "Card" },
-  { value: "list", label: "List" },
-  { value: "compact", label: "Compact" },
-  { value: "table", label: "Table" },
-  { value: "dashboard", label: "Dashboard" },
+const VIEW_MODE_META: {
+  value: ViewMode;
+  labelKey:
+    | "settings.general.viewCard"
+    | "settings.general.viewList"
+    | "settings.general.viewCompact"
+    | "settings.general.viewTable"
+    | "settings.general.viewDashboard";
+}[] = [
+  { value: "card", labelKey: "settings.general.viewCard" },
+  { value: "list", labelKey: "settings.general.viewList" },
+  { value: "compact", labelKey: "settings.general.viewCompact" },
+  { value: "table", labelKey: "settings.general.viewTable" },
+  { value: "dashboard", labelKey: "settings.general.viewDashboard" },
 ];
 
 export const GeneralSettings = memo(function GeneralSettings({ onError, accentColor, onAccentChange }: GeneralSettingsProps) {
+  const { t } = useTranslation();
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [saved, setSaved] = useState(false);
   const [hotkeyDraft, setHotkeyDraft] = useState("");
@@ -38,12 +54,12 @@ export const GeneralSettings = memo(function GeneralSettings({ onError, accentCo
       setSettings(s);
       setHotkeyDraft(s.terminal_hotkey);
     }).catch((e) => {
-      onErrorRef.current(`Failed to load settings: ${e}`);
+      onErrorRef.current(t("errors.loadSettings", { error: String(e) }));
     });
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-  }, []);
+  }, [t]);
 
   const update = useCallback(<K extends keyof AppSettings>(key: K, value: AppSettings[K]): Promise<boolean> => {
     // Update UI immediately
@@ -57,13 +73,13 @@ export const GeneralSettings = memo(function GeneralSettings({ onError, accentCo
         saveTimerRef.current = setTimeout(() => setSaved(false), 1500);
         return true;
       } catch (e) {
-        onErrorRef.current(`Failed to save settings: ${e}`);
+        onErrorRef.current(t("errors.saveSettings", { error: String(e) }));
         return false;
       }
     });
     pendingRef.current = save;
     return save;
-  }, []);
+  }, [t]);
 
   const commitHotkey = useCallback(() => {
     if (!settings) return;
@@ -77,8 +93,18 @@ export const GeneralSettings = memo(function GeneralSettings({ onError, accentCo
     });
   }, [settings, hotkeyDraft, update]);
 
+  const selectLanguage = useCallback(
+    (choice: LanguageChoice) => {
+      // Switch the interface immediately, then persist through the serialized
+      // saver so concurrent setting changes cannot interleave.
+      applyLanguageChoice(choice);
+      void update("language", choice);
+    },
+    [update]
+  );
+
   if (!settings) {
-    return <div className="text-sm text-gray-500 dark:text-gray-400">Loading...</div>;
+    return <div className="text-sm text-gray-500 dark:text-gray-400">{t("common.loading")}</div>;
   }
 
   return (
@@ -86,10 +112,10 @@ export const GeneralSettings = memo(function GeneralSettings({ onError, accentCo
       {/* Theme */}
       <div>
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          Theme
+          {t("settings.general.theme")}
         </label>
         <div className="flex gap-2">
-          {THEME_OPTIONS.map((opt) => (
+          {THEME_META.map((opt) => (
             <button
               key={opt.value}
               onClick={() => update("theme", opt.value)}
@@ -100,7 +126,7 @@ export const GeneralSettings = memo(function GeneralSettings({ onError, accentCo
               }`}
             >
               <span className="mr-1.5">{opt.icon}</span>
-              {opt.label}
+              {t(opt.labelKey)}
             </button>
           ))}
         </div>
@@ -109,10 +135,10 @@ export const GeneralSettings = memo(function GeneralSettings({ onError, accentCo
       {/* Default View Mode */}
       <div>
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          Default View Mode
+          {t("settings.general.viewMode")}
         </label>
         <div className="flex flex-wrap gap-2">
-          {VIEW_MODE_OPTIONS.map((opt) => (
+          {VIEW_MODE_META.map((opt) => (
             <button
               key={opt.value}
               onClick={() => update("view_mode", opt.value)}
@@ -122,7 +148,7 @@ export const GeneralSettings = memo(function GeneralSettings({ onError, accentCo
                   : "border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-600"
               }`}
             >
-              {opt.label}
+              {t(opt.labelKey)}
             </button>
           ))}
         </div>
@@ -132,16 +158,16 @@ export const GeneralSettings = memo(function GeneralSettings({ onError, accentCo
       <div className="flex items-center justify-between">
         <div>
           <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
-            Auto Refresh
+            {t("settings.general.autoRefresh")}
           </div>
           <div className="text-xs text-gray-500 dark:text-gray-400">
-            Periodically refresh all project statuses
+            {t("settings.general.autoRefreshDesc")}
           </div>
         </div>
         <button
           role="switch"
           aria-checked={settings.auto_refresh}
-          aria-label="Enable auto refresh"
+          aria-label={t("settings.general.autoRefreshAria")}
           onClick={() => update("auto_refresh", !settings.auto_refresh)}
           className={`relative w-10 h-6 rounded-full transition-colors ${
             settings.auto_refresh
@@ -161,7 +187,7 @@ export const GeneralSettings = memo(function GeneralSettings({ onError, accentCo
       {settings.auto_refresh && (
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Refresh Interval (seconds)
+            {t("settings.general.refreshInterval")}
           </label>
           <input
             type="number"
@@ -170,11 +196,11 @@ export const GeneralSettings = memo(function GeneralSettings({ onError, accentCo
             step="5"
             value={settings.refresh_interval_secs}
             onChange={(e) => update("refresh_interval_secs", Math.max(5, parseInt(e.target.value) || 30))}
-            aria-label="Refresh interval in seconds"
+            aria-label={t("settings.general.refreshIntervalAria")}
             className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400"
           />
           <p className="text-xs text-gray-400 mt-1">
-            Minimum 5 seconds. Recommended: 30 seconds.
+            {t("settings.general.refreshIntervalHint")}
           </p>
         </div>
       )}
@@ -183,16 +209,16 @@ export const GeneralSettings = memo(function GeneralSettings({ onError, accentCo
       <div className="flex items-center justify-between">
         <div>
           <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
-            Auto-fetch on Launch
+            {t("settings.general.autoFetchOnLaunch")}
           </div>
           <div className="text-xs text-gray-500 dark:text-gray-400">
-            Automatically fetch all projects when the app starts
+            {t("settings.general.autoFetchOnLaunchDesc")}
           </div>
         </div>
         <button
           role="switch"
           aria-checked={settings.auto_fetch_on_launch}
-          aria-label="Enable auto-fetch on launch"
+          aria-label={t("settings.general.autoFetchOnLaunchAria")}
           onClick={() => update("auto_fetch_on_launch", !settings.auto_fetch_on_launch)}
           className={`relative w-10 h-6 rounded-full transition-colors ${
             settings.auto_fetch_on_launch
@@ -211,7 +237,7 @@ export const GeneralSettings = memo(function GeneralSettings({ onError, accentCo
       {/* Terminal Hotkey */}
       <div>
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-          Terminal Hotkey
+          {t("settings.general.terminalHotkey")}
         </label>
         <div className="flex items-center gap-2">
           <input
@@ -223,7 +249,7 @@ export const GeneralSettings = memo(function GeneralSettings({ onError, accentCo
               if (e.key === "Enter") e.currentTarget.blur();
             }}
             placeholder="CmdOrCtrl+Shift+`"
-            aria-label="Terminal hotkey"
+            aria-label={t("settings.general.terminalHotkeyAria")}
             spellCheck={false}
             className="flex-1 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400"
           />
@@ -232,8 +258,7 @@ export const GeneralSettings = memo(function GeneralSettings({ onError, accentCo
           </kbd>
         </div>
         <p className="text-xs text-gray-400 mt-1">
-          Global shortcut that summons the standalone terminal window. Examples:
-          CmdOrCtrl+Shift+`, Alt+Space.
+          {t("settings.general.terminalHotkeyHint")}
         </p>
       </div>
 
@@ -241,16 +266,16 @@ export const GeneralSettings = memo(function GeneralSettings({ onError, accentCo
       <div className="flex items-center justify-between">
         <div>
           <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
-            Hide Terminal on Blur
+            {t("settings.general.hideTerminalOnBlur")}
           </div>
           <div className="text-xs text-gray-500 dark:text-gray-400">
-            Dismiss the summoned terminal window when it loses focus
+            {t("settings.general.hideTerminalOnBlurDesc")}
           </div>
         </div>
         <button
           role="switch"
           aria-checked={settings.terminal_hide_on_blur}
-          aria-label="Hide terminal on blur"
+          aria-label={t("settings.general.hideTerminalOnBlurAria")}
           onClick={() => update("terminal_hide_on_blur", !settings.terminal_hide_on_blur)}
           className={`relative w-10 h-6 rounded-full transition-colors ${
             settings.terminal_hide_on_blur
@@ -266,13 +291,15 @@ export const GeneralSettings = memo(function GeneralSettings({ onError, accentCo
         </button>
       </div>
 
+      <LanguageSettings onSelect={selectLanguage} />
+
       {/* Saved indicator */}
       {saved && (
         <div className="flex items-center gap-1.5 text-sm text-green-600 dark:text-green-400 transition-opacity">
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
           </svg>
-          Saved
+          {t("common.saved")}
         </div>
       )}
 

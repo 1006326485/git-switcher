@@ -5,6 +5,7 @@ import {
   latestSessionOfProject,
   nextActiveInProject,
   nextProjectKey,
+  preferredSessionOfProject,
   projectKeys,
   setActive,
   setActiveProject,
@@ -25,17 +26,24 @@ function session(id: string, projectKey = `proj-${id}`): TerminalSessionState {
   };
 }
 
-function tabs(...sessions: TerminalSessionState[]): TerminalTabsState {
-  return { sessions, activeId: null, activeProject: null };
+function tabs(
+  ...sessions: TerminalSessionState[]
+): TerminalTabsState {
+  return { sessions, activeId: null, activeProject: null, activeByProject: {} };
+}
+
+function activeTabs(
+  sessions: TerminalSessionState[],
+  activeId: string,
+  activeProject: string,
+  activeByProject: Record<string, string> = {}
+): TerminalTabsState {
+  return { sessions, activeId, activeProject, activeByProject };
 }
 
 describe("shared session snapshot", () => {
   it("keeps the local selection when it survives the snapshot", () => {
-    const start: TerminalTabsState = {
-      sessions: [session("a", "pa")],
-      activeId: "a",
-      activeProject: "pa",
-    };
+    const start: TerminalTabsState = activeTabs([session("a", "pa")], "a", "pa");
     const next = [session("a", "pa"), session("b", "pb")];
     const state = applySessions(start, next);
     expect(state.sessions).toEqual(next);
@@ -44,33 +52,29 @@ describe("shared session snapshot", () => {
   });
 
   it("falls back to the same project group when the active tab is gone", () => {
-    const start: TerminalTabsState = {
-      sessions: [session("a1", "pa"), session("a2", "pa"), session("b1", "pb")],
-      activeId: "a2",
-      activeProject: "pa",
-    };
+    const start: TerminalTabsState = activeTabs(
+      [session("a1", "pa"), session("a2", "pa"), session("b1", "pb")],
+      "a2",
+      "pa"
+    );
     const state = applySessions(start, [session("a1", "pa"), session("b1", "pb")]);
     expect(state.activeId).toBe("a1");
     expect(state.activeProject).toBe("pa");
   });
 
   it("falls back to the last session when its group is gone too", () => {
-    const start: TerminalTabsState = {
-      sessions: [session("a1", "pa"), session("b1", "pb")],
-      activeId: "a1",
-      activeProject: "pa",
-    };
+    const start: TerminalTabsState = activeTabs(
+      [session("a1", "pa"), session("b1", "pb")],
+      "a1",
+      "pa"
+    );
     const state = applySessions(start, [session("b1", "pb")]);
     expect(state.activeId).toBe("b1");
     expect(state.activeProject).toBe("pb");
   });
 
   it("leaves no active tab for an empty snapshot", () => {
-    const start: TerminalTabsState = {
-      sessions: [session("a", "pa")],
-      activeId: "a",
-      activeProject: "pa",
-    };
+    const start: TerminalTabsState = activeTabs([session("a", "pa")], "a", "pa");
     const state = applySessions(start, []);
     expect(state.sessions).toEqual([]);
     expect(state.activeId).toBeNull();
@@ -85,11 +89,11 @@ describe("shared session snapshot", () => {
   });
 
   it("replaces an existing session by id without duplicating it", () => {
-    const start: TerminalTabsState = {
-      sessions: [session("a", "pa"), session("b", "pb")],
-      activeId: "b",
-      activeProject: "pb",
-    };
+    const start: TerminalTabsState = activeTabs(
+      [session("a", "pa"), session("b", "pb")],
+      "b",
+      "pb"
+    );
     const updated = { ...session("a", "pa"), exited: true };
     const state = upsertSession(start, updated);
     expect(state.sessions.map((s) => s.id)).toEqual(["a", "b"]);
@@ -99,11 +103,11 @@ describe("shared session snapshot", () => {
 });
 
 describe("project grouping", () => {
-  const grouped: TerminalTabsState = {
-    sessions: [session("a1", "pa"), session("b1", "pb"), session("a2", "pa"), session("c1", "pc")],
-    activeId: "a2",
-    activeProject: "pa",
-  };
+  const grouped: TerminalTabsState = activeTabs(
+    [session("a1", "pa"), session("b1", "pb"), session("a2", "pa"), session("c1", "pc")],
+    "a2",
+    "pa"
+  );
 
   it("lists project keys in first-appearance order", () => {
     expect(projectKeys(grouped)).toEqual(["pa", "pb", "pc"]);
@@ -136,6 +140,33 @@ describe("project grouping", () => {
     expect(same.activeProject).toBe("pa");
 
     expect(setActiveProject(grouped, "missing")).toBe(grouped);
+  });
+
+  it("remembers the selected tab of each project across switches", () => {
+    let state = activeTabs(
+      [session("a1", "pa"), session("a2", "pa"), session("b1", "pb"), session("b2", "pb")],
+      "a1",
+      "pa"
+    );
+    state = setActiveProject(state, "pb");
+    state = setActive(state, "b1");
+    state = setActiveProject(state, "pa");
+    expect(state.activeId).toBe("a1");
+    state = setActiveProject(state, "pb");
+    expect(state.activeId).toBe("b1");
+    expect(preferredSessionOfProject(state, "pa")?.id).toBe("a1");
+  });
+
+  it("falls back to the latest tab once the remembered one is gone", () => {
+    let state = activeTabs(
+      [session("a1", "pa"), session("a2", "pa"), session("b1", "pb")],
+      "b1",
+      "pb",
+      { pa: "a1" }
+    );
+    state = applySessions(state, [session("a2", "pa"), session("b1", "pb")]);
+    state = setActiveProject(state, "pa");
+    expect(state.activeId).toBe("a2");
   });
 });
 

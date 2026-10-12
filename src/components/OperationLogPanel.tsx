@@ -1,5 +1,8 @@
-import { useState, useEffect, useCallback, memo } from "react";
+import { useState, useEffect, useCallback, useRef, memo } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import * as api from "../lib/tauri";
+import { useHorizontalScroll } from "../hooks/useScrollEdge";
 import type { OperationLogEntry } from "../lib/types";
 
 const OP_ICONS: Record<string, string> = {
@@ -24,28 +27,83 @@ const OP_ICONS: Record<string, string> = {
   sync_all: "🔄",
 };
 
-function formatTime(dateStr: string): string {
+function formatTime(t: TFunction, dateStr: string): string {
   try {
     const d = new Date(dateStr);
     const now = new Date();
     const diffMs = now.getTime() - d.getTime();
     const diffMins = Math.floor(diffMs / 60000);
-    if (diffMins < 1) return "just now";
-    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffMins < 1) return t("opLog.justNow");
+    if (diffMins < 60) return t("opLog.mAgo", { count: diffMins });
     const diffHours = Math.floor(diffMins / 60);
-    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffHours < 24) return t("opLog.hAgo", { count: diffHours });
     const diffDays = Math.floor(diffHours / 24);
-    if (diffDays < 7) return `${diffDays}d ago`;
+    if (diffDays < 7) return t("opLog.dAgo", { count: diffDays });
     return d.toLocaleDateString();
   } catch {
     return dateStr;
   }
 }
 
-function formatOpName(type: string): string {
-  return type
+const OP_NAME_KEYS: Record<string, string> = {
+  fetch: "opLog.op.fetch",
+  pull: "opLog.op.pull",
+  push: "opLog.op.push",
+  stash: "opLog.op.stash",
+  branch_switch: "opLog.op.branch_switch",
+  commit: "opLog.op.commit",
+  merge: "opLog.op.merge",
+  rebase: "opLog.op.rebase",
+  cherry_pick: "opLog.op.cherry_pick",
+  tag: "opLog.op.tag",
+  clean: "opLog.op.clean",
+  reset: "opLog.op.reset",
+  worktree: "opLog.op.worktree",
+  stash_apply: "opLog.op.stash_apply",
+  stash_pop: "opLog.op.stash_pop",
+  fetch_all: "opLog.op.fetch_all",
+  pull_all: "opLog.op.pull_all",
+  push_all: "opLog.op.push_all",
+  sync_all: "opLog.op.sync_all",
+  bisect: "opLog.op.bisect",
+  cherry_pick_range: "opLog.op.cherry_pick_range",
+  squash: "opLog.op.squash",
+  reword: "opLog.op.reword",
+  submodule: "opLog.op.submodule",
+  hooks: "opLog.op.hooks",
+  import: "opLog.op.import",
+  export: "opLog.op.export",
+  gitignore: "opLog.op.gitignore",
+  revert: "opLog.op.revert",
+  diff: "opLog.op.diff",
+  blame: "opLog.op.blame",
+  reflog: "opLog.op.reflog",
+  delete_branch: "opLog.op.delete_branch",
+  create_branch: "opLog.op.create_branch",
+  open: "opLog.op.open",
+  add_project: "opLog.op.add_project",
+  remove_project: "opLog.op.remove_project",
+  toggle_hook: "opLog.op.toggle_hook",
+  update_submodule: "opLog.op.update_submodule",
+  add_worktree: "opLog.op.add_worktree",
+  remove_worktree: "opLog.op.remove_worktree",
+  prune_worktrees: "opLog.op.prune_worktrees",
+  run_script: "opLog.op.run_script",
+  delete_group: "opLog.op.delete_group",
+  update_group: "opLog.op.update_group",
+  create_group: "opLog.op.create_group",
+  reorder: "opLog.op.reorder",
+  review: "opLog.op.review",
+  task_workspace: "opLog.op.task_workspace",
+};
+
+function formatOpName(t: TFunction, type: string): string {
+  const fallback = type
     .replace(/_/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase());
+  const key = OP_NAME_KEYS[type];
+  if (!key) return fallback;
+  return t(key, { defaultValue: fallback });
 }
 
 interface OperationLogPanelProps {
@@ -57,9 +115,12 @@ export const OperationLogPanel = memo(function OperationLogPanel({
   open,
   onClose,
 }: OperationLogPanelProps) {
+  const { t } = useTranslation();
   const [entries, setEntries] = useState<OperationLogEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState<string>("all");
+  const chipStripRef = useRef<HTMLDivElement>(null);
+  const chipStrip = useHorizontalScroll(chipStripRef);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -93,10 +154,11 @@ export const OperationLogPanel = memo(function OperationLogPanel({
       >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-2.5 border-b border-[var(--border-color)]">
-          <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200">Operation History</h3>
+          <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200">{t("opLog.title")}</h3>
           <button
             onClick={onClose}
             className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+            aria-label={t("common.close")}
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
               <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
@@ -104,36 +166,86 @@ export const OperationLogPanel = memo(function OperationLogPanel({
           </button>
         </div>
 
-        {/* Filter chips */}
-        <div className="px-3 py-2 border-b border-[var(--border-color)] overflow-x-auto">
-          <div className="flex gap-1.5 min-w-max">
-            <button
-              onClick={() => setFilter("all")}
-              className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
-                filter === "all"
-                  ? "bg-[var(--accent)] text-white"
-                  : "bg-[var(--surface-2)] text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700"
-              }`}
-            >
-              All ({entries.length})
-            </button>
-            {opTypes.map((op) => {
-              const count = entries.filter((e) => e.operation_type === op).length;
-              return (
-                <button
-                  key={op}
-                  onClick={() => setFilter(op)}
-                  className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
-                    filter === op
-                      ? "bg-[var(--accent)] text-white"
-                      : "bg-[var(--surface-2)] text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700"
-                  }`}
-                >
-                  {OP_ICONS[op] || "📌"} {formatOpName(op)} ({count})
-                </button>
-              );
-            })}
+        {/* Filter chips: one-line strip. overflow-x-auto and min-w-max must NOT
+            share an element — min-w-max would grow that element past the panel
+            and push the clipping onto its parent, so the scroller would never
+            report scrollWidth > clientWidth. The scroller stays full-width and
+            the inner row is what grows. The scrollbar is hidden
+            (no-scrollbar), so the edge fades and arrow buttons are the only
+            affordance that more chips exist off-screen. */}
+        <div className="relative border-b border-[var(--border-color)]">
+          <div
+            ref={chipStripRef}
+            data-testid="op-log-chips"
+            className="no-scrollbar overflow-x-auto select-none"
+          >
+            <div className="flex w-max gap-1.5 px-3 py-2">
+              <button
+                onClick={() => setFilter("all")}
+                className={`px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${
+                  filter === "all"
+                    ? "bg-[var(--accent)] text-white"
+                    : "bg-[var(--surface-2)] text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700"
+                }`}
+              >
+                {t("opLog.all", { count: entries.length })}
+              </button>
+              {opTypes.map((op) => {
+                const count = entries.filter((e) => e.operation_type === op).length;
+                return (
+                  <button
+                    key={op}
+                    onClick={() => setFilter(op)}
+                    className={`px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${
+                      filter === op
+                        ? "bg-[var(--accent)] text-white"
+                        : "bg-[var(--surface-2)] text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700"
+                    }`}
+                  >
+                    {OP_ICONS[op] || "📌"} {formatOpName(t, op)} ({count})
+                  </button>
+                );
+              })}
+            </div>
           </div>
+
+          {chipStrip.overflow && !chipStrip.atStart && (
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-y-0 left-0 w-8 bg-gradient-to-r from-[var(--surface-1)] to-transparent"
+            />
+          )}
+          {chipStrip.overflow && !chipStrip.atEnd && (
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-[var(--surface-1)] to-transparent"
+            />
+          )}
+
+          {chipStrip.overflow && !chipStrip.atStart && (
+            <button
+              type="button"
+              onClick={() => chipStrip.scrollBy(-1)}
+              aria-label={t("opLog.scrollLeft")}
+              className="absolute left-1 top-1/2 -translate-y-1/2 grid h-6 w-6 place-items-center rounded-full border border-[var(--border-color)] bg-[var(--surface-1)] text-gray-500 shadow-sm transition-colors hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <path d="M10.53 3.47a.75.75 0 010 1.06L6.06 8l4.47 3.47a.75.75 0 11-1.06 1.06L4.47 8.53a.75.75 0 010-1.06l5-5a.75.75 0 011.06 0z" />
+              </svg>
+            </button>
+          )}
+          {chipStrip.overflow && !chipStrip.atEnd && (
+            <button
+              type="button"
+              onClick={() => chipStrip.scrollBy(1)}
+              aria-label={t("opLog.scrollRight")}
+              className="absolute right-1 top-1/2 -translate-y-1/2 grid h-6 w-6 place-items-center rounded-full border border-[var(--border-color)] bg-[var(--surface-1)] text-gray-500 shadow-sm transition-colors hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <path d="M5.47 3.47a.75.75 0 011.06 0l5 5a.75.75 0 010 1.06l-5 5a.75.75 0 11-1.06-1.06L9.94 8 5.47 4.53a.75.75 0 010-1.06z" />
+              </svg>
+            </button>
+          )}
         </div>
 
         {/* List */}
@@ -149,8 +261,8 @@ export const OperationLogPanel = memo(function OperationLogPanel({
               <svg className="w-10 h-10 text-gray-300 dark:text-gray-600 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              <p className="text-sm text-gray-400 dark:text-gray-500">No operations recorded yet</p>
-              <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Git operations will appear here</p>
+              <p className="text-sm text-gray-400 dark:text-gray-500">{t("opLog.empty")}</p>
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{t("opLog.emptyHint")}</p>
             </div>
           )}
 
@@ -167,7 +279,7 @@ export const OperationLogPanel = memo(function OperationLogPanel({
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                    {formatOpName(entry.operation_type)}
+                    {formatOpName(t, entry.operation_type)}
                   </span>
                   <span className="text-xs text-gray-400 dark:text-gray-500">
                     {entry.project_name || entry.project_path.split("/").pop()}
@@ -185,7 +297,7 @@ export const OperationLogPanel = memo(function OperationLogPanel({
                 )}
               </div>
               <span className="text-xs text-gray-400 dark:text-gray-500 shrink-0 mt-0.5">
-                {formatTime(entry.created_at)}
+                {formatTime(t, entry.created_at)}
               </span>
             </div>
           ))}

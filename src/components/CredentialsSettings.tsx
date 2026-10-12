@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, memo } from "react";
+import { useTranslation } from "react-i18next";
 import type { GitCredential } from "../lib/types";
 import { getGitCredentials, upsertGitCredential, deleteGitCredential } from "../lib/tauri";
 
@@ -13,6 +14,7 @@ const emptyForm = { id: "", project_path: "", remote_url: "", username: "", secr
 export const CredentialsSettings = memo(function CredentialsSettings({
   onError,
 }: CredentialsSettingsProps) {
+  const { t } = useTranslation();
   const [creds, setCreds] = useState<GitCredential[]>([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(emptyForm);
@@ -24,7 +26,7 @@ export const CredentialsSettings = memo(function CredentialsSettings({
     try {
       setCreds(await getGitCredentials());
     } catch (e) {
-      onError?.(`Failed to load credentials: ${e}`);
+      onError?.(t("settings.credentials.failLoad", { error: String(e) }));
     } finally {
       setLoading(false);
     }
@@ -70,7 +72,7 @@ export const CredentialsSettings = memo(function CredentialsSettings({
       cancelEdit();
       await load();
     } catch (e) {
-      onError?.(`Failed to save credential: ${e}`);
+      onError?.(t("settings.credentials.failSave", { error: String(e) }));
     } finally {
       setSaving(false);
     }
@@ -82,7 +84,7 @@ export const CredentialsSettings = memo(function CredentialsSettings({
         await deleteGitCredential(id);
         setCreds((prev) => prev.filter((c) => c.id !== id));
       } catch (e) {
-        onError?.(`Failed to delete credential: ${e}`);
+        onError?.(t("settings.credentials.failDelete", { error: String(e) }));
       }
     },
     [onError]
@@ -92,14 +94,13 @@ export const CredentialsSettings = memo(function CredentialsSettings({
     <div className="space-y-4">
       <div>
         <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200">
-          Git Credentials
+          {t("settings.credentials.title")}
         </h3>
         <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
-          Credentials for private repository fetch/pull/push, matched by remote URL.
+          {t("settings.credentials.description")}
         </p>
         <p className="text-xs text-amber-600 dark:text-amber-400">
-          Credentials are stored in the local database this phase; migrate to the OS
-          keychain later for stronger protection.
+          {t("settings.credentials.note")}
         </p>
       </div>
 
@@ -108,7 +109,7 @@ export const CredentialsSettings = memo(function CredentialsSettings({
         <div className="flex gap-2 items-end">
           <div className="flex-[2]">
             <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-              Remote URL
+              {t("settings.credentials.remoteUrl")}
             </label>
             <input
               type="text"
@@ -120,7 +121,7 @@ export const CredentialsSettings = memo(function CredentialsSettings({
           </div>
           <div className="flex-1">
             <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-              Username
+              {t("settings.credentials.username")}
             </label>
             <input
               type="text"
@@ -132,13 +133,13 @@ export const CredentialsSettings = memo(function CredentialsSettings({
           </div>
           <div className="flex-1">
             <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-              Token / Password
+              {t("settings.credentials.tokenPassword")}
             </label>
             <input
               type="password"
               value={form.secret}
               onChange={(e) => setForm((f) => ({ ...f, secret: e.target.value }))}
-              placeholder={editingId ? "leave blank to keep current" : "token or password"}
+              placeholder={editingId ? t("settings.credentials.keepCurrent") : t("settings.credentials.tokenPlaceholder")}
               className="w-full px-2.5 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--surface-2)] text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
@@ -146,13 +147,13 @@ export const CredentialsSettings = memo(function CredentialsSettings({
         <div className="flex gap-2 items-end">
           <div className="flex-1">
             <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-              Project Path (optional)
+              {t("settings.credentials.projectPath")}
             </label>
             <input
               type="text"
               value={form.project_path}
               onChange={(e) => setForm((f) => ({ ...f, project_path: e.target.value }))}
-              placeholder="leave blank to apply to all projects"
+              placeholder={t("settings.credentials.allProjectsHint")}
               className="w-full px-2.5 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--surface-2)] text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
@@ -161,14 +162,14 @@ export const CredentialsSettings = memo(function CredentialsSettings({
             disabled={saving || !form.remote_url.trim() || !form.username.trim()}
             className="h-8 px-3 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-sm font-medium transition-colors disabled:opacity-50 shrink-0"
           >
-            {saving ? "..." : editingId ? "Save" : "Add"}
+            {saving ? t("common.working") : editingId ? t("common.save") : t("common.add")}
           </button>
           {editingId && (
             <button
               onClick={cancelEdit}
               className="h-8 px-3 rounded-lg border border-[var(--border-color)] text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors shrink-0"
             >
-              Cancel
+              {t("common.cancel")}
             </button>
           )}
         </div>
@@ -181,7 +182,7 @@ export const CredentialsSettings = memo(function CredentialsSettings({
         </div>
       ) : creds.length === 0 ? (
         <p className="text-xs text-gray-400 dark:text-gray-500 text-center py-4">
-          No credentials yet. Add one above.
+          {t("settings.credentials.empty")}
         </p>
       ) : (
         <div className="space-y-1">
@@ -196,19 +197,19 @@ export const CredentialsSettings = memo(function CredentialsSettings({
                 </div>
                 <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
                   {c.username}
-                  {c.project_path ? ` · ${c.project_path}` : " · all projects"}
+                  {c.project_path ? ` · ${c.project_path}` : t("settings.credentials.allProjectsSuffix")}
                 </div>
               </div>
               <span
                 className="text-xs font-mono text-gray-400 dark:text-gray-500 shrink-0"
-                title="Secret is stored locally and masked"
+                title={t("settings.credentials.maskedHint")}
               >
                 {MASK}
               </span>
               <button
                 onClick={() => startEdit(c)}
                 className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-blue-600 transition-all shrink-0"
-                title="Edit credential"
+                title={t("settings.credentials.editAria")}
               >
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
                   <path d="M11.013 1.427a1.75 1.75 0 012.474 0l1.086 1.086a1.75 1.75 0 010 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 01-.927-.928l.929-3.25c.081-.286.235-.547.445-.757l8.61-8.61z" />
@@ -217,7 +218,7 @@ export const CredentialsSettings = memo(function CredentialsSettings({
               <button
                 onClick={() => handleDelete(c.id)}
                 className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 transition-all shrink-0"
-                title="Delete credential"
+                title={t("settings.credentials.deleteAria")}
               >
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
                   <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />

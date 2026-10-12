@@ -1,6 +1,7 @@
 import { memo, type RefObject } from "react";
 import type { CommitInfo } from "../lib/types";
 import { AiGenerateIcon } from "./ui/icons";
+import { useTranslation } from "react-i18next";
 
 const COMMIT_PREFIXES = ["feat: ", "fix: ", "chore: ", "docs: "] as const;
 
@@ -27,6 +28,7 @@ export const GitOpsCommitBar = memo(function GitOpsCommitBar({
   onToggleDiff, showDiff, isLoading, onInsertPrefix, recentCommits, onFillCommit,
   stagedDiff, loadingDiff, onRefreshDiff,
 }: GitOpsCommitBarProps) {
+  const { t } = useTranslation();
   return (
     <>
       <div className="space-y-2">
@@ -41,8 +43,8 @@ export const GitOpsCommitBar = memo(function GitOpsCommitBar({
                 onCommit();
               }
             }}
-            placeholder="Commit message... (Cmd+Enter to commit)"
-            aria-label="Commit message"
+            placeholder={t("commitbar.msgPlaceholder")}
+            aria-label={t("commitbar.msgAria")}
             rows={2}
             className="flex-1 min-w-0 px-3 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--surface-1)] text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
           />
@@ -50,8 +52,8 @@ export const GitOpsCommitBar = memo(function GitOpsCommitBar({
             <button
               onClick={onGenerateMsg}
               disabled={generatingMsg}
-              title="Generate commit message with AI"
-              aria-label="Generate commit message with AI"
+              title={t("commitbar.generateAria")}
+              aria-label={t("commitbar.generateAria")}
               className="px-2 py-1.5 rounded-lg text-xs font-medium bg-purple-100 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/50 hover:bg-purple-200 dark:hover:bg-purple-900/40 disabled:opacity-50 transition-colors duration-150 active:scale-[0.98]"
             >
               {generatingMsg ? (
@@ -62,19 +64,19 @@ export const GitOpsCommitBar = memo(function GitOpsCommitBar({
             </button>
             <button
               onClick={onToggleDiff}
-              title="Preview staged diff"
-              aria-label="Preview staged diff"
+              title={t("commitbar.toggleDiffAria")}
+              aria-label={t("commitbar.toggleDiffAria")}
               aria-expanded={showDiff}
               className={`px-2 py-1.5 rounded-lg text-xs font-medium transition-colors duration-150 active:scale-[0.98] ${showDiff ? "bg-teal-200 dark:bg-teal-800/50 text-teal-800 dark:text-teal-200 border border-teal-300 dark:border-teal-700/50" : "bg-teal-100 dark:bg-teal-900/20 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800/50 hover:bg-teal-200 dark:hover:bg-teal-900/40"}`}
             >
-              {showDiff ? "Hide Diff" : "Preview Diff"}
+              {showDiff ? t("commitbar.hideDiff") : t("commitbar.previewDiff")}
             </button>
             <button
               onClick={onCommit}
               disabled={!commitMsg.trim() || isLoading("commit")}
               className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:bg-gray-400 text-white transition-colors duration-150 active:scale-[0.98]"
             >
-              {isLoading("commit") ? "Committing..." : "Commit"}
+              {isLoading("commit") ? t("commitbar.committing") : t("commitbar.commit")}
             </button>
           </div>
         </div>
@@ -83,7 +85,7 @@ export const GitOpsCommitBar = memo(function GitOpsCommitBar({
         <div className="flex items-center gap-2 flex-wrap">
           {/* Character counter */}
           <span className="text-[10px] text-gray-400 dark:text-gray-500 tabular-nums shrink-0">
-            {commitMsg.length} chars
+            {t("commitbar.chars", { count: commitMsg.length })}
           </span>
 
           {/* Prefix buttons */}
@@ -93,7 +95,7 @@ export const GitOpsCommitBar = memo(function GitOpsCommitBar({
                 key={prefix}
                 onClick={() => onInsertPrefix(prefix)}
                 className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-                title={`Add "${prefix.trim()}" prefix`}
+                title={t("commitbar.prefixTitle", { prefix: prefix.trim() })}
               >
                 {prefix.trim()}
               </button>
@@ -122,21 +124,21 @@ export const GitOpsCommitBar = memo(function GitOpsCommitBar({
       {showDiff && (
         <div className="rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 overflow-hidden">
           <div className="flex items-center justify-between px-3 py-1.5 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-            <span className="text-xs font-medium text-gray-600 dark:text-gray-400">Staged Changes</span>
+            <span className="text-xs font-medium text-gray-600 dark:text-gray-400">{t("commitbar.stagedChanges")}</span>
             <button
               onClick={onRefreshDiff}
               disabled={loadingDiff}
               className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 disabled:opacity-50"
-              aria-label="Refresh diff"
+              aria-label={t("commitbar.refreshAria")}
             >
-              {loadingDiff ? "Loading..." : "Refresh"}
+              {loadingDiff ? t("common.loading") : t("commitbar.refresh")}
             </button>
           </div>
           <pre className="select-text p-3 text-xs font-mono max-h-48 overflow-y-auto whitespace-pre-wrap break-all text-gray-800 dark:text-gray-200">
             {stagedDiff === null ? (
-              <span className="text-gray-400 italic">Loading...</span>
+              <span className="text-gray-400 italic">{t("common.loading")}</span>
             ) : stagedDiff.length === 0 ? (
-              <span className="text-gray-400 italic">No staged changes</span>
+              <span className="text-gray-400 italic">{t("commitbar.noStagedChanges")}</span>
             ) : (
               stagedDiff.split("\n").map((line, i) => (
                 <span

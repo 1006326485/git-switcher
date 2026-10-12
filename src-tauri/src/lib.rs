@@ -2,6 +2,7 @@ pub mod commands;
 pub mod db;
 pub mod error;
 pub mod hotkeys;
+pub mod i18n;
 pub mod models;
 pub mod services;
 
@@ -18,7 +19,6 @@ use db::Database;
 use services::BackgroundService;
 
 use std::sync::Arc;
-use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder};
 use tauri::{Emitter, Listener, Manager, RunEvent};
 
@@ -43,7 +43,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
                     if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
-                        hotkeys::toggle_terminal_window(app);
+                        hotkeys::handle_terminal_hotkey(app);
                     }
                 })
                 .build(),
@@ -54,29 +54,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         .manage(bg_service)
         .manage(commands::NotificationStore::new())
         .manage(commands::TerminalManager::default())
+        .plugin(tauri_plugin_notification::init())
         .setup(move |app| {
-            // ── Tray menu ─────────────────────────────────────────────────
-            let show_item = MenuItemBuilder::with_id("show", "Show Window")
-                .build(app)?;
-            let terminal_item = MenuItemBuilder::with_id("terminal", "Summon Terminal")
-                .build(app)?;
-            let refresh_item = MenuItemBuilder::with_id("refresh", "Refresh All")
-                .build(app)?;
-            let quit_item = MenuItemBuilder::with_id("quit", "Quit")
-                .build(app)?;
-
-            let menu = MenuBuilder::new(app)
-                .item(&show_item)
-                .item(&terminal_item)
-                .item(&refresh_item)
-                .separator()
-                .item(&quit_item)
-                .build()?;
-
-            // ── Tray icon ─────────────────────────────────────────────────
-            let tray = TrayIconBuilder::new()
+            // ── Tray icon; the menu is built dynamically (see commands/tray) ──
+            let tray = TrayIconBuilder::with_id(commands::TRAY_ID)
                 .icon(app.default_window_icon().unwrap().clone())
-                .menu(&menu)
                 .tooltip("Git Switcher")
                 .on_tray_icon_event(|tray, event| {
                     if let tauri::tray::TrayIconEvent::Click {
@@ -97,43 +79,44 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 })
                 .build(app)?;
+            // The tray menu is translated on the Rust side; set the language
+            // before the first build so it never renders in the wrong locale.
+            let language = app
+                .state::<SettingsStore>()
+                .get_all()
+                .map(|settings| settings.language)
+                .unwrap_or_else(|_| "system".to_string());
+            crate::i18n::set_language(&language);
+            commands::rebuild(app.handle());
 
             // ── Menu event handler ────────────────────────────────────────
-            let app_handle = app.handle().clone();
-            app.on_menu_event(move |_app, event| {
-                let id = event.id().as_ref();
-                match id {
-                    "show" => {
-                        if let Some(window) = app_handle.get_webview_window(hotkeys::MAIN_WINDOW_LABEL) {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
-                    }
-                    "terminal" => hotkeys::toggle_terminal_window(&app_handle),
-                    "refresh" => {
-                        if let Some(window) = app_handle.get_webview_window(hotkeys::MAIN_WINDOW_LABEL) {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
-                        let _ = app_handle.emit("request-refresh-all", ());
-                    }
-                    "quit" => {
-                        app_handle.exit(0);
-                    }
-                    _ => {}
-                }
+            app.on_menu_event(|app, event| {
+                commands::handle_tray_action(app, event.id().as_ref());
             });
 
-            // ── Hide to tray instead of closing ──────────────────────────
+            // ── Hide to tray instead of closing; retake the terminal spotlight ──
             if let Some(window) = app.get_webview_window(hotkeys::MAIN_WINDOW_LABEL) {
                 let window_clone = window.clone();
                 let app_for_close = app.handle().clone();
-                window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let app_for_focus = app.handle().clone();
+                window.on_window_event(move |event| match event {
+                    tauri::WindowEvent::CloseRequested { api, .. } => {
                         api.prevent_close();
                         let _ = window_clone.hide();
                         let _ = app_for_close.emit("window-hidden-to-tray", ());
+                        // Project list / recency may have changed while the
+                        // window was open; refresh the tray before it is used.
+                        commands::rebuild(&app_for_close);
                     }
+                    tauri::WindowEvent::Focused(focused) => {
+                        log::info!("[debug] main window Focused({})", focused);
+                        if *focused {
+                            // Returning to the main window (e.g. via the app
+                            // switcher) should hand the terminal spotlight back.
+                            hotkeys::hide_terminal_window_if_visible(&app_for_focus);
+                        }
+                    }
+                    _ => {}
                 });
             }
 
@@ -141,6 +124,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(window) = app.get_webview_window(hotkeys::TERMINAL_WINDOW_LABEL) {
                 let window_clone = window.clone();
                 window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::Focused(focused) = event {
+                        log::info!("[debug] terminal window Focused({})", focused);
+                    }
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                         api.prevent_close();
                         hotkeys::dismiss_terminal_window(&window_clone);
@@ -229,11 +215,15 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                         }
                                     }
 
+                                    let has_imports = !imported.is_empty();
                                     let _ = app_handle.emit("drag-drop-result", serde_json::json!({
                                         "imported": imported,
                                         "skipped": skipped,
                                         "errors": errors,
                                     }));
+                                    if has_imports {
+                                        commands::rebuild(&app_handle);
+                                    }
                                 }
                                 tauri::DragDropEvent::Leave => {
                                     let _ = app_handle.emit("drag-drop-leave", ());
@@ -412,6 +402,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::get_settings,
             commands::update_settings,
             commands::update_settings_partial,
+            commands::rebuild_tray_menu,
             commands::set_llm_api_key,
             commands::get_llm_api_key,
             // AI Review

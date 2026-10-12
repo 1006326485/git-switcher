@@ -1,4 +1,5 @@
 import { memo } from "react";
+import { useTranslation } from "react-i18next";
 import type { ProjectDetail } from "../lib/types";
 import { PROJECT_COLORS } from "../lib/types";
 import { StatusBadge, GroupDot } from "./ui/primitives";
@@ -19,6 +20,7 @@ interface ProjectListProps {
 const ROW_HEIGHT = 88; // estimated list row height (80px card + 8px gap)
 
 const ProjectListRow = memo(function ProjectListRow({ detail, sortable, projectIndex, isFocused }: { detail: ProjectDetail; sortable?: boolean; projectIndex?: number; isFocused?: boolean }) {
+  const { t } = useTranslation();
   const { onSuccess, onError, onInfo } = useProjectActions();
   const { project, group } = detail;
 
@@ -32,7 +34,7 @@ const ProjectListRow = memo(function ProjectListRow({ detail, sortable, projectI
 
   return (
     <ProjectRowShell detail={detail}>
-      {({ detail: d, row, actionButtons, errorBanner, activeOpIndicator }) => {
+      {({ detail: d, row, actionButtons, errorBanner, activeOpIndicator, onRowContextMenu, onRowKeyDown }) => {
         const { current_branch, branches, status } = d;
 
         return (
@@ -42,8 +44,16 @@ const ProjectListRow = memo(function ProjectListRow({ detail, sortable, projectI
             data-project-id={project.id}
             data-project-index={projectIndex}
             data-dragging={isDragging ? "" : undefined}
+            onContextMenu={onRowContextMenu}
+            onKeyDown={onRowKeyDown}
+            tabIndex={-1}
             role="article"
-            aria-label={`${project.alias || project.name}, branch ${current_branch}${status.modified + status.staged + status.untracked > 0 ? `, ${status.modified + status.staged + status.untracked} changes` : ""}${status.behind > 0 ? `, ${status.behind} behind` : ""}${status.ahead > 0 ? `, ${status.ahead} ahead` : ""}`}
+            aria-label={[
+              t("card.rowAriaBase", { name: project.alias || project.name, branch: current_branch }),
+              status.modified + status.staged + status.untracked > 0 ? t("card.rowAriaChanges", { count: status.modified + status.staged + status.untracked }) : "",
+              status.behind > 0 ? t("card.rowAriaBehind", { count: status.behind }) : "",
+              status.ahead > 0 ? t("card.rowAriaAhead", { count: status.ahead }) : "",
+            ].join("")}
             className={`bg-[var(--surface-1)] border border-[var(--border-color)] rounded-xl shadow-sm dark:shadow-none dark:ring-1 dark:ring-white/5 hover:shadow-md dark:hover:ring-white/10 hover:-translate-y-px transition-all duration-150 relative overflow-hidden ${isDragging ? "z-50 shadow-lg dark:ring-2 dark:ring-[var(--accent)]/30 ring-2 ring-[var(--accent)]/20" : ""} ${isFocused ? "ring-2 ring-blue-500 dark:ring-blue-400" : ""}`}
           >
             {/* Color stripe */}
@@ -63,7 +73,7 @@ const ProjectListRow = memo(function ProjectListRow({ detail, sortable, projectI
               {sortable && (
                 <button
                   className="shrink-0 cursor-grab active:cursor-grabbing text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-                  title="Drag to reorder"
+                  title={t("card.dragAria")}
                   {...attributes}
                   {...listeners}
                 >

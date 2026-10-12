@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import type { ProjectDetail } from "../lib/types";
 import { parseError } from "../lib/types";
 import * as api from "../lib/tauri";
@@ -10,15 +11,22 @@ interface ToastApi {
 }
 
 export function useProjects(toast?: ToastApi, activeGroup?: string | null) {
+  const { t } = useTranslation();
   const [projects, setProjects] = useState<ProjectDetail[]>([]);
   const [loading, setLoading] = useState(true);
   const [projectsVersion, setProjectsVersion] = useState(0);
+  const tRef = useRef(t);
+  tRef.current = t;
   const projectsRef = useRef(projects);
   projectsRef.current = projects;
   const toastRef = useRef(toast);
   toastRef.current = toast;
   const groupRef = useRef(activeGroup);
   groupRef.current = activeGroup;
+
+  const rebuildTray = useCallback(() => {
+    api.rebuildTrayMenu().catch(() => {});
+  }, []);
   const defaultGroupIdRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -29,7 +37,7 @@ export function useProjects(toast?: ToastApi, activeGroup?: string | null) {
         const data = await api.listProjects();
         if (!cancelled) setProjects(data);
       } catch (e) {
-        if (!cancelled) toastRef.current?.error(`Failed to load projects: ${parseError(e)}`);
+        if (!cancelled) toastRef.current?.error(tRef.current("projects.loadFailed", { error: parseError(e) }));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -42,7 +50,7 @@ export function useProjects(toast?: ToastApi, activeGroup?: string | null) {
     if (gid) return gid;
     if (defaultGroupIdRef.current) return defaultGroupIdRef.current;
     const groups = await api.listGroups();
-    if (groups.length === 0) throw new Error("No groups exist");
+    if (groups.length === 0) throw new Error(tRef.current("projects.noGroups"));
     defaultGroupIdRef.current = groups[0].id;
     return groups[0].id;
   }, []);
@@ -54,14 +62,15 @@ export function useProjects(toast?: ToastApi, activeGroup?: string | null) {
         const detail = await api.addProject(path, groupId);
         setProjects((prev) => [...prev, detail]);
         setProjectsVersion((v) => v + 1);
-        toastRef.current?.success(`Added "${detail.project.name}"`);
+        toastRef.current?.success(tRef.current("projects.added", { name: detail.project.name }));
+        rebuildTray();
         return detail;
       } catch (e) {
-        toastRef.current?.error(`Failed to add project: ${parseError(e)}`);
+        toastRef.current?.error(tRef.current("projects.addFailed", { error: parseError(e) }));
         throw e;
       }
     },
-    [resolveGroupId]
+    [resolveGroupId, rebuildTray]
   );
 
   const removeProject = useCallback(
@@ -70,12 +79,13 @@ export function useProjects(toast?: ToastApi, activeGroup?: string | null) {
         await api.removeProject(id);
         setProjects((prev) => prev.filter((p) => p.project.id !== id));
         setProjectsVersion((v) => v + 1);
+        rebuildTray();
       } catch (e) {
-        toastRef.current?.error(`Failed to remove project: ${parseError(e)}`);
+        toastRef.current?.error(tRef.current("projects.removeFailed", { error: parseError(e) }));
         throw e;
       }
     },
-    []
+    [rebuildTray]
   );
 
   const importWorkspace = useCallback(
@@ -85,19 +95,20 @@ export function useProjects(toast?: ToastApi, activeGroup?: string | null) {
         const newProjects = await api.importWorkspace(filePath, groupId);
         setProjects((prev) => [...prev, ...newProjects]);
         setProjectsVersion((v) => v + 1);
-        toastRef.current?.success(`Imported ${newProjects.length} project(s)`);
+        toastRef.current?.success(tRef.current("projects.imported", { count: newProjects.length }));
+        rebuildTray();
         return newProjects;
       } catch (e) {
         const msg = String(e);
         if (msg.includes("already exist")) {
           toastRef.current?.info(msg);
         } else {
-          toastRef.current?.error(`Failed to import workspace: ${msg}`);
+          toastRef.current?.error(tRef.current("projects.importFailed", { error: msg }));
         }
         throw e;
       }
     },
-    [resolveGroupId]
+    [resolveGroupId, rebuildTray]
   );
 
   const initProject = useCallback(
@@ -107,14 +118,15 @@ export function useProjects(toast?: ToastApi, activeGroup?: string | null) {
         const detail = await api.initGitProject(path, name, groupId);
         setProjects((prev) => [...prev, detail]);
         setProjectsVersion((v) => v + 1);
-        toastRef.current?.success(`Initialized "${name}"`);
+        toastRef.current?.success(tRef.current("projects.initialized", { name }));
+        rebuildTray();
         return detail;
       } catch (e) {
-        toastRef.current?.error(`Failed to init project: ${parseError(e)}`);
+        toastRef.current?.error(tRef.current("projects.initFailed", { error: parseError(e) }));
         throw e;
       }
     },
-    [resolveGroupId]
+    [resolveGroupId, rebuildTray]
   );
 
   const switchBranch = useCallback(
@@ -127,10 +139,10 @@ export function useProjects(toast?: ToastApi, activeGroup?: string | null) {
             prevList.map((p) => (p.project.path === path ? detail : p))
           );
           setProjectsVersion((v) => v + 1);
-          toastRef.current?.success(`Switched to ${branch}`);
+          toastRef.current?.success(tRef.current("projects.switchedTo", { branch }));
           return detail;
         } catch (e) {
-          toastRef.current?.error(`Failed to switch branch: ${parseError(e)}`);
+          toastRef.current?.error(tRef.current("projects.switchFailed", { error: parseError(e) }));
           throw e;
         }
       }
@@ -151,14 +163,14 @@ export function useProjects(toast?: ToastApi, activeGroup?: string | null) {
           prevList.map((p) => (p.project.path === path ? detail : p))
         );
         setProjectsVersion((v) => v + 1);
-        toastRef.current?.success(`Switched "${detail.project.name}" to ${branch}`);
+        toastRef.current?.success(tRef.current("projects.switchedNameTo", { name: detail.project.name, branch }));
         return detail;
       } catch (e) {
         // Rollback optimistic update
         setProjects((prevList) =>
           prevList.map((p) => (p.project.path === path ? prev : p))
         );
-        toastRef.current?.error(`Failed to switch branch: ${parseError(e)}`);
+        toastRef.current?.error(tRef.current("projects.switchFailed", { error: parseError(e) }));
         throw e;
       }
     },
@@ -177,7 +189,7 @@ export function useProjects(toast?: ToastApi, activeGroup?: string | null) {
       }
       return detail;
     } catch (e) {
-      toastRef.current?.error(`Failed to refresh project: ${parseError(e)}`);
+      toastRef.current?.error(tRef.current("projects.refreshFailed", { error: parseError(e) }));
       throw e;
     }
   }, []);
@@ -208,7 +220,7 @@ export function useProjects(toast?: ToastApi, activeGroup?: string | null) {
         return changed ? next : prev;
       });
     } catch (e) {
-      toastRef.current?.error(`Failed to refresh projects: ${parseError(e)}`);
+      toastRef.current?.error(tRef.current("projects.refreshAllFailed", { error: parseError(e) }));
     }
   }, []);
 
@@ -223,12 +235,13 @@ export function useProjects(toast?: ToastApi, activeGroup?: string | null) {
               : p
           )
         );
+        rebuildTray();
       } catch (e) {
-        toastRef.current?.error(`Failed to update alias: ${parseError(e)}`);
+        toastRef.current?.error(tRef.current("projects.aliasFailed", { error: parseError(e) }));
         throw e;
       }
     },
-    []
+    [rebuildTray]
   );
 
   const setProjectColorLocally = useCallback((id: string, color: string | null) => {
@@ -258,7 +271,7 @@ export function useProjects(toast?: ToastApi, activeGroup?: string | null) {
       } catch (e) {
         // Rollback on failure
         setProjects(prev);
-        toastRef.current?.error(`Failed to reorder projects: ${parseError(e)}`);
+        toastRef.current?.error(tRef.current("projects.reorderFailed", { error: parseError(e) }));
         throw e;
       }
     },

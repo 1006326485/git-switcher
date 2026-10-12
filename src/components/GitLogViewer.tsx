@@ -1,7 +1,10 @@
 import { useState, useEffect, useCallback, memo } from "react";
+import { useTranslation } from "react-i18next";
 import * as api from "../lib/tauri";
 import type { CommitInfo } from "../lib/types";
-import { Modal } from "./ui/primitives";
+import { MenuItem, Modal } from "./ui/primitives";
+import { ContextMenu, MenuSeparator } from "./ui/ContextMenu";
+import { useContextMenu } from "../hooks/useContextMenu";
 import { OperationConfirmDialog } from "./OperationConfirmDialog";
 
 const LIMIT = 50;
@@ -13,9 +16,11 @@ interface GitLogViewerProps {
   onClose: () => void;
   unpushedCount?: number;
   onRefresh?: () => void;
+  onSuccess?: (message: string) => void;
 }
 
-export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open, onClose, unpushedCount = 0, onRefresh }: GitLogViewerProps) {
+export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open, onClose, unpushedCount = 0, onRefresh, onSuccess }: GitLogViewerProps) {
+  const { t } = useTranslation();
   const [commits, setCommits] = useState<CommitInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -39,6 +44,8 @@ export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open
   const [confirmRevertHash, setConfirmRevertHash] = useState<string | null>(null);
   const [revertConflicts, setRevertConflicts] = useState<string[] | null>(null);
   const [rebaseLoading, setRebaseLoading] = useState(false);
+  const [contextTarget, setContextTarget] = useState<{ commit: CommitInfo; index: number } | null>(null);
+  const { onContextMenu, close, menuProps } = useContextMenu();
 
   const buildFilters = useCallback((): api.GitLogFilters => {
     const filters: api.GitLogFilters = {};
@@ -137,11 +144,11 @@ export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open
     const now = new Date();
     const diff = now.getTime() - d.getTime();
     const days = Math.floor(diff / 86400000);
-    if (days === 0) return "today";
-    if (days === 1) return "yesterday";
-    if (days < 7) return `${days}d ago`;
+    if (days === 0) return t("log.today");
+    if (days === 1) return t("log.yesterday");
+    if (days < 7) return t("log.daysAgo", { count: days });
     return d.toLocaleDateString();
-  }, []);
+  }, [t]);
 
   const handleStartReword = useCallback((c: CommitInfo) => {
     setEditMode("reword");
@@ -247,14 +254,26 @@ export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open
     return unpushedCount > 0 && index < unpushedCount;
   }, [unpushedCount]);
 
+  const closeContextMenu = useCallback(() => {
+    close();
+    setContextTarget(null);
+  }, [close]);
+
+  const copyToClipboard = useCallback((text: string) => {
+    navigator.clipboard?.writeText(text).then(
+      () => onSuccess?.(t("log.copiedToClipboard")),
+      () => {},
+    );
+  }, [onSuccess, t]);
+
   return (
     <>
     <Modal
       open={open}
       onClose={onClose}
-      title="Commit History"
+      title={t("log.title")}
       subtitle={projectName}
-      maxWidth="max-w-2xl"
+      width="xl"
     >
       {/* Filter toggle */}
       <div className="px-6 pb-2 flex items-center gap-2">
@@ -266,11 +285,11 @@ export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open
               : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600"
           }`}
         >
-          {hasActiveFilters ? "Filters (active)" : "Filters"}
+          {hasActiveFilters ? t("log.filtersActive") : t("log.filters")}
         </button>
         {unpushedCount > 0 && (
           <span className="text-xs text-amber-600 dark:text-amber-400">
-            {unpushedCount} unpushed commit{unpushedCount > 1 ? "s" : ""} can be edited
+            {unpushedCount === 1 ? t("log.unpushed_one", { count: unpushedCount }) : t("log.unpushed_other", { count: unpushedCount })}
           </span>
         )}
       </div>
@@ -280,27 +299,27 @@ export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open
         <div className="px-6 pb-3 space-y-2 border-b border-gray-100 dark:border-gray-700/50">
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Author</label>
+              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">{t("log.author")}</label>
               <input
                 type="text"
                 value={authorFilter}
                 onChange={(e) => setAuthorFilter(e.target.value)}
-                placeholder="Filter by author..."
+                placeholder={t("log.authorPlaceholder")}
                 className="w-full px-2.5 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
             <div>
-              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Message</label>
+              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">{t("log.message")}</label>
               <input
                 type="text"
                 value={messageFilter}
                 onChange={(e) => setMessageFilter(e.target.value)}
-                placeholder="Search in messages..."
+                placeholder={t("log.messagePlaceholder")}
                 className="w-full px-2.5 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
             <div>
-              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Since</label>
+              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">{t("log.since")}</label>
               <input
                 type="date"
                 value={sinceFilter}
@@ -309,7 +328,7 @@ export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open
               />
             </div>
             <div>
-              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Until</label>
+              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">{t("log.until")}</label>
               <input
                 type="date"
                 value={untilFilter}
@@ -323,14 +342,14 @@ export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open
               onClick={handleApplyFilters}
               className="px-3 py-1.5 rounded-md text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors"
             >
-              Apply
+              {t("log.apply")}
             </button>
             {hasActiveFilters && (
               <button
                 onClick={handleClearFilters}
                 className="px-3 py-1.5 rounded-md text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
               >
-                Clear
+                {t("log.clear")}
               </button>
             )}
           </div>
@@ -342,7 +361,7 @@ export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open
           <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/40 rounded-lg space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium text-red-700 dark:text-red-300">
-                Revert in progress — resolve conflicts, then continue or abort
+                {t("log.revertRecovery")}
               </span>
               <div className="flex items-center gap-2">
                 <button
@@ -350,14 +369,14 @@ export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open
                   disabled={rebaseLoading}
                   className="px-3 py-1 rounded text-xs bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 transition-colors"
                 >
-                  Continue
+                  {t("log.continue")}
                 </button>
                 <button
                   onClick={() => handleRevertRecovery("abort")}
                   disabled={rebaseLoading}
                   className="px-3 py-1 rounded text-xs bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 transition-colors"
                 >
-                  Abort
+                  {t("log.abort")}
                 </button>
               </div>
             </div>
@@ -372,10 +391,10 @@ export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open
         </div>
       )}
 
-      <div className="select-text max-h-[60vh] overflow-y-auto" role="region" aria-label="Commit history">
+      <div className="select-text max-h-[60vh] overflow-y-auto" role="region" aria-label={t("log.historyAria")}>
         {loading ? (
           <div className="flex items-center justify-center h-32 text-gray-500">
-            <span className="animate-spin mr-2">&#x21BB;</span> Loading...
+            <span className="animate-spin mr-2">&#x21BB;</span> {t("log.loading")}
           </div>
         ) : error ? (
           <div className="flex items-center justify-center h-32 text-red-500 text-sm">
@@ -383,7 +402,7 @@ export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open
           </div>
         ) : commits.length === 0 ? (
           <div className="flex items-center justify-center h-32 text-gray-500">
-            {hasActiveFilters ? "No commits match the filters" : "No commits yet"}
+            {hasActiveFilters ? t("log.noMatch") : t("log.noCommits")}
           </div>
         ) : (
           <>
@@ -391,6 +410,12 @@ export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open
               {commits.map((c, index) => (
                 <li
                   key={c.hash}
+                  onContextMenu={(e) => {
+                    const target = e.target as HTMLElement;
+                    if (target.closest('button, input, textarea, a, [role="button"]')) return;
+                    setContextTarget({ commit: c, index });
+                    onContextMenu(e);
+                  }}
                   className="px-6 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
                 >
                   <div className="flex items-start gap-3">
@@ -424,14 +449,14 @@ export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open
                               disabled={rebaseLoading || !editMessage.trim()}
                               className="px-3 py-1 rounded-md text-xs font-medium bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white transition-colors"
                             >
-                              {rebaseLoading ? "Saving..." : "Save"}
+                              {rebaseLoading ? t("log.saving") : t("log.save")}
                             </button>
                             <button
                               onClick={handleCancelReword}
                               disabled={rebaseLoading}
                               className="px-3 py-1 rounded-md text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
                             >
-                              Cancel
+                              {t("log.cancel")}
                             </button>
                           </div>
                         </div>
@@ -449,33 +474,33 @@ export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open
                                 <button
                                   onClick={() => handleStartAmend(c)}
                                   className="px-2 py-0.5 rounded text-xs font-medium text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors"
-                                  title="Amend HEAD commit with staged changes or a new message"
+                                  title={t("log.amendHint")}
                                 >
-                                  Amend
+                                  {t("log.amend")}
                                 </button>
                               )}
                               <button
                                 onClick={() => setConfirmRevertHash(c.hash)}
                                 className="px-2 py-0.5 rounded text-xs font-medium text-teal-600 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-900/20 transition-colors"
-                                title="Revert this commit with a new undoing commit"
+                                title={t("log.revertHint")}
                               >
-                                Revert
+                                {t("log.revert")}
                               </button>
                               {isRewritable(index) && (
                                 <>
                                   <button
                                     onClick={() => handleStartReword(c)}
                                     className="px-2 py-0.5 rounded text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
-                                    title="Reword commit message"
+                                    title={t("log.rewordHint")}
                                   >
-                                    Reword
+                                    {t("log.reword")}
                                   </button>
                                   <button
                                     onClick={() => setConfirmDropHash(c.hash)}
                                     className="px-2 py-0.5 rounded text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                                    title="Drop this commit"
+                                    title={t("log.dropHint")}
                                   >
-                                    Drop
+                                    {t("log.drop")}
                                   </button>
                                 </>
                               )}
@@ -495,7 +520,7 @@ export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open
                   disabled={loadingMore}
                   className="w-full px-4 py-2 rounded-lg bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-sm text-gray-700 dark:text-gray-300 transition-colors"
                 >
-                  {loadingMore ? "Loading..." : "Load More"}
+                  {loadingMore ? t("log.loadingMore") : t("log.loadMore")}
                 </button>
               </div>
             )}
@@ -503,6 +528,70 @@ export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open
         )}
       </div>
     </Modal>
+      {contextTarget && (
+        <ContextMenu {...menuProps} onClose={closeContextMenu}>
+          {contextTarget.index === 0 && (
+            <MenuItem
+              label={t("log.amend")}
+              onClick={() => {
+                closeContextMenu();
+                handleStartAmend(contextTarget.commit);
+              }}
+            />
+          )}
+          <MenuItem
+            label={t("log.revert")}
+            onClick={() => {
+              closeContextMenu();
+              setConfirmRevertHash(contextTarget.commit.hash);
+            }}
+          />
+          {isRewritable(contextTarget.index) && (
+            <MenuItem
+              label={t("log.reword")}
+              onClick={() => {
+                closeContextMenu();
+                handleStartReword(contextTarget.commit);
+              }}
+            />
+          )}
+          <MenuSeparator />
+          <MenuItem
+            label={t("log.copyHash")}
+            onClick={() => {
+              closeContextMenu();
+              copyToClipboard(contextTarget.commit.short_hash);
+            }}
+          />
+          <MenuItem
+            label={t("log.copyFullHash")}
+            onClick={() => {
+              closeContextMenu();
+              copyToClipboard(contextTarget.commit.hash);
+            }}
+          />
+          <MenuItem
+            label={t("log.copyMessage")}
+            onClick={() => {
+              closeContextMenu();
+              copyToClipboard(contextTarget.commit.message);
+            }}
+          />
+          {isRewritable(contextTarget.index) && (
+            <>
+              <MenuSeparator />
+              <MenuItem
+                danger
+                label={t("log.drop")}
+                onClick={() => {
+                  closeContextMenu();
+                  setConfirmDropHash(contextTarget.commit.hash);
+                }}
+              />
+            </>
+          )}
+        </ContextMenu>
+      )}
       {confirmDropHash && (
         <OperationConfirmDialog
           open

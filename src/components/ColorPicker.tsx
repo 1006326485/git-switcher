@@ -1,5 +1,6 @@
 import { memo, useState, useCallback, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import { PROJECT_COLORS } from "../lib/types";
 import { popoverAnimation } from "./ui/primitives";
 
@@ -21,6 +22,7 @@ export const ColorPicker = memo(function ColorPicker({
   open: controlledOpen,
   onOpenChange,
 }: ColorPickerProps) {
+  const { t } = useTranslation();
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlledOpen ?? internalOpen;
   const setOpen = useCallback(
@@ -112,7 +114,7 @@ export const ColorPicker = memo(function ColorPicker({
                 onClick={() => handleSelect(null)}
                 className="w-full text-left px-2 py-1 text-xs text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded transition-colors"
               >
-                {currentColor ? "Remove color" : "No color"}
+                {currentColor ? t("colorPicker.removeColor") : t("colorPicker.noColor")}
               </button>
             </div>
           </div>,

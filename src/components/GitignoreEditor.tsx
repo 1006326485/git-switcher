@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, memo, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import * as api from "../lib/tauri";
 import { parseError } from "../lib/types";
 import type { GitignoreTemplate } from "../lib/types";
@@ -19,6 +20,7 @@ export const GitignoreEditor = memo(function GitignoreEditor({
   onSuccess,
   onError,
 }: GitignoreEditorProps) {
+  const { t } = useTranslation();
   const [content, setContent] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -43,14 +45,14 @@ export const GitignoreEditor = memo(function GitignoreEditor({
     setSaving(true);
     try {
       await api.saveGitignore(path, content);
-      onSuccess(".gitignore saved");
+      onSuccess(t("gitignoreEditor.saved"));
       onClose();
     } catch (e) {
       onError(parseError(e));
     } finally {
       setSaving(false);
     }
-  }, [path, content, onSuccess, onError, onClose]);
+  }, [path, content, onSuccess, onError, onClose, t]);
 
   const handleAddTemplate = useCallback(() => {
     const tpl = templates.find((t) => t.name === selectedTemplate);
@@ -66,11 +68,11 @@ export const GitignoreEditor = memo(function GitignoreEditor({
   const lineCount = content.split("\n").length;
 
   return (
-    <Modal open={open} onClose={onClose} title="Edit .gitignore" maxWidth="max-w-2xl">
+    <Modal open={open} onClose={onClose} title={t("gitignoreEditor.title")} width="xl">
       {loading ? (
         <div className="flex items-center justify-center py-8 text-sm text-gray-500">
           <span className="animate-spin mr-2">&#x21BB;</span>
-          Loading...
+          {t("gitignoreEditor.loading")}
         </div>
       ) : (
         <div className="space-y-3">
@@ -81,7 +83,7 @@ export const GitignoreEditor = memo(function GitignoreEditor({
               onChange={(e) => setSelectedTemplate(e.target.value)}
               className="flex-1 px-2 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--surface-1)] text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              <option value="">Select a template...</option>
+              <option value="">{t("gitignoreEditor.selectTemplate")}</option>
               {templates.map((t) => (
                 <option key={t.name} value={t.name}>
                   {t.name}
@@ -93,7 +95,7 @@ export const GitignoreEditor = memo(function GitignoreEditor({
               disabled={!selectedTemplate}
               className="px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-100 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800/50 hover:bg-blue-200 dark:hover:bg-blue-900/40 disabled:opacity-50 transition-colors"
             >
-              Add Template
+              {t("gitignoreEditor.addTemplate")}
             </button>
           </div>
 
@@ -120,21 +122,21 @@ export const GitignoreEditor = memo(function GitignoreEditor({
           {/* Footer actions */}
           <div className="flex items-center justify-between">
             <span className="text-xs text-gray-400">
-              {lineCount} line{lineCount !== 1 ? "s" : ""}
+              {lineCount === 1 ? t("gitignoreEditor.lineOne") : t("gitignoreEditor.lines", { count: lineCount })}
             </span>
             <div className="flex gap-2">
               <button
                 onClick={onClose}
                 className="px-3 py-1.5 rounded-lg text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
               >
-                Cancel
+                {t("common.cancel")}
               </button>
               <button
                 onClick={handleSave}
                 disabled={saving}
                 className="px-4 py-1.5 rounded-lg text-sm font-medium bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:bg-gray-400 text-white transition-colors"
               >
-                {saving ? "Saving..." : "Save"}
+                {saving ? t("common.saving") : t("common.save")}
               </button>
             </div>
           </div>
