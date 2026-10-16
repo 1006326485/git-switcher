@@ -875,6 +875,13 @@ export default function App() {
             onClick={handleToggleSidebar}
           />
           <aside
+            // Collapsed width 0 still leaves the .app-panel 1px border
+            // visible (unlayered rule beats Tailwind's layered border-0),
+            // so the border is zeroed inline when closed.
+            style={showSidebar ? undefined : { borderWidth: 0 }}
+            // Always mounted for CSS width/transform animation, so the
+            // hidden sidebar must be removed from the tab order / a11y tree.
+            inert={!showSidebar}
             className={`app-panel fixed bottom-[var(--panel-gap)] left-[var(--panel-gap)] top-[calc(var(--titlebar-h)+var(--panel-gap))] z-40 w-72 max-w-[85vw] overflow-hidden transition-transform duration-300 ease-[var(--ease-spring)] lg:relative lg:bottom-auto lg:left-auto lg:top-auto lg:z-auto lg:max-w-none lg:translate-x-0 lg:transition-[width] lg:duration-300 lg:ease-[var(--ease-spring)] lg:shrink-0 ${
               showSidebar
                 ? "translate-x-0 lg:w-56"
