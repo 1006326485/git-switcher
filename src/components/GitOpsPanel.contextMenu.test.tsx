@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { GitOpsPanel } from "./GitOpsPanel";
-import { gitDiscardFile, gitGetFiles } from "../lib/tauri";
+import { gitDiscardFile, gitGetFiles, gitStageFile, gitUnstageFile } from "../lib/tauri";
 
 const noop = async () => {};
 
@@ -16,13 +16,16 @@ vi.mock("../lib/tauri", () => ({
 }));
 
 const TRACKED = { path: "src/tracked.ts", status: "modified" as const, staged: true };
+// Same path content but unstaged: the row button must offer Stage (not
+// Unstage) — buttons branch on `staged`, never on the status label.
+const MODIFIED_UNSTAGED = { path: "src/edited.ts", status: "modified" as const, staged: false };
 const UNTRACKED = { path: "new.txt", status: "untracked" as const, staged: false };
 
-function renderPanel(onOuterContextMenu?: () => void) {
-  vi.mocked(gitGetFiles).mockResolvedValue([TRACKED, UNTRACKED] as never);
+function renderPanel(onOuterContextMenu?: () => void, onRefresh: () => Promise<void> = noop, files = [TRACKED, UNTRACKED]) {
+  vi.mocked(gitGetFiles).mockResolvedValue(files as never);
   render(
     <div onContextMenu={onOuterContextMenu}>
-      <GitOpsPanel path="/repos/x" onRefresh={noop} onSuccess={noop} onError={noop} onInfo={noop} />
+      <GitOpsPanel path="/repos/x" onRefresh={onRefresh} onSuccess={noop} onError={noop} onInfo={noop} />
     </div>
   );
   fireEvent.click(screen.getByLabelText("Toggle git operations"));
@@ -85,6 +88,38 @@ describe("GitOpsPanel file-row context menu", () => {
 
     await waitFor(() =>
       expect(gitDiscardFile).toHaveBeenCalledWith("/repos/x", "src/tracked.ts")
+    );
+  });
+
+  it("offers Stage for an unstaged modified file (buttons branch on staged)", async () => {
+    renderPanel(undefined, noop, [TRACKED, MODIFIED_UNSTAGED, UNTRACKED]);
+
+    // The unstaged modified row renders its own Stage button even though its
+    // status label is "M" — the old `status === untracked` check showed Unstage.
+    const stageButtons = await screen.findAllByTitle("Stage");
+    expect(stageButtons.length).toBeGreaterThanOrEqual(2);
+    const row = screen.getByText("src/edited.ts").closest("div");
+    expect(row).not.toBeNull();
+    expect(row!.querySelector('[title="Stage"]')).not.toBeNull();
+    expect(row!.querySelector('[title="Unstage"]')).toBeNull();
+  });
+
+  it("refreshes card badges after stage/unstage so counts stay accurate", async () => {
+    const onRefresh = vi.fn().mockResolvedValue(undefined);
+    renderPanel(undefined, onRefresh, [TRACKED, MODIFIED_UNSTAGED, UNTRACKED]);
+    const callsAfterOpen = onRefresh.mock.calls.length;
+    expect(callsAfterOpen).toBeGreaterThanOrEqual(1);
+
+    fireEvent.click((await screen.findAllByTitle("Stage"))[0]);
+    await waitFor(() => expect(gitStageFile).toHaveBeenCalledWith("/repos/x", "src/edited.ts"));
+    await waitFor(() =>
+      expect(onRefresh.mock.calls.length).toBeGreaterThan(callsAfterOpen)
+    );
+
+    fireEvent.click(await screen.findByTitle("Unstage"));
+    await waitFor(() => expect(gitUnstageFile).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(onRefresh.mock.calls.length).toBeGreaterThan(callsAfterOpen + 1)
     );
   });
 

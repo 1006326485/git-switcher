@@ -14,6 +14,8 @@ vi.mock("../lib/tauri", () => ({
   terminalResize: vi.fn(() => Promise.resolve()),
   terminalClose: vi.fn(() => Promise.resolve()),
   listRunPresets: vi.fn(() => Promise.resolve([])),
+  listCustomCommands: vi.fn(() => Promise.resolve([])),
+  listProjectScripts: vi.fn(() => Promise.resolve([])),
   listProjects: vi.fn(() => Promise.resolve([])),
   openInFinder: vi.fn(),
   openInTerminal: vi.fn(),

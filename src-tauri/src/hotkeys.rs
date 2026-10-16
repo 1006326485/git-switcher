@@ -87,11 +87,11 @@ fn summon_terminal_window(app: &AppHandle, window: &WebviewWindow, visible: bool
 }
 
 /// Hides the terminal window and hands focus back to the app the summon
-/// interrupted. `orderOut:` (what `hide()` calls) only removes the window
-/// from the screen and, if it was key, hands key status to the next window
-/// in this app — it never orders another window to the front. So the only
-/// thing to steer here is *where that key status goes*: to the interrupted
-/// app if there was one, so it never lands on the main window at all.
+/// interrupted. `focus_previous_app` waits for the reactivation to actually
+/// land first, so by the time `hide()` runs the terminal no longer holds key
+/// status (the interrupted app owns it now) and `orderOut:` removes the
+/// window without reassigning anything — no key hand-off to the main window,
+/// which is what used to flash it forward for a frame.
 pub fn dismiss_terminal_window(window: &WebviewWindow) {
     let previous = PREVIOUS_APP_PID.lock().ok().and_then(|mut pid| pid.take());
     platform::focus_previous_app(previous);
@@ -168,6 +168,7 @@ fn main_restore_plan(order: &[isize], main: isize, raised: isize) -> Option<Rest
 #[cfg(target_os = "macos")]
 mod platform {
     use std::ptr;
+    use std::time::Duration;
 
     use objc2::runtime::AnyObject;
     use objc2::{class, msg_send, MainThreadMarker};
@@ -177,6 +178,9 @@ mod platform {
 
     const LIST_ALL_APPS: usize = 1; // NSWindowNumberListAllApplications
     const ACTIVATE_IGNORING_OTHER_APPS: usize = 1 << 1; // NSApplicationActivateIgnoringOtherApps
+    /// Cap on waiting for the async activation, so a wedged system can only
+    /// cost a snappy close, never a frozen main thread.
+    const ACTIVATION_TIMEOUT: Duration = Duration::from_millis(200);
 
     /// Pid of the frontmost app, unless that app is this one.
     pub fn frontmost_other_app() -> Option<i32> {
@@ -192,7 +196,17 @@ mod platform {
         }
     }
 
-    /// Reactivates the app the summon interrupted.
+    /// Reactivates the app the summon interrupted, and waits until the system
+    /// has actually done it.
+    ///
+    /// Activation is asynchronous: `activateWithOptions` only posts the
+    /// request — the window server raises that app's windows a beat later.
+    /// Hiding the terminal in that gap leaves it key, so AppKit reassigns key
+    /// status to the main window and orders it forward, which is the frame of
+    /// the main window that flashes by on close. Once the switch has landed
+    /// the terminal has already resigned key and `orderOut:` has nothing to
+    /// hand off, so the close is invisible. Bounded so a refused or stalled
+    /// activation can never wedge the main thread.
     pub fn focus_previous_app(pid: Option<i32>) {
         let Some(pid) = pid else {
             return;
@@ -208,7 +222,41 @@ mod platform {
             if app.is_null() {
                 return;
             }
-            let _: bool = msg_send![app, activateWithOptions: ACTIVATE_IGNORING_OTHER_APPS];
+            let activated: bool = msg_send![app, activateWithOptions: ACTIVATE_IGNORING_OTHER_APPS];
+            if !activated {
+                return;
+            }
+        }
+        wait_until_frontmost(pid);
+    }
+
+    /// Pumps the main run loop until `pid` is frontmost or the deadline hits.
+    /// Pumping (rather than sleeping) matters: AppKit may defer the actual
+    /// activation onto a run loop turn, so nothing lands while we just wait.
+    fn wait_until_frontmost(pid: i32) {
+        let deadline = std::time::Instant::now() + ACTIVATION_TIMEOUT;
+        loop {
+            if frontmost_other_app() == Some(pid) {
+                return;
+            }
+            if std::time::Instant::now() >= deadline {
+                log::warn!(
+                    "[debug] wait_until_frontmost: timed out after {:?} waiting for pid {}",
+                    ACTIVATION_TIMEOUT,
+                    pid
+                );
+                return;
+            }
+            unsafe {
+                let run_loop: *mut AnyObject = msg_send![class!(NSRunLoop), currentRunLoop];
+                let mode: *mut AnyObject = msg_send![
+                    class!(NSString),
+                    stringWithUTF8String: c"NSDefaultRunLoopMode".as_ptr()
+                ];
+                let limit: *mut AnyObject =
+                    msg_send![class!(NSDate), dateWithTimeIntervalSinceNow: 0.008f64];
+                let _: bool = msg_send![run_loop, runMode: mode, beforeDate: limit];
+            }
         }
     }
 

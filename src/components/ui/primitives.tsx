@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback, useId, memo, isValidElement, 
 import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import { CloseIcon } from "./icons";
+import { isShortcutCapturing } from "../../lib/shortcutCapture";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Design System Primitives — single source of truth
@@ -10,12 +11,21 @@ import { CloseIcon } from "./icons";
 // ── Overlay Motion ────────────────────────────────────────────────────────
 // Keyframes live in styles/globals.css; every floating layer must import
 // its entrance from here (with the matching transform-origin) instead of
-// declaring inline animate-[...] values.
+// declaring inline animate-[...] values. Exits are the exact mirrors,
+// swapped in via usePresence's `closing` flag (scheme B: dialog 300ms in /
+// 160ms out, menu 180ms in / 110ms out).
+// Scheme-B entrances: spring settle for surfaces, soft ease for scrims.
 export const popoverAnimation = "animate-[popoverIn_180ms_var(--ease-spring)]";
-export const dialogAnimation = "animate-[sheetIn_220ms_var(--ease-spring)]";
+export const popoverExitAnimation = "animate-[popoverOut_110ms_ease-out_forwards]";
+export const dialogAnimation = "animate-[sheetIn_300ms_var(--ease-spring)]";
+export const dialogExitAnimation = "animate-[sheetOut_160ms_ease-out_forwards]";
 export const scrimAnimation = "animate-[scrimIn_180ms_ease-out]";
+export const scrimExitAnimation = "animate-[scrimOut_160ms_ease-out_forwards]";
 export const toastAnimation = "animate-[toastIn_200ms_var(--ease-out-soft)]";
 export const toastExitAnimation = "animate-[toastOut_160ms_ease-out_forwards]";
+// List/filter entrances (scheme B): one-shot rise, staggered ≤8 × 14ms via
+// inline animation-delay. Never on virtualized rows or polling remounts.
+export const listItemAnimation = "animate-[itemIn_180ms_var(--ease-out-soft)_backwards]";
 // Card view: the expanded card takes the whole grid row. Its GitOps body
 // unfolds in place while the card itself slides in from the side it sits on.
 export const expandBodyAnimation = "animate-[cardExpandIn_300ms_var(--ease-spring)]";
@@ -50,14 +60,30 @@ export function usePresence(open: boolean, duration = CARD_EXPAND_MS) {
   const [present, setPresent] = useState(open);
   const [closing, setClosing] = useState(false);
 
+  // Sync-mount on open: flipping `present` during render (not in an effect)
+  // keeps the portal in the SAME commit as the `open` change, so effects that
+  // measure the fresh subtree (menu positioning, dialog autofocus) still see
+  // it on their first run.
+  if (open && !present) {
+    setPresent(true);
+  }
+
+  // Sync-exit on close: flipping `closing` during render too, so the exit
+  // class lands in the SAME commit as `open=false` and the exit animation
+  // starts on the very first frame after the click. Previously `closing` was
+  // set in an effect, which added a full extra render — the element sat
+  // static for a frame before the exit keyframes even began, which is what
+  // made sidebar collapse feel laggy.
+  if (!open && present && !closing) {
+    setClosing(true);
+  }
+
   useEffect(() => {
     if (open) {
-      setPresent(true);
       setClosing(false);
       return;
     }
     if (!present) return;
-    setClosing(true);
     const timer = window.setTimeout(() => {
       setPresent(false);
       setClosing(false);
@@ -66,6 +92,30 @@ export function usePresence(open: boolean, duration = CARD_EXPAND_MS) {
   }, [open, present, duration]);
 
   return { present, closing };
+}
+
+// ── Disclosure (inline collapsible section) ─────────────────────────────
+// Grid-rows fold shared by toolbar/panel sub-sections (stash list, tag list,
+// patch preview, clean preview). Unlike Modal's sheetOut, the fold keeps the
+// content's own height — the grid row animates 0fr↔1fr so the section grows
+// out of / collapses into its trigger line instead of sliding as a sheet.
+// Pure mount-gating stays for long/dynamic lists (virtualized, polling).
+export function Disclosure({
+  open,
+  children,
+  className = "",
+}: {
+  open: boolean;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  const { present, closing } = usePresence(open);
+  if (!present) return null;
+  return (
+    <div className={`grid ${closing ? expandBodyExitAnimation : expandBodyAnimation} ${className}`}>
+      <div className="overflow-hidden min-w-0">{children}</div>
+    </div>
+  );
 }
 
 // ── Segmented Control ─────────────────────────────────────────────────────
@@ -116,10 +166,13 @@ export function SegmentedControl<T extends string>({
           aria-label={opt.label}
           title={opt.label}
           tabIndex={value === opt.value ? 0 : -1}
-          className={`press px-2 py-1 rounded-md text-sm transition-all active:scale-[0.95] ${
+          // Selected option lifts 1px into its white pill (spring 200ms) so
+          // the segment switch reads as a press-settle, not a color snap.
+          // transition-all survives the global theme rule via @layer base.
+          className={`press px-2 py-1 rounded-md text-sm transition-all duration-200 active:scale-[0.95] ${
             value === opt.value
-              ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm"
-              : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+              ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm -translate-y-px"
+              : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:-translate-y-px"
           }`}
         >
           {opt.icon}
@@ -148,6 +201,10 @@ export const DropdownMenu = memo(function DropdownMenu({
   });
   const triggerRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  // 110ms popoverOut exit: the portal stays mounted one cycle after `open`
+  // turns false. Item click still closes via deferred setOpen (below) so the
+  // action fires before the exit starts.
+  const { present, closing } = usePresence(open, 110);
 
   const updatePos = useCallback(() => {
     if (!triggerRef.current) return;
@@ -193,9 +250,12 @@ export const DropdownMenu = memo(function DropdownMenu({
   }, []);
 
   useEffect(() => {
-    if (!open) return;
+    // `present` is already true in the same commit (render-phase sync above),
+    // so positioning/focus run on their first pass over the mounted portal.
+    // Listeners still gate on `open` so the closing cycle stops reacting.
+    if (!present) return;
     updatePos();
-    menuItems()[0]?.focus();
+    if (open) menuItems()[0]?.focus();
     const handleClick = (e: MouseEvent) => {
       const target = e.target as Node;
       if (
@@ -209,6 +269,7 @@ export const DropdownMenu = memo(function DropdownMenu({
     // Capture phase: Escape must be consumed before an enclosing Modal's
     // document listener sees it, or the dialog closes together with the menu.
     const handleKey = (e: KeyboardEvent) => {
+      if (isShortcutCapturing()) return;
       if (e.key === "Escape") {
         e.preventDefault();
         e.stopImmediatePropagation();
@@ -259,7 +320,7 @@ export const DropdownMenu = memo(function DropdownMenu({
             })
           : trigger}
       </div>
-      {open &&
+      {present &&
         createPortal(
           <div
             ref={dropdownRef}
@@ -272,7 +333,7 @@ export const DropdownMenu = memo(function DropdownMenu({
               maxHeight: pos.maxHeight,
               zIndex: 9999,
             }}
-            className={`origin-top-left bg-(--surface-1) border border-(--border-color) rounded-xl shadow-lg py-1.5 min-w-50 overflow-y-auto overscroll-contain ${popoverAnimation}`}
+            className={`origin-top-left bg-(--surface-1) border border-(--border-color) rounded-xl shadow-lg py-1.5 min-w-50 overflow-y-auto overscroll-contain ${closing ? popoverExitAnimation : popoverAnimation}`}
           >
             <div onClick={() => setTimeout(() => setOpen(false), 0)}>
               {children}
@@ -363,6 +424,7 @@ export const Modal = memo(function Modal({
   subtitle,
   width = "md",
   compact = false,
+  bodyClassName,
   children,
 }: {
   open: boolean;
@@ -372,20 +434,37 @@ export const Modal = memo(function Modal({
   width?: keyof typeof MODAL_WIDTHS;
   /** Smaller header chrome (used alongside width="sm" for confirmations). */
   compact?: boolean;
+  bodyClassName?: string;
   children: React.ReactNode;
 }) {
   const { t } = useTranslation();
   const contentRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  // Exit presence: keeps the portal mounted for one 160ms cycle after `open`
+  // turns false so sheetOut/scrimOut have something to animate. Focus restore
+  // stays bound to `open` (effect below), so the opener regains focus the
+  // moment the dialog starts closing — no waiting for the exit to finish.
+  const { present, closing } = usePresence(open, 160);
 
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
   useEffect(() => {
-    if (!open) return;
+    // Bound to `present` (same-commit mount via usePresence's render-phase
+    // sync): the rAF autofocus below then finds contentRef on its first run.
+    // Focus restore runs in the same cleanup, so the opener still regains
+    // focus the moment the dialog starts closing.
+    if (!present) return;
     // Remember the opener so focus returns to it when the dialog closes.
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const handleKey = (e: KeyboardEvent) => {
+      // While a shortcut is being recorded, no real action may fire: only
+      // the recorder itself handles keys.
+      if (isShortcutCapturing()) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        return;
+      }
       // A nested layer (dropdown/select) that consumed Escape marks the event
       // as handled; closing here too would drop the user's in-progress input.
       if (e.key === "Escape" && !e.defaultPrevented) onCloseRef.current();
@@ -421,18 +500,18 @@ export const Modal = memo(function Modal({
       document.removeEventListener("keydown", handleKey);
       if (opener?.isConnected) opener.focus();
     };
-  }, [open]);
+  }, [present]);
 
-  if (!open) return null;
+  if (!present) return null;
 
   // Portal to body: host containers (e.g. project cards) apply hover
   // translate, which traps fixed descendants as a containing block.
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4" role="dialog" aria-modal="true" aria-labelledby={titleId}>
-      <div className={`absolute inset-0 bg-black/50 dark:bg-black/60 backdrop-blur-sm ${scrimAnimation}`} onClick={onClose} />
+      <div className={`absolute inset-0 bg-black/50 dark:bg-black/60 backdrop-blur-sm ${closing ? scrimExitAnimation : scrimAnimation}`} onClick={onClose} />
       <div
         ref={contentRef}
-        className={`relative flex max-h-[calc(100dvh-1.5rem)] w-full max-w-[calc(100vw-1.5rem)] flex-col overflow-hidden ${compact ? "rounded-xl" : "rounded-2xl"} bg-[var(--surface-1)] shadow-xl sm:max-h-[calc(100dvh-2rem)] sm:max-w-[calc(100vw-2rem)] ${dialogAnimation} ${MODAL_WIDTHS[width]}`}
+        className={`relative flex max-h-[calc(100dvh-1.5rem)] w-full max-w-[calc(100vw-1.5rem)] flex-col overflow-hidden ${compact ? "rounded-xl" : "rounded-2xl"} bg-[var(--surface-1)] shadow-xl sm:max-h-[calc(100dvh-2rem)] sm:max-w-[calc(100vw-2rem)] ${closing ? dialogExitAnimation : dialogAnimation} ${MODAL_WIDTHS[width]}`}
       >
         {/* Header */}
         <div className={`flex items-start justify-between gap-3 border-b border-black/5 dark:border-white/5 ${compact ? "px-3 pb-2 pt-2.5" : "px-4 pb-3 pt-4 sm:px-6 sm:pt-5"}`}>
@@ -452,7 +531,7 @@ export const Modal = memo(function Modal({
         </div>
 
         {/* Body — scrolls internally so the header stays pinned across all dialogs */}
-        <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+        <div className={`min-h-0 flex-1 overflow-y-auto${bodyClassName ? ` ${bodyClassName}` : ""}`}>{children}</div>
       </div>
     </div>,
     document.body
@@ -505,7 +584,7 @@ export function Tabs<T extends string>({
   );
 
   return (
-    <div role="tablist" className="flex gap-1 overflow-x-auto border-b border-gray-200 px-3 [-webkit-overflow-scrolling:touch] sm:px-6 dark:border-gray-700" onKeyDown={handleKeyDown}>
+    <div role="tablist" className="relative flex gap-1 overflow-x-auto border-b border-gray-200 px-3 [-webkit-overflow-scrolling:touch] sm:px-6 dark:border-gray-700" onKeyDown={handleKeyDown}>
       {tabs.map((tab) => (
         <button
           key={tab.value}
@@ -515,10 +594,14 @@ export function Tabs<T extends string>({
           aria-controls={linkedPanels.has(tab.value) ? `${groupId}-panel-${tab.value}` : undefined}
           tabIndex={active === tab.value ? 0 : -1}
           onClick={() => onChange(tab.value)}
-          className={`shrink-0 whitespace-nowrap px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+          // Selected label cross-fades + rises 2px (spring 200ms) so the tab
+          // switch reads as a lift, not a color snap. Border color rides the
+          // same timing via transition-[border-color,...] — transform/opacity
+          // now survive the global theme rule thanks to the @layer base fix.
+          className={`press shrink-0 whitespace-nowrap px-4 py-2 text-sm font-medium border-b-2 transition-[border-color,color,transform,opacity] duration-200 active:scale-[0.98] ${
             active === tab.value
-              ? "border-blue-500 text-blue-600 dark:text-blue-400"
-              : "border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+              ? "border-blue-500 text-blue-600 dark:text-blue-400 opacity-100"
+              : "border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 opacity-80 hover:opacity-100 hover:-translate-y-px"
           }`}
         >
           {tab.label}

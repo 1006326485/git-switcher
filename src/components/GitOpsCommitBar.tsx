@@ -2,6 +2,7 @@ import { memo, type RefObject } from "react";
 import type { CommitInfo } from "../lib/types";
 import { AiGenerateIcon } from "./ui/icons";
 import { useTranslation } from "react-i18next";
+import { isDirtyChord } from "../lib/heldKeys";
 
 const COMMIT_PREFIXES = ["feat: ", "fix: ", "chore: ", "docs: "] as const;
 
@@ -40,6 +41,7 @@ export const GitOpsCommitBar = memo(function GitOpsCommitBar({
             onKeyDown={(e) => {
               if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
                 e.preventDefault();
+                if (isDirtyChord(e)) return;
                 onCommit();
               }
             }}

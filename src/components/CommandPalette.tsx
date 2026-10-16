@@ -3,8 +3,10 @@ import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import type { ProjectMatch } from "../hooks/useCommandPalette";
 import type { SearchResult } from "../lib/types";
-import { popoverAnimation } from "./ui/primitives";
+import { popoverAnimation, popoverExitAnimation, scrimAnimation, scrimExitAnimation, usePresence } from "./ui/primitives";
 import { searchContent } from "../lib/tauri";
+import { isShortcutCapturing } from "../lib/shortcutCapture";
+import { isDirtyChord } from "../lib/heldKeys";
 
 export interface Command {
   id: string;
@@ -196,8 +198,12 @@ export const CommandPalette = memo(function CommandPalette({
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
+      if (isShortcutCapturing()) return;
       if (e.key === "Escape" || ((e.metaKey || e.ctrlKey) && e.key === "w")) {
-        if (e.key === "w") e.preventDefault();
+        if (e.key === "w") {
+          e.preventDefault();
+          if (isDirtyChord(e)) return;
+        }
         onClose();
       }
     };
@@ -211,6 +217,10 @@ export const CommandPalette = memo(function CommandPalette({
     const active = listRef.current.querySelector("[data-active]");
     if (active) active.scrollIntoView({ block: "nearest" });
   }, [projectIdx, cmdIdx, contentIdx, section]);
+
+  // 160ms sheet/scrim exit shared with Modal: portal stays mounted one cycle
+  // after `open` turns false so the exit has something to animate.
+  const { present, closing } = usePresence(open, 160);
 
   const handleSelectContentResult = useCallback((result: SearchResult) => {
     // Find the project by name and scroll to it
@@ -296,7 +306,7 @@ export const CommandPalette = memo(function CommandPalette({
     if (e.key === "Escape") onClose();
   };
 
-  if (!open) return null;
+  if (!present) return null;
 
   let flatIdx = 0;
 
@@ -305,8 +315,15 @@ export const CommandPalette = memo(function CommandPalette({
       className="fixed inset-0 z-50 flex items-start justify-center pt-[18vh]"
       onClick={onClose}
     >
+      {/* Scrim — its own layer so scrimIn does not also fade the palette,
+       * which keeps popoverIn's scale-from-top entrance crisp. Clicking it
+       * bubbles to the container's onClick above, so dismissal is unchanged. */}
       <div
-        className={`select-none w-full max-w-2xl bg-(--surface-1) rounded-xl shadow-2xl border border-(--border-color) overflow-hidden origin-top ${popoverAnimation}`}
+        aria-hidden
+        className={`absolute inset-0 bg-black/40 backdrop-blur-sm ${closing ? scrimExitAnimation : scrimAnimation}`}
+      />
+      <div
+        className={`relative select-none w-full max-w-2xl bg-(--surface-1) rounded-xl shadow-2xl border border-(--border-color) overflow-hidden origin-top ${closing ? popoverExitAnimation : popoverAnimation}`}
         onClick={(e) => e.stopPropagation()}
       >
         <input

@@ -85,7 +85,7 @@ export const SettingsDialog = memo(function SettingsDialog({ open, onClose, onSu
         active={tab}
         onChange={setTab}
       />
-      <div className="px-6 py-5">
+      <div className="px-6 py-5 h-[min(60vh,520px)] overflow-y-auto">
         {tab === "general" && <GeneralSettings onError={onError} accentColor={accentColor} onAccentChange={onAccentChange} />}
         {tab === "llm" && <LlmSettings onError={onError} />}
         {tab === "background" && <BackgroundSettings onError={onError} />}

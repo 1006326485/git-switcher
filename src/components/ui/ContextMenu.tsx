@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { popoverAnimation } from "./primitives";
+import { popoverAnimation, popoverExitAnimation, usePresence } from "./primitives";
+import { isShortcutCapturing } from "../../lib/shortcutCapture";
 
 export interface ContextMenuProps {
   open: boolean;
@@ -32,6 +33,10 @@ export function ContextMenu({
 }: ContextMenuProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<MenuPos | null>(null);
+  // 110ms popoverOut exit: portal stays mounted one cycle after `open` turns
+  // false. Position reset stays bound to `open` (effect below) so a reopened
+  // menu re-measures instead of reusing the stale rect.
+  const { present, closing } = usePresence(open, 110);
 
   const updatePos = useCallback(() => {
     const panel = panelRef.current;
@@ -102,6 +107,7 @@ export function ContextMenu({
     };
 
     const handleKey = (e: KeyboardEvent) => {
+      if (isShortcutCapturing()) return;
       if (e.key === "Escape") {
         e.preventDefault();
         e.stopImmediatePropagation();
@@ -138,8 +144,10 @@ export function ContextMenu({
   }, [open, onClose, updatePos]);
 
   useLayoutEffect(() => {
-    if (open) updatePos();
-  }, [open, updatePos]);
+    // `present` flips in the same commit as `open` (usePresence render-phase
+    // sync), so the fresh portal is measurable on this first pass.
+    if (present) updatePos();
+  }, [present, updatePos]);
 
   useEffect(() => {
     if (!open || !restoreFocus) return;
@@ -147,7 +155,7 @@ export function ContextMenu({
     return () => opener?.focus();
   }, [open, restoreFocus]);
 
-  if (!open) return null;
+  if (!present) return null;
 
   const style: React.CSSProperties = pos
     ? {
@@ -173,7 +181,7 @@ export function ContextMenu({
       ref={panelRef}
       role="menu"
       style={style}
-      className={`${pos?.bottom !== undefined ? "origin-bottom-left" : "origin-top-left"} bg-(--surface-1) border border-(--border-color) rounded-xl shadow-lg py-1.5 overflow-y-auto overscroll-contain ${popoverAnimation}`}
+      className={`${pos?.bottom !== undefined ? "origin-bottom-left" : "origin-top-left"} bg-(--surface-1) border border-(--border-color) rounded-xl shadow-lg py-1.5 overflow-y-auto overscroll-contain ${closing ? popoverExitAnimation : popoverAnimation}`}
     >
       <div onClick={() => setTimeout(onClose, 0)}>{children}</div>
     </div>,

@@ -99,6 +99,7 @@
       "terminalHotkey": "Terminal Hotkey",
       "terminalHotkeyAria": "Terminal hotkey",
       "terminalHotkeyHint": "Global shortcut that summons the standalone terminal window. Examples: CmdOrCtrl+Shift+`, Alt+Space.",
+      "inAppTerminalHint": "In-app shortcut that toggles the built-in terminal panel (configurable in the Shortcuts panel). The global shortcut also toggles the panel while the main window is focused.",
       "hideTerminalOnBlur": "Hide Terminal on Blur",
       "hideTerminalOnBlurDesc": "Dismiss the summoned terminal window when it loses focus",
       "hideTerminalOnBlurAria": "Hide terminal on blur"
@@ -291,7 +292,7 @@
     "actions": {
       "commandPalette": "Command palette (⌘K)",
       "terminal": "Terminal",
-      "shortcuts": "Keyboard shortcuts (⌘/)",
+      "shortcuts": "Keyboard shortcuts",
       "operationHistory": "Operation History",
       "notifications": "Notifications",
       "addProject": "Add project",
@@ -395,7 +396,8 @@
       "navigation": "Navigation",
       "git": "Git Operations",
       "view": "View",
-      "terminal": "Terminal"
+      "terminal": "Terminal",
+      "inApp": "In-App"
     },
     "global": {
       "terminal": "Toggle the built-in terminal when the main window is focused, or summon/hide the standalone terminal window otherwise (configurable in Settings)"
@@ -436,6 +438,30 @@
       "closeTab": "Close terminal tab",
       "newTab": "New terminal in selected project",
       "closeTabKey": "Close current terminal tab"
+    },
+    "inApp": {
+      "addProject": "Add project",
+      "refreshAll": "Refresh all projects",
+      "focusSearch": "Focus search",
+      "exportImport": "Import / Export",
+      "toggleSidebar": "Toggle sidebar",
+      "commandPalette": "Command palette",
+      "shortcutsHelp": "Keyboard shortcuts help",
+      "quickDiff": "Quick Diff overview",
+      "navigateDown": "Move selection down",
+      "navigateUp": "Move selection up",
+      "selectFocused": "Expand focused project",
+      "toggleTerminal": "Toggle built-in terminal"
+    },
+    "editor": {
+      "capture": "Recording… press a key combination",
+      "recording": "Recording…",
+      "conflict": "Conflicts with {{action}}",
+      "reset": "Reset",
+      "restoreDefaults": "Restore defaults",
+      "save": "Save",
+      "cancel": "Cancel",
+      "pressKeys": "Press a key combination"
     }
   },
   "dashboard": {
@@ -526,6 +552,10 @@
     "newTerminal": "New terminal",
     "newTerminalButton": "New Terminal",
     "noTerminals": "No terminals open",
+    "quickRun": "Quick run",
+    "quickRunAria": "Quick run in {{title}}",
+    "quickRunLoading": "Loading commands…",
+    "quickRunEmpty": "No quick commands yet",
     "switchTabs": "Switch tabs — ⌥1…9 to jump, middle-click to close",
     "switchGroupBadge": "⌘↑↓",
     "openInFinder": "Open in Finder",

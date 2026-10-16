@@ -42,6 +42,8 @@ export interface GitStatus {
   untracked: number;
   ahead: number;
   behind: number;
+  /** True while a merge is in progress (MERGE_HEAD exists). Absent in older mocks. */
+  is_merging?: boolean;
 }
 
 export interface ProjectDetail {
@@ -98,6 +100,18 @@ export interface AppSettings {
   auto_fetch_on_launch: boolean;
   /** Global hotkey that summons the standalone terminal window. */
   terminal_hotkey: string;
+  in_app_add_project?: string;
+  in_app_refresh_all?: string;
+  in_app_focus_search?: string;
+  in_app_export_import?: string;
+  in_app_toggle_sidebar?: string;
+  in_app_command_palette?: string;
+  in_app_shortcuts_help?: string;
+  in_app_quick_diff?: string;
+  in_app_navigate_down?: string;
+  in_app_navigate_up?: string;
+  in_app_select_focused?: string;
+  in_app_toggle_terminal?: string;
   /** Hide the summoned terminal window as soon as it loses focus. */
   terminal_hide_on_blur: boolean;
   tray: TraySettings;

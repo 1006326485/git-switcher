@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GeneralSettings } from "./GeneralSettings";
 import * as api from "../lib/tauri";
-import { formatHotkey } from "../lib/hotkey";
+import { bindingToDisplayParts } from "../lib/hotkey";
 import type { AppSettings } from "../lib/types";
 
 vi.mock("../lib/tauri", () => ({
@@ -43,40 +43,69 @@ beforeEach(() => {
 });
 
 describe("GeneralSettings terminal hotkey", () => {
-  it("shows the stored hotkey", async () => {
+  it("shows the stored hotkey as badges", async () => {
     vi.mocked(api.getSettings).mockResolvedValue(settings);
     render(<GeneralSettings onError={() => {}} />);
 
-    const input = await screen.findByLabelText("Terminal hotkey");
-    expect(input).toHaveValue("CmdOrCtrl+Shift+`");
-    expect(screen.getByText(formatHotkey("CmdOrCtrl+Shift+`"))).toBeInTheDocument();
+    for (const part of bindingToDisplayParts("CmdOrCtrl+Shift+`")) {
+      expect(await screen.findByText(part)).toBeInTheDocument();
+    }
+    expect(screen.getByRole("button", { name: "Terminal hotkey" })).toBeInTheDocument();
   });
 
-  it("persists a new hotkey on blur", async () => {
+  it("records keys like the other shortcut editors and persists on save", async () => {
     vi.mocked(api.getSettings).mockResolvedValue(settings);
     vi.mocked(api.updateSettingsPartial).mockResolvedValue(settings);
     render(<GeneralSettings onError={() => {}} />);
 
-    const input = await screen.findByLabelText("Terminal hotkey");
-    fireEvent.change(input, { target: { value: "Alt+Space" } });
-    fireEvent.blur(input);
+    fireEvent.click(await screen.findByRole("button", { name: "Terminal hotkey" }));
+    const recorder = await screen.findByLabelText("Recording… press a key combination");
+    fireEvent.keyDown(recorder, { key: " ", code: "Space", altKey: true });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() =>
       expect(api.updateSettingsPartial).toHaveBeenCalledWith({ terminal_hotkey: "Alt+Space" })
     );
   });
 
-  it("reverts and reports when the shortcut is rejected", async () => {
+  it("keeps working when the save is rejected", async () => {
     const onError = vi.fn();
     vi.mocked(api.getSettings).mockResolvedValue(settings);
     vi.mocked(api.updateSettingsPartial).mockRejectedValue(new Error("conflict"));
     render(<GeneralSettings onError={onError} />);
 
-    const input = await screen.findByLabelText("Terminal hotkey");
-    fireEvent.change(input, { target: { value: "Not+A+Shortcut" } });
-    fireEvent.blur(input);
+    fireEvent.click(await screen.findByRole("button", { name: "Terminal hotkey" }));
+    const recorder = await screen.findByLabelText("Recording… press a key combination");
+    fireEvent.keyDown(recorder, { key: " ", code: "Space", altKey: true });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(onError).toHaveBeenCalled());
-    await waitFor(() => expect(input).toHaveValue("CmdOrCtrl+Shift+`"));
+  });
+});
+
+describe("GeneralSettings theme switching", () => {
+  it("applies the theme to the DOM immediately when a theme button is clicked", async () => {
+    vi.mocked(api.getSettings).mockResolvedValue({ ...settings, theme: "light" });
+    vi.mocked(api.updateSettingsPartial).mockResolvedValue({ ...settings, theme: "dark" });
+    document.documentElement.classList.remove("dark");
+    render(<GeneralSettings onError={() => {}} />);
+
+    fireEvent.click(await screen.findByText("Dark"));
+
+    await waitFor(() => expect(document.documentElement.classList.contains("dark")).toBe(true));
+    await waitFor(() =>
+      expect(api.updateSettingsPartial).toHaveBeenCalledWith({ theme: "dark" })
+    );
+  });
+
+  it("reserves space for the saved indicator so toggling it never shifts layout", async () => {
+    vi.mocked(api.getSettings).mockResolvedValue(settings);
+    vi.mocked(api.updateSettingsPartial).mockResolvedValue(settings);
+    render(<GeneralSettings onError={() => {}} />);
+
+    // The reserved row exists even before any save (no layout shift on appear).
+    await screen.findByRole("button", { name: "Terminal hotkey" });
+    const live = document.querySelector('[aria-live="polite"]');
+    expect(live).not.toBeNull();
   });
 });

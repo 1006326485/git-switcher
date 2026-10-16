@@ -5,6 +5,8 @@ import type { ProjectDetail, Theme, ViewMode, ProjectScript, RunPresetItem } fro
 import type { RecentProject } from "./useRecentProjects";
 import * as api from "../lib/tauri";
 import { buildRunEntries, type RunEntry } from "../lib/runCommands";
+import { isShortcutCapturing } from "../lib/shortcutCapture";
+import { isDirtyChord, installHeldKeyTracking } from "../lib/heldKeys";
 
 export interface ProjectMatch {
   detail: ProjectDetail;
@@ -94,6 +96,10 @@ export function useCommandPalette(
   const [runEntries, setRunEntries] = useState<RunEntry[]>([]);
   const toggle = useCallback(() => setOpen((o) => !o), []);
 
+  // The chord guards below read the shared held-key record; ref-counted, so
+  // this hook keeps its own owner alive instead of relying on another module.
+  useEffect(() => installHeldKeyTracking(), []);
+
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
@@ -131,17 +137,9 @@ export function useCommandPalette(
     };
   }, [open, projects]);
 
-  // Global Cmd+K shortcut
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
-        e.preventDefault();
-        setOpen((o) => !o);
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, []);
+  // Cmd+K is owned by the user-rebindable table (useKeyboardShortcuts), which
+  // also works from inside inputs. A second listener here made it toggle twice
+  // and cancel itself out, so there is deliberately no Cmd+K handler in this hook.
 
   // Global Cmd+Shift+F shortcut — open in content search mode
   const setOpenWithSearch = useCallback(() => {
@@ -151,8 +149,10 @@ export function useCommandPalette(
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (isShortcutCapturing()) return;
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "f") {
         e.preventDefault();
+        if (isDirtyChord(e)) return;
         setOpenWithSearch();
       }
     };

@@ -2,9 +2,12 @@ import { useState, useEffect, useCallback, useRef, memo } from "react";
 import { useTranslation } from "react-i18next";
 import { ThemeSettings } from "./ThemeSettings";
 import { LanguageSettings } from "./LanguageSettings";
+import { ShortcutRecorder } from "./ShortcutRecorder";
+import { KbdBadge } from "./ui/primitives";
 import type { AppSettings, Theme, ViewMode } from "../lib/types";
 import { getSettings, updateSettingsPartial } from "../lib/tauri";
-import { formatHotkey } from "../lib/hotkey";
+import { applyTheme, broadcastThemeChange } from "../hooks/useTheme";
+import { bindingToDisplayParts, normalizeBinding } from "../lib/hotkey";
 import { applyLanguageChoice, type LanguageChoice } from "../lib/i18n";
 
 interface GeneralSettingsProps {
@@ -43,7 +46,7 @@ export const GeneralSettings = memo(function GeneralSettings({ onError, accentCo
   const { t } = useTranslation();
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [saved, setSaved] = useState(false);
-  const [hotkeyDraft, setHotkeyDraft] = useState("");
+  const [editingTerminalHotkey, setEditingTerminalHotkey] = useState(false);
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -52,7 +55,6 @@ export const GeneralSettings = memo(function GeneralSettings({ onError, accentCo
   useEffect(() => {
     getSettings().then((s) => {
       setSettings(s);
-      setHotkeyDraft(s.terminal_hotkey);
     }).catch((e) => {
       onErrorRef.current(t("errors.loadSettings", { error: String(e) }));
     });
@@ -81,17 +83,16 @@ export const GeneralSettings = memo(function GeneralSettings({ onError, accentCo
     return save;
   }, [t]);
 
-  const commitHotkey = useCallback(() => {
+  const commitHotkey = useCallback((raw: string) => {
     if (!settings) return;
-    const value = hotkeyDraft.trim();
+    const value = normalizeBinding(raw.trim());
     if (!value || value === settings.terminal_hotkey) {
-      setHotkeyDraft(settings.terminal_hotkey);
+      setEditingTerminalHotkey(false);
       return;
     }
-    void update("terminal_hotkey", value).then((ok) => {
-      if (!ok) setHotkeyDraft(settings.terminal_hotkey);
-    });
-  }, [settings, hotkeyDraft, update]);
+    setEditingTerminalHotkey(false);
+    void update("terminal_hotkey", value);
+  }, [settings, update]);
 
   const selectLanguage = useCallback(
     (choice: LanguageChoice) => {
@@ -99,6 +100,18 @@ export const GeneralSettings = memo(function GeneralSettings({ onError, accentCo
       // saver so concurrent setting changes cannot interleave.
       applyLanguageChoice(choice);
       void update("language", choice);
+    },
+    [update]
+  );
+
+  const selectTheme = useCallback(
+    (value: Theme) => {
+      // Apply to the DOM immediately (same path as Header/palette) so the
+      // switch is visible without reload, and notify other useTheme
+      // instances; persist through the serialized saver.
+      applyTheme(value);
+      broadcastThemeChange(value);
+      void update("theme", value);
     },
     [update]
   );
@@ -118,7 +131,7 @@ export const GeneralSettings = memo(function GeneralSettings({ onError, accentCo
           {THEME_META.map((opt) => (
             <button
               key={opt.value}
-              onClick={() => update("theme", opt.value)}
+              onClick={() => selectTheme(opt.value)}
               className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
                 settings.theme === opt.value
                   ? "border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
@@ -236,26 +249,35 @@ export const GeneralSettings = memo(function GeneralSettings({ onError, accentCo
 
       {/* Terminal Hotkey */}
       <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+        <div className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
           {t("settings.general.terminalHotkey")}
-        </label>
-        <div className="flex items-center gap-2">
-          <input
-            type="text"
-            value={hotkeyDraft}
-            onChange={(e) => setHotkeyDraft(e.target.value)}
-            onBlur={commitHotkey}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") e.currentTarget.blur();
-            }}
-            placeholder="CmdOrCtrl+Shift+`"
-            aria-label={t("settings.general.terminalHotkeyAria")}
-            spellCheck={false}
-            className="flex-1 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400"
-          />
-          <kbd className="inline-flex items-center h-8 px-2 text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-md">
-            {formatHotkey(hotkeyDraft.trim() || "CmdOrCtrl+Shift+`")}
-          </kbd>
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-0.5">
+            {bindingToDisplayParts(settings.terminal_hotkey).map((k, i) => (
+              <span key={i} className="flex items-center gap-0.5">
+                {i > 0 && <span className="text-[11px] text-gray-400">+</span>}
+                <KbdBadge label={k} />
+              </span>
+            ))}
+          </div>
+          {editingTerminalHotkey ? (
+            <ShortcutRecorder
+              initial={settings.terminal_hotkey}
+              forGlobalHotkey
+              onCommit={commitHotkey}
+              onCancel={() => setEditingTerminalHotkey(false)}
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => setEditingTerminalHotkey(true)}
+              aria-label={t("settings.general.terminalHotkeyAria")}
+              className="px-2 py-1 rounded-md text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+            >
+              Edit
+            </button>
+          )}
         </div>
         <p className="text-xs text-gray-400 mt-1">
           {t("settings.general.terminalHotkeyHint")}
@@ -293,15 +315,17 @@ export const GeneralSettings = memo(function GeneralSettings({ onError, accentCo
 
       <LanguageSettings onSelect={selectLanguage} />
 
-      {/* Saved indicator */}
-      {saved && (
-        <div className="flex items-center gap-1.5 text-sm text-green-600 dark:text-green-400 transition-opacity">
+      {/* Saved indicator — reserved row so toggling never shifts layout */}
+      <div aria-live="polite" className="flex items-center gap-1.5 text-sm min-h-[20px]">
+        {saved && (
+          <span className="flex items-center gap-1.5 text-green-600 dark:text-green-400 transition-opacity">
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
           </svg>
           {t("common.saved")}
-        </div>
-      )}
+          </span>
+        )}
+      </div>
 
       {accentColor && onAccentChange && (
         <ThemeSettings accentColor={accentColor} onAccentChange={onAccentChange} />

@@ -99,6 +99,7 @@
       "terminalHotkey": "终端快捷键",
       "terminalHotkeyAria": "终端快捷键",
       "terminalHotkeyHint": "唤起独立终端窗口的全局快捷键，例如：CmdOrCtrl+Shift+`、Alt+Space。",
+      "inAppTerminalHint": "切换内嵌终端面板的应用内快捷键（可在快捷键面板中配置）。主窗口聚焦时，全局快捷键同样会翻转该面板。",
       "hideTerminalOnBlur": "失焦时隐藏终端",
       "hideTerminalOnBlurDesc": "终端窗口失去焦点时自动隐藏",
       "hideTerminalOnBlurAria": "失焦时隐藏终端"
@@ -291,7 +292,7 @@
     "actions": {
       "commandPalette": "命令面板 (⌘K)",
       "terminal": "终端",
-      "shortcuts": "键盘快捷键 (⌘/)",
+      "shortcuts": "键盘快捷键",
       "operationHistory": "操作历史",
       "notifications": "通知",
       "addProject": "添加项目",
@@ -395,7 +396,8 @@
       "navigation": "导航",
       "git": "Git 操作",
       "view": "视图",
-      "terminal": "终端"
+      "terminal": "终端",
+      "inApp": "应用内"
     },
     "global": {
       "terminal": "主窗口聚焦时切换内置终端，否则召唤/隐藏独立终端窗口（可在设置中配置）"
@@ -436,6 +438,30 @@
       "closeTab": "关闭终端标签页",
       "newTab": "在所选项目中新建终端",
       "closeTabKey": "关闭当前终端标签页"
+    },
+    "inApp": {
+      "addProject": "新增项目",
+      "refreshAll": "刷新全部",
+      "focusSearch": "聚焦搜索",
+      "exportImport": "导入导出",
+      "toggleSidebar": "切换侧栏",
+      "commandPalette": "命令面板",
+      "shortcutsHelp": "快捷键帮助",
+      "quickDiff": "快速 Diff",
+      "navigateDown": "下移",
+      "navigateUp": "上移",
+      "selectFocused": "展开选中",
+      "toggleTerminal": "切换内嵌终端"
+    },
+    "editor": {
+      "capture": "正在录制…请按下组合键",
+      "recording": "录制中…",
+      "conflict": "与{{action}}冲突",
+      "reset": "重置",
+      "restoreDefaults": "恢复默认",
+      "save": "保存",
+      "cancel": "取消",
+      "pressKeys": "请按下组合键"
     }
   },
   "dashboard": {
@@ -526,6 +552,10 @@
     "newTerminal": "新建终端",
     "newTerminalButton": "新建终端",
     "noTerminals": "没有打开的终端",
+    "quickRun": "快速运行",
+    "quickRunAria": "在 {{title}} 中快速运行",
+    "quickRunLoading": "正在加载命令…",
+    "quickRunEmpty": "暂无快捷命令",
     "switchTabs": "切换标签页 — 使用 ⌥1…9 跳转，中键单击关闭",
     "switchGroupBadge": "⌘↑↓",
     "openInFinder": "在访达中打开",

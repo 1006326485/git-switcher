@@ -34,13 +34,16 @@ import { useRecentProjects } from "./hooks/useRecentProjects";
 import { useGitOpTracker } from "./hooks/useGitOpTracker";
 import { useOperationHistory } from "./hooks/useOperationHistory";
 import { syncLanguageFromSettings } from "./hooks/useLanguage";
-import type { ViewMode, SortOption, RunPresetItem } from "./lib/types";
+import type { ViewMode, SortOption, RunPresetItem, AppSettings } from "./lib/types";
+import type { ActionId } from "./lib/inAppShortcuts";
 import { parseError, isBenignFetchFailure, createErrorAggregator } from "./lib/types";
 import { setRecentCommand } from "./lib/recentCommands";
+import { isShortcutCapturing } from "./lib/shortcutCapture";
+import { isDirtyChord } from "./lib/heldKeys";
 import type { DashboardFilter } from "./components/DashboardView";
 import { gitFetch, gitPull, gitPush, gitStash, getSettings, onDragDropEnter, onDragDropLeave, onDragDropResult, logOperation } from "./lib/tauri";
 import { useTranslation } from "react-i18next";
-import { Modal, scrimAnimation } from "./components/ui/primitives";
+import { Modal } from "./components/ui/primitives";
 
 export default function App() {
   const { t } = useTranslation();
@@ -69,6 +72,10 @@ export default function App() {
     name: string;
   } | null>(null);
   const [showSidebar, setShowSidebar] = useState(() => localStorage.getItem("showSidebar") === "true");
+  // Sidebar visibility is plain mount-gating now — the View Transition API
+  // (wired in handleToggleSidebar) captures old/new states and FLIPs the
+  // sidebar + main area via GPU-composited transforms, so no width keyframe
+  // or usePresence exit timer is needed.
   const [activeGroup, setActiveGroup] = useState<string | null>(() => localStorage.getItem("activeGroup"));
   const [sortBy, setSortBy] = useState<SortOption>("custom");
   const [exportImportOpen, setExportImportOpen] = useState(false);
@@ -383,10 +390,15 @@ export default function App() {
   }, [removeProject, t]);
 
   const handleAddProject = useCallback(() => setDialogOpen(true), []);
-  const handleToggleSidebar = useCallback(() => setShowSidebar((s) => {
-    localStorage.setItem("showSidebar", String(!s));
-    return !s;
-  }), []);
+  // Sidebar toggle — always-mounted aside animates via CSS width (wide)
+  // or translateX (narrow), so this is just a plain state flip.
+  const handleToggleSidebar = useCallback(() => {
+    setShowSidebar((s) => {
+      const next = !s;
+      localStorage.setItem("showSidebar", String(next));
+      return next;
+    });
+  }, []);
   const handleGroupChange = useCallback((groupId: string | null) => {
     setActiveGroup(groupId);
     if (groupId) {
@@ -410,6 +422,11 @@ export default function App() {
   }, [notifySettingsChanged]);
   const handleOpenShortcutsHelp = useCallback(() => setShortcutsHelpOpen(true), []);
   const handleOpenQuickDiff = useCallback(() => setQuickDiffOpen(true), []);
+  // Keyboard-driven counterparts: Cmd+/ and Cmd+D toggle, matching what the
+  // chord already did in the old inline handler (open-only made it impossible
+  // to close the panel from the keyboard).
+  const handleToggleShortcutsHelp = useCallback(() => setShortcutsHelpOpen((v) => !v), []);
+  const handleToggleQuickDiff = useCallback(() => setQuickDiffOpen((v) => !v), []);
   const handleCloseQuickDiff = useCallback(() => setQuickDiffOpen(false), []);
   const handleOpenBuiltInTerminal = useCallback((path: string, title: string) => {
     setTerminalInitial({ cwd: path, title });
@@ -511,11 +528,25 @@ export default function App() {
 
   const handleReorder = useCallback(async (orderedIds: string[]) => {
     try {
-      await reorderProjects(orderedIds);
+      let idsToSave = orderedIds;
+      // When a group is active, `orderedIds` only covers the visible group
+      // subset (ProjectGrid operates on the filtered list). Saving that
+      // subset directly would assign duplicate `sort_order` values against
+      // untouched projects from other groups. Merge the visible order back
+      // into the full global order by filling the group's global slots.
+      if (activeGroup) {
+        let vi = 0;
+        idsToSave = projectsRef.current.map((p) =>
+          p.project.group_id === activeGroup
+            ? (orderedIds[vi++] ?? p.project.id)
+            : p.project.id
+        );
+      }
+      await reorderProjects(idsToSave);
     } catch {
       // Error already handled in useProjects
     }
-  }, [reorderProjects]);
+  }, [reorderProjects, activeGroup]);
 
   const handleFetchProject = useCallback(async (path: string) => {
     try {
@@ -589,32 +620,38 @@ export default function App() {
   // Keyboard shortcuts — Escape stays here (closes multiple dialogs)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (isShortcutCapturing()) return;
       const tag = (e.target as HTMLElement).tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+      // A modifier chord only counts while nothing else is still held down
+      // (`Ctrl` `z` `1` must not be `Ctrl+1`). Bare keys/Escape are unaffected.
+      const chordClean = !isDirtyChord(e);
 
       // View mode shortcuts: Ctrl/Cmd+1 through Ctrl/Cmd+5
       if (e.ctrlKey || e.metaKey) {
         const viewModes: ViewMode[] = ["card", "list", "compact", "table", "dashboard"];
         const num = parseInt(e.key, 10);
+        const isChord =
+          (num >= 1 && num <= 5) ||
+          (e.key === "r" && !e.shiftKey) ||
+          (e.shiftKey && e.key === "G");
+
+        // A dirty chord is swallowed, not reinterpreted: it must neither run
+        // our action nor fall through to the webview's native Cmd+R reload.
+        if (!chordClean && isChord) {
+          e.preventDefault();
+          return;
+        }
+
         if (num >= 1 && num <= 5) {
           e.preventDefault();
           setViewMode(viewModes[num - 1]);
           return;
         }
 
-        // Cmd+/ — toggle keyboard shortcuts help
-        if (e.key === "/" ) {
-          e.preventDefault();
-          setShortcutsHelpOpen((v) => !v);
-          return;
-        }
-
-        // Cmd+D — quick diff overview
-        if (e.key === "d" ) {
-          e.preventDefault();
-          setQuickDiffOpen((v) => !v);
-          return;
-        }
+        // Cmd+/ (shortcuts help) and Cmd+D (quick diff) are owned by the
+        // rebindable table in useKeyboardShortcuts, which toggles them.
 
         // Cmd+R — refresh all projects
         if (e.key === "r" && !e.shiftKey) {
@@ -632,8 +669,33 @@ export default function App() {
       }
 
       // Escape or Cmd+W closes whatever dialog/panel is open.
-      if (e.key === "Escape" || ((e.metaKey || e.ctrlKey) && e.key === "w")) {
-        if (e.key === "w") e.preventDefault();
+      const closingChord = (e.metaKey || e.ctrlKey) && e.key === "w";
+      if (e.key === "Escape" || closingChord) {
+        if (closingChord) {
+          // Dirty chord: keep Cmd+W away from the webview, but do not close.
+          if (!chordClean) {
+            e.preventDefault();
+            return;
+          }
+          // Nothing in-app to close: let Cmd+W reach the native menu
+          // (hide-to-tray) or the terminal-tab handler (capture runs first).
+          const anyDialogOpen =
+            dialogOpen ||
+            confirmDelete !== null ||
+            exportImportOpen ||
+            exportArchiveOpen ||
+            bulkImportOpen ||
+            settingsOpen ||
+            paletteOpen ||
+            shortcutsHelpOpen ||
+            quickDiffOpen ||
+            taskWorkspacesOpen ||
+            conflictResolvePath !== null ||
+            batchPickerOpen ||
+            terminalPanelOpen;
+          if (!anyDialogOpen) return;
+          e.preventDefault();
+        }
         setDialogOpen(false);
         setConfirmDelete(null);
         setExportImportOpen(false);
@@ -651,11 +713,12 @@ export default function App() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [setViewMode, refreshAll, fetchAll, handleCloseTerminalPanel]);
+  }, [setViewMode, refreshAll, fetchAll, handleCloseTerminalPanel, dialogOpen, confirmDelete, exportImportOpen, exportArchiveOpen, bulkImportOpen, settingsOpen, paletteOpen, shortcutsHelpOpen, quickDiffOpen, taskWorkspacesOpen, conflictResolvePath, batchPickerOpen, terminalPanelOpen]);
 
   // Project keyboard navigation (↑/↓/Enter/Space)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (isShortcutCapturing()) return;
       const el = e.target as HTMLElement;
       if (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable) return;
       // Skip if any dialog or palette is open
@@ -694,15 +757,54 @@ export default function App() {
     if (el) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [focusIndex]);
 
-  useKeyboardShortcuts({
-    onAddProject: handleAddProject,
-    onRefreshAll: refreshAll,
-    onToggleSidebar: handleToggleSidebar,
-    onExportImport: handleOpenExportImport,
-    onToggleCommandPalette: togglePalette,
-    onOpenShortcutsHelp: handleOpenShortcutsHelp,
-    onToggleQuickDiff: handleOpenQuickDiff,
-  });
+  const [inAppBindings, setInAppBindings] = useState<Partial<Record<ActionId, string>>>({});
+  const [globalTerminalHotkey, setGlobalTerminalHotkey] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      getSettings()
+        .then((s: AppSettings) => {
+          if (cancelled) return;
+          const next: Partial<Record<ActionId, string>> = {};
+          if (s.in_app_add_project) next.addProject = s.in_app_add_project;
+          if (s.in_app_refresh_all) next.refreshAll = s.in_app_refresh_all;
+          if (s.in_app_focus_search) next.focusSearch = s.in_app_focus_search;
+          if (s.in_app_export_import) next.exportImport = s.in_app_export_import;
+          if (s.in_app_toggle_sidebar) next.toggleSidebar = s.in_app_toggle_sidebar;
+          if (s.in_app_command_palette) next.commandPalette = s.in_app_command_palette;
+          if (s.in_app_shortcuts_help) next.shortcutsHelp = s.in_app_shortcuts_help;
+          if (s.in_app_quick_diff) next.quickDiff = s.in_app_quick_diff;
+          if (s.in_app_navigate_down) next.navigateDown = s.in_app_navigate_down;
+          if (s.in_app_navigate_up) next.navigateUp = s.in_app_navigate_up;
+          if (s.in_app_select_focused) next.selectFocused = s.in_app_select_focused;
+          if (s.in_app_toggle_terminal) next.toggleTerminal = s.in_app_toggle_terminal;
+          setInAppBindings(next);
+          setGlobalTerminalHotkey(s.terminal_hotkey ?? "");
+        })
+        .catch(() => {});
+    };
+    load();
+    const unlisten = listen("settings-changed", load);
+    return () => {
+      cancelled = true;
+      unlisten.then((f) => f());
+    };
+  }, [settingsVersion]);
+
+  useKeyboardShortcuts(
+    {
+      onAddProject: handleAddProject,
+      onRefreshAll: refreshAll,
+      onToggleSidebar: handleToggleSidebar,
+      onExportImport: handleOpenExportImport,
+      onToggleCommandPalette: togglePalette,
+      onToggleShortcutsHelp: handleToggleShortcutsHelp,
+      onToggleQuickDiff: handleToggleQuickDiff,
+      onToggleTerminal: handleToggleTerminalPanel,
+    },
+    inAppBindings,
+    globalTerminalHotkey
+  );
 
   const projectActions = useMemo(
     () => ({
@@ -752,30 +854,47 @@ export default function App() {
 
       <ProjectProvider value={projectActions}>
         <div
-          className="flex flex-1 min-w-0 overflow-hidden p-[var(--panel-gap)] gap-[var(--panel-gap)]"
+          className={`flex flex-1 min-w-0 overflow-hidden p-[var(--panel-gap)] transition-[gap] duration-300 ease-[var(--ease-spring)] ${
+            showSidebar ? "gap-[var(--panel-gap)]" : "gap-0"
+          }`}
         >
-          {/* Sidebar: docked on wide windows, drawer on narrow windows. */}
-          {showSidebar && (
-            <>
-              <button
-                type="button"
-                className={`fixed inset-0 top-[var(--titlebar-h)] z-30 bg-black/30 lg:hidden ${scrimAnimation}`}
-                aria-label={t("app.closeSidebar")}
-                onClick={handleToggleSidebar}
+          {/* Sidebar: docked on wide windows, drawer on narrow windows.
+              The aside is always mounted so its width/transform can be
+              CSS-transitioned — no mount/unmount flicker. On wide screens
+              the outer width animates 0↔14rem while the inner content stays
+              a fixed 14rem (clipped by overflow-hidden), so the sidebar's
+              list never reflows mid-animation. On narrow screens the aside
+              slides as a fixed overlay via translate-x. */}
+          <button
+            type="button"
+            className={`fixed inset-0 top-[var(--titlebar-h)] z-30 bg-black/30 transition-opacity duration-300 ease-[var(--ease-out-soft)] lg:hidden ${
+              showSidebar ? "opacity-100" : "pointer-events-none opacity-0"
+            }`}
+            aria-hidden={!showSidebar}
+            aria-label={t("app.closeSidebar")}
+            onClick={handleToggleSidebar}
+          />
+          <aside
+            className={`app-panel fixed bottom-[var(--panel-gap)] left-[var(--panel-gap)] top-[calc(var(--titlebar-h)+var(--panel-gap))] z-40 w-72 max-w-[85vw] overflow-hidden transition-transform duration-300 ease-[var(--ease-spring)] lg:relative lg:bottom-auto lg:left-auto lg:top-auto lg:z-auto lg:max-w-none lg:translate-x-0 lg:transition-[width] lg:duration-300 lg:ease-[var(--ease-spring)] lg:shrink-0 ${
+              showSidebar
+                ? "translate-x-0 lg:w-56"
+                : "-translate-x-full pointer-events-none lg:w-0"
+            }`}
+          >
+            <div className="h-full w-72 overflow-y-auto p-4 lg:w-56">
+              <ProjectGroupsPanel
+                activeGroup={activeGroup}
+                onGroupChange={handleGroupChange}
+                onSuccess={toast.success}
+                onError={toast.error}
               />
-              <aside className="app-panel fixed bottom-[var(--panel-gap)] left-[var(--panel-gap)] top-[calc(var(--titlebar-h)+var(--panel-gap))] z-40 w-72 max-w-[85vw] overflow-y-auto p-4 animate-[drawerIn_280ms_var(--ease-spring)] lg:relative lg:bottom-auto lg:left-auto lg:top-auto lg:z-auto lg:w-56 lg:max-w-none lg:shrink-0 lg:animate-none">
-                <ProjectGroupsPanel
-                  activeGroup={activeGroup}
-                  onGroupChange={handleGroupChange}
-                  onSuccess={toast.success}
-                  onError={toast.error}
-                />
-              </aside>
-            </>
-          )}
+            </div>
+          </aside>
 
         {/* Main area: toolbar + content */}
-        <div className="relative flex-1 min-w-0 flex flex-col overflow-hidden gap-[var(--panel-gap)]">
+        <div
+          className="relative flex-1 min-w-0 flex flex-col overflow-hidden gap-[var(--panel-gap)]"
+        >
           {/* Menu bar — 流内 header 面板，内容不再从其下方滚过 */}
           <div className="app-panel shrink-0 z-20">
             <Header
@@ -842,7 +961,7 @@ export default function App() {
                   onAddProject={handleAddProject}
                   onBulkImport={handleOpenBulkImport}
                   onDashboardDrillDown={handleDashboardDrillDown}
-                  onReorder={!searchQuery.trim() && !activeGroup && sortBy === "custom" ? handleReorder : undefined}
+                  onReorder={!searchQuery.trim() && activeFilter === "all" && sortBy === "custom" ? handleReorder : undefined}
                   focusedIndex={focusIndex}
                 />
               </ScrollParentProvider>

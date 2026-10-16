@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { PROJECT_COLORS } from "../lib/types";
 import { popoverAnimation } from "./ui/primitives";
+import { isShortcutCapturing } from "../lib/shortcutCapture";
 
 interface ColorPickerProps {
   currentColor?: string;
@@ -60,6 +61,7 @@ export const ColorPicker = memo(function ColorPicker({
       setOpen(false);
     };
     const handleKey = (e: KeyboardEvent) => {
+      if (isShortcutCapturing()) return;
       if (e.key === "Escape") setOpen(false);
     };
     document.addEventListener("mousedown", handleClick);

@@ -27,11 +27,17 @@ import {
 } from "../lib/terminalTabs";
 import { useTranslation } from "react-i18next";
 import { Modal, DropdownMenu, MenuItem, KbdBadge } from "./ui/primitives";
+import { buildPickerItems, type PickerItem } from "../lib/scriptPicker";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { SelectDropdown } from "./ui/SelectDropdown";
 import { CloseIcon, PlusIcon, TerminalIcon } from "./ui/icons";
 import { ContextMenu, MenuSeparator } from "./ui/ContextMenu";
 import { useContextMenu } from "../hooks/useContextMenu";
+import { isShortcutCapturing } from "../lib/shortcutCapture";
+import { isDirtyChord } from "../lib/heldKeys";
+
+/** The keys this workspace claims as its own Cmd/Ctrl chords. */
+const WORKSPACE_CHORD_CODE = /^(Key[NW]|Arrow(Up|Down|Left|Right)|Digit[1-9])$/;
 
 const HOME_TARGET = "__home__";
 
@@ -56,11 +62,15 @@ interface TerminalWorkspaceProps {
   headerExtra?: ReactNode;
   /** Render the header as the window title bar: draggable, red-light inset. */
   headerDraggable?: boolean;
+  /** Hide the header row entirely (the host window draws the title itself). */
+  hideHeader?: boolean;
 }
 
 interface TerminalCanvasProps {
   id: string;
   active: boolean;
+  /** Replay the pane entrance on the wrapper (xterm node itself never animates). */
+  animateIn?: boolean;
   onAttach: (id: string, container: HTMLElement) => void;
   onDetach: (id: string) => void;
   onFit: (id: string) => void;
@@ -70,6 +80,7 @@ interface TerminalCanvasProps {
 const TerminalCanvas = memo(function TerminalCanvas({
   id,
   active,
+  animateIn,
   onAttach,
   onDetach,
   onFit,
@@ -93,11 +104,147 @@ const TerminalCanvas = memo(function TerminalCanvas({
   }, [id, active, onFit]);
 
   return (
+    /* Inset within the padded pane wrapper: the canvas measures this box, so
+       xterm's cols/rows already account for the panel's rounded corners. */
     <div
       ref={containerRef}
+      data-testid={`terminal-canvas-${id}`}
       onContextMenu={onContextMenu}
-      className={`absolute inset-0 ${active ? "" : "hidden"}`}
+      className={`absolute inset-2 ${active ? "" : "hidden"}${animateIn && active ? " term-pane-in" : ""}`}
     />
+  );
+});
+
+/** Global empty canvas (D scheme: C+B combined): up to 3 recent projects in
+ * a horizontal card grid, each with its own quick-run commands.
+ * sessions[] === 0 only — per-project empty is unreachable (project keys
+ * derive from sessions). Each card = project header (name + path) + up to 2
+ * quick-run commands (listCustomCommands + listProjectScripts for that cwd)
+ * + an "open terminal" button for a blank terminal in that cwd. No expand
+ * state, no new storage: reuses the sidebar ▶ data path and the existing
+ * project list, sorted by last_active_at desc at the call site and capped
+ * at 3). */
+const TerminalBlankSlate = memo(function TerminalBlankSlate({
+  projects,
+  fallbackTitle,
+  opening,
+  onNew,
+  onQuickRun,
+}: {
+  projects: { cwd: string; title: string }[];
+  fallbackTitle: string;
+  opening: boolean;
+  onNew: (cwd: string, projectTitle: string) => void;
+  onQuickRun: (cwd: string, projectTitle: string, item: PickerItem) => void;
+}) {
+  const { t } = useTranslation();
+  const [items, setItems] = useState<Record<string, PickerItem[]>>({});
+  const shown = projects.slice(0, 3);
+
+  useEffect(() => {
+    let cancelled = false;
+    setItems({});
+    if (shown.length === 0) return;
+    // One combined fetch: saved commands once, scripts per project.
+    api
+      .listCustomCommands()
+      .then((saved) =>
+        Promise.all(
+          shown.map((p) =>
+            (p.cwd ? api.listProjectScripts(p.cwd) : Promise.resolve([] as never[]))
+              .then((scripts) => ({ cwd: p.cwd, items: buildPickerItems(saved, scripts, p.cwd).slice(0, 2) }))
+              .catch(() => ({ cwd: p.cwd, items: [] as PickerItem[] }))
+          )
+        )
+      )
+      .then((rows) => {
+        if (cancelled) return;
+        const next: Record<string, PickerItem[]> = {};
+        for (const r of rows) next[r.cwd] = r.items;
+        setItems(next);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+    // shown is derived from projects (slice); depend on the stable source.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projects]);
+
+  return (
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 py-6 text-center overflow-y-auto">
+      <span
+        aria-hidden="true"
+        className="w-11 h-11 shrink-0 rounded-2xl bg-[var(--surface-1)] border border-[var(--border-color)] flex items-center justify-center text-lg animate-[terminal-blank-float_3.2s_ease-in-out_infinite]"
+      >
+        ◧
+      </span>
+      <span className="text-sm text-gray-400">{t("terminal.noTerminals")}</span>
+      {shown.length === 0 ? (
+        <button
+          type="button"
+          onClick={() => onNew("", fallbackTitle)}
+          disabled={opening}
+          className="press px-3 py-1.5 text-xs rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white transition-colors disabled:opacity-50"
+        >
+          {t("terminal.newTerminalButton")}
+        </button>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 w-full max-w-2xl">
+          {shown.map((p, ci) => {
+            const cmds = items[p.cwd] ?? [];
+            return (
+              <div
+                key={p.cwd || p.title}
+                style={{ animationDelay: `${ci * 80}ms` }}
+                className="rounded-2xl border border-[var(--border-color)] bg-[var(--surface-1)] hover:border-[var(--accent)] hover:-translate-y-0.5 hover:shadow-lg p-3.5 flex flex-col gap-2.5 text-left transition-all animate-[terminal-chip-in_380ms_var(--ease-jelly)_backwards]"
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <span
+                    aria-hidden="true"
+                    className="w-7 h-7 shrink-0 rounded-lg bg-[var(--surface-2)] flex items-center justify-center text-sm"
+                  >
+                    ◧
+                  </span>
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-xs font-bold text-gray-800 dark:text-gray-100 truncate">
+                      {p.title}
+                    </span>
+                    <span className="block text-[10.5px] font-mono text-gray-400 truncate">
+                      {p.cwd}
+                    </span>
+                  </span>
+                </div>
+                {cmds.length > 0 && (
+                  <div className="flex flex-col gap-1.5">
+                    {cmds.map((item) => (
+                      <button
+                        key={`${item.kind}:${item.name}:${item.command}`}
+                        type="button"
+                        onClick={() => onQuickRun(p.cwd, p.title, item)}
+                        title={item.command}
+                        className="press w-full inline-flex items-center gap-1.5 text-[11px] font-mono rounded-lg px-2.5 py-1.5 border border-[var(--border-color)] hover:bg-[var(--surface-2)] text-gray-700 dark:text-gray-200 transition-colors"
+                      >
+                        <span aria-hidden="true" className="text-emerald-500 text-[9px] shrink-0">▶</span>
+                        <span className="truncate">{item.command}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => onNew(p.cwd, p.title)}
+                  disabled={opening}
+                  className="press mt-auto w-full text-[11.5px] font-semibold rounded-lg px-2.5 py-1.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white transition-colors disabled:opacity-50"
+                >
+                  {t("terminal.newTerminalButton")}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 });
 
@@ -108,6 +255,7 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
   onClose,
   headerExtra,
   headerDraggable,
+  hideHeader,
 }: TerminalWorkspaceProps) {
   const {
     sessions,
@@ -158,6 +306,56 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
   const consumedInitial = useRef<TerminalLaunchTarget | null>(null);
   const consumedWorkspace = useRef<number | null>(null);
   const [newMenuSignal, setNewMenuSignal] = useState(0);
+  // Quick-run commands per project cwd: hover preloads them so the ▶ menu
+  // opens instantly. Project scripts come from manifest analysis
+  // (package.json/Makefile/justfile), saved ones are user-stored per project.
+  const [quickItems, setQuickItems] = useState<Record<string, PickerItem[]>>({});
+  const quickLoading = useRef<Set<string>>(new Set());
+
+  const tabbarRef = useRef<HTMLDivElement | null>(null);
+  // Newly opened tabs pop in once (jelly tabIn). Render happens before the
+  // effect that records the new id, so the effect bumps a tick to re-render
+  // with the class; render consumes the id so a later re-render (e.g. title
+  // update) never replays the entrance.
+  const newTabIds = useRef<Set<string>>(new Set());
+  const [, setNewTabTick] = useState(0);
+  // Reselect-squish tick per tab: clicking the active tab replays the jelly
+  // wobble on demand (keyed class), so the effect isn't birth-only.
+  const [tabSquish, setTabSquish] = useState<{ id: string; tick: number } | null>(null);
+  // Sliding indicator geometry, measured from the active tab's DOM box.
+  const [indicator, setIndicator] = useState({ left: 0, width: 0 });
+  const prevSessionIds = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const ids = new Set(sessions.map((s) => s.id));
+    let added = false;
+    for (const s of sessions) {
+      if (!prevSessionIds.current.has(s.id) && !newTabIds.current.has(s.id)) {
+        newTabIds.current.add(s.id);
+        added = true;
+      }
+    }
+    for (const id of [...newTabIds.current]) {
+      if (!ids.has(id)) newTabIds.current.delete(id);
+    }
+    prevSessionIds.current = ids;
+    if (added) setNewTabTick((t) => t + 1);
+  }, [sessions]);
+
+  const preloadQuickItems = useCallback((cwd: string) => {
+    if (!cwd || quickLoading.current.has(cwd)) return;
+    quickLoading.current.add(cwd);
+    Promise.all([api.listCustomCommands(), api.listProjectScripts(cwd)])
+      .then(([saved, scripts]) => {
+        setQuickItems((prev) =>
+          prev[cwd] ? prev : { ...prev, [cwd]: buildPickerItems(saved, scripts, cwd) }
+        );
+      })
+      .catch(() => {})
+      .finally(() => {
+        quickLoading.current.delete(cwd);
+      });
+  }, []);
 
   const dark =
     theme === "dark" ||
@@ -196,6 +394,31 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
     },
     [openTerminal]
   );
+
+  const handleQuickRun = useCallback(
+    (cwd: string, projectTitle: string, item: PickerItem) => {
+      void handleNewTerminal(cwd, projectTitle, item.name, item.command);
+    },
+    [handleNewTerminal]
+  );
+
+  // Slide the indicator to the active tab after paint, and keep it in view.
+  // Placed after activeGroup is declared (used only for the dep count).
+  const activeGroupLength = activeGroup.length;
+  useEffect(() => {
+    const bar = tabbarRef.current;
+    if (!bar || activeId == null) return;
+    const raf = requestAnimationFrame(() => {
+      const el = bar.querySelector<HTMLElement>(`[data-tab-id="${activeId}"]`);
+      if (!el) return;
+      setIndicator((prev) => {
+        const next = { left: el.offsetLeft, width: el.offsetWidth };
+        return prev.left === next.left && prev.width === next.width ? prev : next;
+      });
+      el.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [activeId, activeGroupLength]);
 
   useEffect(() => {
     if (!open || !initial || consumedInitial.current === initial) return;
@@ -248,7 +471,15 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
+      if (isShortcutCapturing()) return;
       if (e.metaKey && !e.ctrlKey && !e.altKey) {
+        // A chord that still has another key held must not fire. Swallow it
+        // only for the keys this handler owns, so a simultaneous Cmd+C/Cmd+A
+        // keeps its native meaning.
+        if (isDirtyChord(e)) {
+          if (WORKSPACE_CHORD_CODE.test(e.code)) e.preventDefault();
+          return;
+        }
         if (e.code === "KeyN") {
           e.preventDefault();
           e.stopPropagation();
@@ -256,6 +487,7 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
           return;
         }
         if (e.code === "KeyW") {
+          // No tabs: let it propagate (dialog-close or native hide).
           if (activeId == null) return;
           e.preventDefault();
           e.stopPropagation();
@@ -283,6 +515,7 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
         const digit = /^Digit([1-9])$/.exec(e.code);
         if (digit) {
           e.preventDefault();
+          if (isDirtyChord(e)) return;
           selectTerminalByIndex(Number(digit[1]) - 1);
         }
       }
@@ -486,8 +719,13 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
 
   return (
     <>
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--surface-1)]">
-      {/* Header — doubles as the window title bar in the summoned window */}
+    <div className="window-root flex h-full min-h-0 flex-col overflow-hidden">
+      {/* Header — edge-to-edge title band with only a bottom hairline.
+          Not rendered when the host window draws the title itself (the
+          summoned window puts it in the overlay bar next to the traffic
+          lights). The in-app panel (TerminalPanel) keeps this header with
+          its custom close button. */}
+      {!hideHeader && (
       <div
         className={`border-b border-[var(--border-color)] flex items-center gap-2.5 shrink-0 ${
           headerDraggable ? "app-titlebar h-[var(--titlebar-h)] px-3" : "px-4 py-2.5"
@@ -502,20 +740,30 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
           {headerExtra}
         </div>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label={t("common.close")}
-            className="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-          >
-            <CloseIcon />
-          </button>
+          {/* The summoned window renders native traffic lights in its own
+              overlay title bar, so its header close button would duplicate
+              the system one. The in-app panel has no traffic lights and
+              keeps its custom close button. */}
+          {!headerDraggable && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label={t("common.close")}
+              className="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+            >
+              <CloseIcon />
+            </button>
+          )}
         </div>
       </div>
+      )}
 
-      <div className="flex flex-1 min-h-0">
+      {/* Floating partitions (same kit as the main window): the sidebar and
+          the terminal column are app-panels over the window material with a
+          --panel-gap gutter. The header above stays edge-to-edge. */}
+      <div className="flex flex-1 min-h-0 gap-[var(--panel-gap)] p-[var(--panel-gap)]">
         {/* Project sidebar */}
-        <div className="w-52 shrink-0 border-r border-[var(--border-color)] flex flex-col">
+        <div className="app-panel w-52 shrink-0 flex flex-col overflow-hidden">
           <div className="px-3 pt-3 pb-1.5 flex items-center gap-1.5">
             <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
               {t("terminal.projects")}
@@ -552,26 +800,86 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
             {visibleKeys.map((key) => {
               const group = sessionsOfProject(state, key);
               const title = group[0]?.projectTitle || fallbackTitle;
-              const hasExited = group.some((s) => s.exited);
+              const cwd = group[0]?.cwd || "";
+              const hasLive = group.some((s) => !s.exited);
+              const isActive = key === activeProject;
+              const items = quickItems[cwd];
               return (
                 <div
                   key={key}
                   onClick={() => setActiveProject(key)}
                   onContextMenu={(e) => handleProjectContextMenu(e, key)}
-                  title={group[0]?.cwd || title}
-                  className={`group flex items-center gap-1.5 rounded-md px-2 py-1.5 cursor-pointer ${
-                    key === activeProject
-                      ? "bg-[var(--surface-2)]"
+                  onMouseEnter={() => preloadQuickItems(cwd)}
+                  onFocus={() => preloadQuickItems(cwd)}
+                  title={cwd || title}
+                  className={`group relative flex items-center gap-1.5 rounded-md px-2 py-1.5 cursor-pointer transition-all duration-200 hover:translate-x-0.5 active:scale-[0.98] ${
+                    isActive
+                      ? "bg-[var(--surface-2)] text-gray-900 dark:text-gray-100 font-semibold"
                       : "hover:bg-gray-100 dark:hover:bg-gray-800"
                   }`}
                 >
+                  {isActive && (
+                    <span
+                      aria-hidden="true"
+                      className="term-proj-rail absolute left-[-8px] top-[7px] bottom-[7px] w-[3px] rounded bg-[var(--accent)]"
+                    />
+                  )}
+                  <span
+                    aria-hidden="true"
+                    title={hasLive ? undefined : t("terminal.exited")}
+                    className={`w-[7px] h-[7px] rounded-full shrink-0 ${
+                      hasLive ? "bg-emerald-400 term-dot-live" : "bg-red-500"
+                    }`}
+                  />
                   <span className="flex-1 truncate text-xs text-gray-700 dark:text-gray-200">
                     {title}
                   </span>
-                  {hasExited && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" title={t("terminal.exited")} />
+                  {/* Quick-run ▶: fixed 20px slot, visibility-toggled so the
+                      count pill never shifts when it appears (preview .run).
+                      Hidden once loaded and confirmed empty — no shortcuts,
+                      no button. Stays visible while loading (items undefined)
+                      so hover-preload can still resolve. */}
+                  {!(items !== undefined && items.length === 0) && (
+                  <span className="shrink-0 w-5 h-5 inline-flex items-center justify-center invisible group-hover:visible group-focus-within:visible focus-within:visible">
+                    <DropdownMenu
+                      align="left"
+                      trigger={
+                        <button
+                          type="button"
+                          onClick={() => preloadQuickItems(cwd)}
+                          aria-label={t("terminal.quickRunAria", { title })}
+                          title={t("terminal.quickRun")}
+                          className="press w-5 h-5 inline-flex items-center justify-center rounded text-gray-400 hover:text-emerald-500 hover:bg-gray-200 dark:hover:bg-gray-700 transition-all active:scale-90 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                        >
+                          <svg aria-hidden="true" width="9" height="9" viewBox="0 0 16 16" fill="currentColor">
+                            <path d="M4 2.5v11l9-5.5-9-5.5Z" />
+                          </svg>
+                        </button>
+                      }
+                    >
+                    {items === undefined && (
+                      <div className="px-3 py-2 text-xs text-gray-400">{t("terminal.quickRunLoading")}</div>
+                    )}
+                    {items !== undefined && items.length === 0 && (
+                      <div className="px-3 py-2 text-xs text-gray-400">{t("terminal.quickRunEmpty")}</div>
+                    )}
+                    {items !== undefined &&
+                      items.map((item) => (
+                        <MenuItem
+                          key={`${item.kind}:${item.name}:${item.command}`}
+                          label={item.name}
+                          description={item.command}
+                          onClick={() => handleQuickRun(cwd, title, item)}
+                        />
+                      ))}
+                  </DropdownMenu>
+                  </span>
                   )}
-                  <span className="text-[10px] text-gray-400 tabular-nums shrink-0">
+                  <span className={`text-[10px] tabular-nums shrink-0 min-w-6 px-[7px] py-px rounded-full text-center ${
+                    isActive
+                      ? "bg-[var(--accent)] text-white"
+                      : "text-gray-400 bg-[var(--surface-2)]"
+                  }`}>
                     {group.length}
                   </span>
                 </div>
@@ -638,11 +946,26 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
         </div>
 
         {/* Terminals for the active project */}
-        <div className="flex-1 min-w-0 flex flex-col">
-          <div className="px-2 py-1.5 border-b border-[var(--border-color)] flex items-center gap-1.5 shrink-0 overflow-x-auto">
+        <div className="flex-1 min-w-0 flex flex-col gap-[var(--panel-gap)]">
+          {activeGroup.length > 0 && (
+          <div ref={tabbarRef} className="app-panel relative px-2 py-1.5 flex items-center gap-1.5 shrink-0 overflow-x-auto">
+            {activeGroup.length > 0 && (
+              <span
+                aria-hidden="true"
+                className="term-tab-indicator pointer-events-none absolute left-0 top-1.5 bottom-1.5 rounded-md bg-[var(--surface-2)] shadow-[inset_0_0_0_1px_var(--border-color)]"
+                style={{ transform: `translateX(${indicator.left}px)`, width: indicator.width }}
+              />
+            )}
             {activeGroup.map((s) => (
               <div
                 key={s.id}
+                data-tab-id={s.id}
+                onClick={() => {
+                  if (s.id === activeId) {
+                    setTabSquish((prev) => ({ id: s.id, tick: (prev?.tick ?? 0) + 1 }));
+                  }
+                  selectTerminal(s.id);
+                }}
                 onContextMenu={(e) => handleTabContextMenu(e, s)}
                 onMouseDown={(e) => {
                   if (e.button === 1) e.preventDefault();
@@ -651,20 +974,24 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
                   if (e.button === 1) void closeTerminal(s.id);
                 }}
                 title={t("terminal.middleClickClose", { path: s.cwd || s.title })}
-                className={`group flex items-center gap-1 rounded-md pl-2 pr-1 py-1 text-xs shrink-0 ${
+                className={`group relative z-[1] flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs shrink-0 min-w-0 max-w-[12rem] cursor-pointer transition-all duration-200 hover:-translate-y-px active:scale-[0.98] ${
+                  newTabIds.current.delete(s.id) ? "term-tab-new" : ""
+                }${
+                  tabSquish && tabSquish.id === s.id ? ` term-tab-squish tab-squish-${tabSquish.tick}` : ""
+                } ${
                   s.id === activeId
-                    ? "bg-[var(--surface-2)] text-gray-900 dark:text-gray-100 font-medium shadow-sm"
+                    ? "text-gray-900 dark:text-gray-100 font-medium"
                     : "text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
                 }`}
               >
                 <button
                   type="button"
                   onClick={() => selectTerminal(s.id)}
-                  className="flex items-center gap-1.5 max-w-[10rem]"
+                  className="flex items-center gap-1.5 max-w-[10rem] min-w-0 flex-1"
                 >
                   <span className="truncate">{s.title}</span>
                   {s.exited && (
-                    <span className="text-[9px] uppercase tracking-wide px-1 py-0.5 rounded bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400">
+                    <span className="text-[9px] uppercase tracking-wide px-1 py-0.5 rounded bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400 shrink-0">
                       {t("terminal.exitedBadge")}
                     </span>
                   )}
@@ -675,7 +1002,7 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
                     onClick={() => void restartTerminal(s.id)}
                     aria-label={t("terminal.restartAria", { title: s.title })}
                     title={t("terminal.restart")}
-                    className="p-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-400 transition-colors opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                    className="p-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-400 transition-colors opacity-0 group-hover:opacity-100 focus-visible:opacity-100 shrink-0"
                   >
                     <svg aria-hidden="true" width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
                       <path d="M8 2a6 6 0 106 6 .75.75 0 011.5 0A7.5 7.5 0 118 .5a.75.75 0 010 1.5z" />
@@ -687,7 +1014,7 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
                   type="button"
                   onClick={() => void closeTerminal(s.id)}
                   aria-label={t("terminal.closeAria", { title: s.title })}
-                  className="p-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-400 transition-colors"
+                  className="p-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-400 transition-colors shrink-0"
                 >
                   <CloseIcon size={10} />
                 </button>
@@ -715,6 +1042,7 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
               </span>
             )}
           </div>
+          )}
 
           {error && (
             <div className="px-4 py-1.5 text-xs text-red-500 border-b border-[var(--border-color)] shrink-0">
@@ -722,32 +1050,49 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
             </div>
           )}
 
-          {/* All sessions stay mounted so every project keeps its scrollback */}
-          <div className="relative flex-1 min-h-0 bg-[var(--surface-2)]">
+          {/* All sessions stay mounted so every project keeps its scrollback.
+              sessions[] === 0 is reachable (fresh window, or after Kill All):
+              show the global empty state. Per-project empty (activeGroup empty
+              while sessions exist) can't happen — project keys derive from
+              sessions and applySessions always retargets activeProject — so
+              there is no per-project empty branch.
+              The animation must not remount the xterm containers:
+              TerminalCanvas attach/dispose is tied to mount, so a keyed
+              remount per tab switch would destroy the view under it. Only
+              the active session's wrapper carries the entrance class.
+              inset-2: the panel's rounded corners would otherwise clip the
+              terminal's edge cells (prompt char, scrollbar). */}
+          <div className="app-panel relative flex-1 min-h-0 overflow-hidden">
             {sessions.length === 0 ? (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
-                <span className="text-sm text-gray-400">{t("terminal.noTerminals")}</span>
-                <button
-                  type="button"
-                  onClick={() => void handleNewTerminal("", fallbackTitle)}
-                  disabled={opening}
-                  className="px-3 py-1.5 text-xs rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white transition-colors disabled:opacity-50"
-                >
-                  {t("terminal.newTerminalButton")}
-                </button>
-              </div>
+              <TerminalBlankSlate
+                projects={[...projects]
+                  .sort((a, b) =>
+                    (b.project.last_active_at ?? "").localeCompare(a.project.last_active_at ?? "")
+                  )
+                  .map((p) => ({
+                    cwd: p.project.path,
+                    title: p.project.name,
+                  }))}
+                fallbackTitle={fallbackTitle}
+                opening={opening}
+                onNew={(cwd, title) => void handleNewTerminal(cwd, title)}
+                onQuickRun={handleQuickRun}
+              />
             ) : (
-              sessions.map((s) => (
+              <div className="absolute inset-0">
+              {sessions.map((s) => (
                 <TerminalCanvas
                   key={s.id}
                   id={s.id}
                   active={s.id === activeId}
+                  animateIn={s.id === activeId}
                   onAttach={attachTerminal}
                   onDetach={detachTerminal}
                   onFit={fitTerminal}
                   onContextMenu={handleCanvasContextMenu}
                 />
-              ))
+              ))}
+              </div>
             )}
           </div>
         </div>

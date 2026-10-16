@@ -61,6 +61,8 @@ vi.mock("../lib/tauri", () => ({
   terminalResize: vi.fn(() => Promise.resolve()),
   terminalClose: vi.fn(() => Promise.resolve()),
   listRunPresets: vi.fn(() => Promise.resolve([])),
+  listCustomCommands: vi.fn(() => Promise.resolve([])),
+  listProjectScripts: vi.fn(() => Promise.resolve([])),
   listProjects: vi.fn(() => Promise.resolve([])),
   openInFinder: vi.fn(),
   openInTerminal: vi.fn(),
@@ -118,10 +120,9 @@ beforeEach(() => {
 async function activeCanvas(): Promise<HTMLElement> {
   render(<TerminalWorkspace open initial={null} workspaceLaunch={null} onClose={() => {}} />);
   return waitFor(() => {
-    // The canvas div carries exactly [absolute, inset-0] when active (the
-    // empty-state placeholder shares `absolute inset-0` but has more classes).
-    const active = Array.from(document.querySelectorAll<HTMLDivElement>("div.absolute.inset-0")).find(
-      (el) => el.classList.length === 2
+    // t2 is the active session (applySessions picks the last of the group).
+    const active = document.querySelector<HTMLElement>(
+      '[data-testid="terminal-canvas-t2"]'
     );
     expect(active).toBeTruthy();
     return active as HTMLElement;

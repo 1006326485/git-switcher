@@ -31,10 +31,11 @@ export function useProjectRow({ detail, onSwitchBranch, onRefresh, onRemove, onC
 
   const handleSwitch = useCallback(
     async (branch: string) => {
-      // Check for uncommitted changes before switching
-      const hasChanges = status.modified > 0 || status.untracked > 0;
+      // Check for uncommitted changes before switching (staged counts too —
+      // a pure-staged change would otherwise bypass the confirm dialog).
+      const hasChanges = status.modified > 0 || status.staged > 0 || status.untracked > 0;
       if (hasChanges && onConfirmDirtySwitch) {
-        const proceed = await onConfirmDirtySwitch(branch, status.modified, status.untracked);
+        const proceed = await onConfirmDirtySwitch(branch, status.modified + status.staged, status.untracked);
         if (!proceed) return;
       }
 
@@ -50,7 +51,7 @@ export function useProjectRow({ detail, onSwitchBranch, onRefresh, onRemove, onC
         setSwitchingTo(null);
       }
     },
-    [project.path, status.modified, status.untracked, onSwitchBranch, onConfirmDirtySwitch]
+    [project.path, status.modified, status.staged, status.untracked, onSwitchBranch, onConfirmDirtySwitch]
   );
 
   const handleGitRefresh = useCallback(async () => {

@@ -1,10 +1,17 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { AppSettings, Theme } from "../lib/types";
-import { getSettings, updateSettings } from "../lib/tauri";
+import { getSettings, updateSettingsPartial } from "../lib/tauri";
 
 const STORAGE_KEY = "git-switcher-theme";
 
-function applyTheme(t: Theme) {
+/** Window event bridging independent useTheme instances + settings UI. */
+export const THEME_CHANGE_EVENT = "git-switcher:theme-change";
+
+export function broadcastThemeChange(t: Theme) {
+  window.dispatchEvent(new CustomEvent<Theme>(THEME_CHANGE_EVENT, { detail: t }));
+}
+
+export function applyTheme(t: Theme) {
   const root = document.documentElement;
   // Disable transitions during theme switch
   root.classList.add("no-transition");
@@ -49,16 +56,12 @@ export function useTheme() {
   const setTheme = useCallback(async (newTheme: Theme) => {
     setThemeState(newTheme);
     applyTheme(newTheme);
+    broadcastThemeChange(newTheme);
     // Serialize writes to prevent race condition
     pendingRef.current = pendingRef.current.then(async () => {
       try {
-        if (settingsRef.current) {
-          settingsRef.current.theme = newTheme;
-        } else {
-          settingsRef.current = await getSettings();
-          settingsRef.current.theme = newTheme;
-        }
-        await updateSettings(settingsRef.current);
+        const updated = await updateSettingsPartial({ theme: newTheme });
+        settingsRef.current = updated;
       } catch (e) {
         console.error("Failed to persist theme:", e);
       }
@@ -72,6 +75,22 @@ export function useTheme() {
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);
   }, [theme]);
+
+  // Converge independent hook instances (e.g. TerminalWorkspace's own
+  // useTheme): a theme applied anywhere re-syncs this instance's state.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const next = (e as CustomEvent<Theme>).detail;
+      if (next) {
+        settingsRef.current = settingsRef.current
+          ? { ...settingsRef.current, theme: next }
+          : settingsRef.current;
+        setThemeState(next);
+      }
+    };
+    window.addEventListener(THEME_CHANGE_EVENT, handler);
+    return () => window.removeEventListener(THEME_CHANGE_EVENT, handler);
+  }, []);
 
   return { theme, setTheme };
 }

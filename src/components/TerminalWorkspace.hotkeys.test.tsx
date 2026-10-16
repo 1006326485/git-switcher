@@ -14,6 +14,8 @@ vi.mock("../lib/tauri", () => ({
   terminalResize: vi.fn(),
   terminalClose: vi.fn(),
   listRunPresets: vi.fn(() => Promise.resolve([])),
+  listCustomCommands: vi.fn(() => Promise.resolve([])),
+  listProjectScripts: vi.fn(() => Promise.resolve([])),
   listProjects: vi.fn(() =>
     Promise.resolve([
       {
@@ -77,7 +79,8 @@ describe("TerminalWorkspace hotkeys", () => {
     fireEvent.keyDown(document, { key: "n", code: "KeyN", metaKey: true });
 
     expect(await screen.findByRole("listbox")).toBeInTheDocument();
-    expect(await screen.findByText("demo")).toBeInTheDocument();
+    // "demo" also renders in the blank-slate project row — scope to the dropdown.
+    expect(await screen.findByRole("listbox")).toHaveTextContent("demo");
   });
 
   it("Cmd+W closes the active terminal tab", async () => {

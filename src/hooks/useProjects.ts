@@ -204,12 +204,29 @@ export function useProjects(toast?: ToastApi, activeGroup?: string | null) {
         let changed = false;
         const next = data.map((d) => {
           const old = prevMap.get(d.project.path);
+          // Branch identity must be compared by content, not just count: an
+          // external tool may add/remove/rename branches or flip merge state
+          // while current_branch and length stay the same.
+          const branchesEqual =
+            old !== undefined &&
+            old.branches.length === d.branches.length &&
+            old.branches.every(
+              (b, i) =>
+                b.name === d.branches[i]?.name &&
+                b.is_current === d.branches[i]?.is_current &&
+                b.is_remote === d.branches[i]?.is_remote &&
+                b.is_merged === d.branches[i]?.is_merged &&
+                b.is_tag === d.branches[i]?.is_tag
+            );
           if (old && old.current_branch === d.current_branch
             && old.status.modified === d.status.modified
             && old.status.staged === d.status.staged
             && old.status.untracked === d.status.untracked
             && old.status.ahead === d.status.ahead
             && old.status.behind === d.status.behind
+            && (old.status.is_merging ?? false) === (d.status.is_merging ?? false)
+            && old.stash_count === d.stash_count
+            && branchesEqual
             && old.project.last_commit_hash === d.project.last_commit_hash
             && old.project.group_id === d.project.group_id) {
             return old;

@@ -1,8 +1,12 @@
 pub mod commands;
 pub mod db;
+#[cfg(target_os = "macos")]
+pub mod dock;
 pub mod error;
 pub mod hotkeys;
 pub mod i18n;
+#[cfg(target_os = "macos")]
+pub mod macos_menu;
 pub mod models;
 pub mod services;
 
@@ -68,7 +72,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     } = event
                     {
                         let app = tray.app_handle();
-                        if let Some(window) = app.get_webview_window(hotkeys::MAIN_WINDOW_LABEL) {
+                        #[cfg(target_os = "macos")]
+                        {
+                            crate::dock::toggle_main(app);
+                        }
+                        #[cfg(not(target_os = "macos"))]
+                        if let Some(window) = app.get_webview_window(hotkeys::MAIN_WINDOW_LABEL)
+                        {
                             if window.is_visible().unwrap_or(false) {
                                 let _ = window.hide();
                             } else {
@@ -89,6 +99,12 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             crate::i18n::set_language(&language);
             commands::rebuild(app.handle());
 
+            // ── macOS app menu so Cmd+W hits CloseRequested (→ hide to tray) ──
+            #[cfg(target_os = "macos")]
+            if let Err(e) = macos_menu::install(app.handle()) {
+                log::warn!("macOS app menu unavailable: {}", e);
+            }
+
             // ── Menu event handler ────────────────────────────────────────
             app.on_menu_event(|app, event| {
                 commands::handle_tray_action(app, event.id().as_ref());
@@ -96,12 +112,16 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
             // ── Hide to tray instead of closing; retake the terminal spotlight ──
             if let Some(window) = app.get_webview_window(hotkeys::MAIN_WINDOW_LABEL) {
+                #[cfg(not(target_os = "macos"))]
                 let window_clone = window.clone();
                 let app_for_close = app.handle().clone();
                 let app_for_focus = app.handle().clone();
                 window.on_window_event(move |event| match event {
                     tauri::WindowEvent::CloseRequested { api, .. } => {
                         api.prevent_close();
+                        #[cfg(target_os = "macos")]
+                        crate::dock::hide_main_to_tray(&app_for_close);
+                        #[cfg(not(target_os = "macos"))]
                         let _ = window_clone.hide();
                         let _ = app_for_close.emit("window-hidden-to-tray", ());
                         // Project list / recency may have changed while the
@@ -476,6 +496,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     app.run(|app, event| {
         if let RunEvent::Exit = event {
             app.state::<commands::TerminalManager>().kill_all();
+        }
+        // Regular-state fallback: in Accessory (hidden to tray) Reopen never
+        // fires — Dock and switcher entries are gone. Kept so a Regular app
+        // with no visible windows still reopens on Dock click / Cmd+Tab.
+        #[cfg(target_os = "macos")]
+        if let RunEvent::Reopen { .. } = event {
+            crate::dock::show_main(app);
         }
     });
     Ok(())

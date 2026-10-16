@@ -2,6 +2,7 @@ import { memo } from "react";
 import { useTranslation } from "react-i18next";
 import type { StashInfo, TagInfo } from "../lib/types";
 import { ChipButton } from "./ui/ChipButton";
+import { Disclosure } from "./ui/primitives";
 
 interface GitOpsToolbarProps {
   // Loading state
@@ -161,8 +162,9 @@ export const GitOpsToolbar = memo(function GitOpsToolbar(props: GitOpsToolbarPro
         </ChipButton>
       </div>
 
-      {/* Stash list */}
-      {showStashList && (
+      {/* Stash list — Disclosure folds the grid row so the list grows out of
+          the trigger line instead of popping in mounted. */}
+      <Disclosure open={showStashList}>
         <div className="space-y-1 max-h-32 overflow-y-auto">
           {stashList.length === 0 ? (
             <p className="text-xs text-gray-400 dark:text-gray-500 italic">{t("gitops.noStash")}</p>
@@ -218,7 +220,7 @@ export const GitOpsToolbar = memo(function GitOpsToolbar(props: GitOpsToolbarPro
             ))
           )}
         </div>
-      )}
+      </Disclosure>
 
       {/* Tags section */}
       <div className="flex items-center gap-2 flex-wrap">
@@ -333,7 +335,7 @@ export const GitOpsToolbar = memo(function GitOpsToolbar(props: GitOpsToolbarPro
       </div>
 
       {/* Patch preview panel */}
-      {showPatchPanel && patchContent && (
+      <Disclosure open={showPatchPanel && !!patchContent}>
         <div className="rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 overflow-hidden">
           <div className="flex items-center justify-between px-3 py-1.5 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
             <span className="text-xs font-medium text-gray-600 dark:text-gray-400">{t("gitops.patchContent")}</span>
@@ -358,7 +360,7 @@ export const GitOpsToolbar = memo(function GitOpsToolbar(props: GitOpsToolbarPro
             {patchContent}
           </pre>
         </div>
-      )}
+      </Disclosure>
 
       {/* Clean section */}
       <div className="flex items-center gap-2 flex-wrap">
@@ -379,7 +381,7 @@ export const GitOpsToolbar = memo(function GitOpsToolbar(props: GitOpsToolbarPro
           {t("gitops.includeIgnored")}
         </label>
       </div>
-      {showCleanPreview && cleanFiles.length > 0 && (
+      <Disclosure open={showCleanPreview && cleanFiles.length > 0}>
         <div className="space-y-2 p-2 bg-red-50 dark:bg-red-900/10 rounded-lg border border-red-200 dark:border-red-800/30">
           <p className="text-xs font-medium text-red-700 dark:text-red-300">
             {t("gitops.cleanFiles", { count: cleanFiles.length })}
@@ -404,13 +406,13 @@ export const GitOpsToolbar = memo(function GitOpsToolbar(props: GitOpsToolbarPro
             </button>
           </div>
         </div>
-      )}
+      </Disclosure>
       {showCleanPreview && cleanFiles.length === 0 && (
         <p className="text-xs text-gray-500 italic">{t("gitops.noCleanFiles")}</p>
       )}
 
       {/* Tag list */}
-      {showTagList && (
+      <Disclosure open={showTagList}>
         <div className="space-y-1 max-h-32 overflow-y-auto">
           {tagList.length === 0 ? (
             <p className="text-xs text-gray-400 dark:text-gray-500 italic">{t("gitops.noTags")}</p>
@@ -447,10 +449,10 @@ export const GitOpsToolbar = memo(function GitOpsToolbar(props: GitOpsToolbarPro
             ))
           )}
         </div>
-      )}
+      </Disclosure>
 
       {/* Stash diff preview */}
-      {stashDiff !== null && stashDiffIndex !== null && (
+      <Disclosure open={stashDiff !== null && stashDiffIndex !== null}>
         <div className="mt-2 p-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-[var(--border-color)]">
           <div className="flex items-center justify-between mb-1">
             <span className="text-xs font-medium text-gray-700 dark:text-gray-300">{`${t("gitops.stashDiffPrefix")}{${stashDiffIndex}}${t("gitops.stashDiffSuffix")}`}</span>
@@ -458,7 +460,7 @@ export const GitOpsToolbar = memo(function GitOpsToolbar(props: GitOpsToolbarPro
           </div>
           <pre className="select-text text-xs font-mono overflow-x-auto max-h-48 overflow-y-auto whitespace-pre">{stashDiff}</pre>
         </div>
-      )}
+      </Disclosure>
     </>
   );
 });

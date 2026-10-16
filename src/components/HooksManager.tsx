@@ -115,7 +115,7 @@ export const HooksManager = memo(function HooksManager({ path, onSuccess, onErro
                     aria-label={t("hooks.toggleAria", { name: hook.name })}
                   >
                     <span
-                      className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform duration-200 mt-0.5 ${
+                      className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform duration-200 ease-[var(--ease-spring)] mt-0.5 ${
                         hook.active ? "translate-x-3.5 ml-0.5" : "translate-x-0.5"
                       }`}
                     />

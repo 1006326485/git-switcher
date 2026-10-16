@@ -30,7 +30,7 @@ function ActivityBar({ value, max }: { value: number; max: number }) {
   return (
     <div className="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
       <div
-        className="h-full bg-emerald-500 dark:bg-emerald-400 rounded-full transition-all duration-500"
+        className="h-full bg-emerald-500 dark:bg-emerald-400 rounded-full transition-[width] duration-500 ease-[var(--ease-spring)]"
         style={{ width: `${pct}%` }}
       />
     </div>

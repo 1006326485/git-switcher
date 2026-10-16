@@ -1,7 +1,10 @@
 import { memo, useState, useEffect, useCallback } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
 import * as api from "../lib/tauri";
-import type { Theme, ViewMode, SortOption } from "../lib/types";
+import type { AppSettings, Theme, ViewMode, SortOption } from "../lib/types";
+import { formatHotkey } from "../lib/hotkey";
+import { DEFAULT_IN_APP_SHORTCUTS } from "../lib/inAppShortcuts";
 import { SegmentedControl, DropdownMenu, MenuItem, IconButton } from "./ui/primitives";
 import { SearchIcon, PlusIcon, KebabIcon, TerminalIcon } from "./ui/icons";
 import { NotificationPanel } from "./NotificationPanel";
@@ -71,6 +74,9 @@ interface HeaderProps {
   onOpenShortcutsHelp: () => void;
 }
 
+const DEFAULT_SHORTCUTS_HELP_HOTKEY = DEFAULT_IN_APP_SHORTCUTS.shortcutsHelp;
+const DEFAULT_TERMINAL_HOTKEY = DEFAULT_IN_APP_SHORTCUTS.toggleTerminal;
+
 const viewOptions: { value: ViewMode; icon: string; labelKey: "header.viewMode.card" | "header.viewMode.list" | "header.viewMode.compact" | "header.viewMode.table" | "header.viewMode.dashboard" }[] = [
   { value: "card", icon: "⊞", labelKey: "header.viewMode.card" },
   { value: "list", icon: "☰", labelKey: "header.viewMode.list" },
@@ -133,6 +139,28 @@ export const Header = memo(function Header({
 }: HeaderProps) {
   const { t } = useTranslation();
   const currentSortLabel = SORT_OPTIONS.find((o) => o.value === sortBy)?.labelKey;
+  const [terminalHotkey, setTerminalHotkey] = useState(DEFAULT_TERMINAL_HOTKEY);
+  const [shortcutsHelpHotkey, setShortcutsHelpHotkey] = useState(DEFAULT_SHORTCUTS_HELP_HOTKEY);
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      api.getSettings()
+        .then((s: AppSettings) => {
+          if (cancelled) return;
+          setTerminalHotkey(s.in_app_toggle_terminal || DEFAULT_TERMINAL_HOTKEY);
+          setShortcutsHelpHotkey(s.in_app_shortcuts_help || DEFAULT_SHORTCUTS_HELP_HOTKEY);
+        })
+        .catch(() => {});
+    };
+    load();
+    const unlisten = listen("settings-changed", load);
+    return () => {
+      cancelled = true;
+      unlisten.then((f) => f());
+    };
+  }, []);
+  const terminalHint = `${t("header.actions.terminal")} (${formatHotkey(terminalHotkey)})`;
+  const shortcutsHint = `${t("header.actions.shortcuts")} (${formatHotkey(shortcutsHelpHotkey)})`;
   return (
     <div className="relative z-10 shrink-0 select-none px-3 sm:px-4">
       <div className="flex min-h-11 min-w-0 flex-wrap items-center gap-x-2 gap-y-2 py-2 xl:flex-nowrap">
@@ -256,14 +284,14 @@ export const Header = memo(function Header({
 
           {/* Built-in terminal */}
           <div className="hidden sm:block">
-          <IconButton onClick={onToggleTerminal} title={t("header.actions.terminal")} aria-label={t("header.actions.terminal")}>
+          <IconButton onClick={onToggleTerminal} title={terminalHint} aria-label={terminalHint}>
             <TerminalIcon size={16} />
           </IconButton>
           </div>
 
           {/* Shortcuts help */}
           <div className="hidden sm:block">
-          <IconButton onClick={onOpenShortcutsHelp} title={t("header.actions.shortcuts")} aria-label={t("header.actions.shortcuts")}>
+          <IconButton onClick={onOpenShortcutsHelp} title={shortcutsHint} aria-label={shortcutsHint}>
             <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
               <path d="M8 0a8 8 0 110 16A8 8 0 018 0zM5.46 4.77a.75.75 0 00-1.42.58A2.75 2.75 0 005.75 8h.75a.75.75 0 000-1.5h-.75a1.25 1.25 0 00-1.06 1.92c.24.36.6.66 1.01.86.58.28.99.86.99 1.47V11a.75.75 0 001.5 0v-.25c0-.88-.5-1.69-1.28-2.12-.56-.31-.93-.88-.93-1.51V6.75A1.25 1.25 0 006.06 4.77zM8 12.5a1 1 0 100 2 1 1 0 000-2z" />
             </svg>

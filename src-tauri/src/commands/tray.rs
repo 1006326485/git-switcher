@@ -221,6 +221,11 @@ pub fn handle_tray_action(app: &AppHandle, id: &str) {
     };
     match action {
         TrayAction::Show => {
+            #[cfg(target_os = "macos")]
+            {
+                crate::dock::show_main(app);
+            }
+            #[cfg(not(target_os = "macos"))]
             if let Some(window) = app.get_webview_window(crate::hotkeys::MAIN_WINDOW_LABEL) {
                 let _ = window.show();
                 let _ = window.set_focus();

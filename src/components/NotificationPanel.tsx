@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import * as api from "../lib/tauri";
 import type { GitNotification } from "../lib/types";
+import { popoverAnimation, popoverExitAnimation, usePresence } from "./ui/primitives";
 
 function formatRelativeTime(t: TFunction, timestamp: number): string {
   const now = Date.now() / 1000;
@@ -70,12 +71,17 @@ export const NotificationPanel = memo(function NotificationPanel({
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
   }, [notifications]);
 
-  if (!open) return null;
+  // 110ms popover exit shared with menus: the panel stays mounted one cycle
+  // after `open` turns false so popoverOut has a target. Origin top-right —
+  // the panel is anchored under the header's right-side bell.
+  const { present, closing } = usePresence(open, 110);
+
+  if (!present) return null;
 
   return (
     <div className="fixed inset-0 z-40" onClick={onClose}>
       <div
-        className="absolute right-4 top-12 w-80 max-h-96 bg-[var(--surface-1)] rounded-xl shadow-2xl border border-[var(--border-color)] flex flex-col overflow-hidden"
+        className={`absolute right-4 top-12 w-80 max-h-96 bg-[var(--surface-1)] rounded-xl shadow-2xl border border-[var(--border-color)] flex flex-col overflow-hidden origin-top-right ${closing ? popoverExitAnimation : popoverAnimation}`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

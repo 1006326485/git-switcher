@@ -54,7 +54,11 @@ const SIZE_CLASS: Record<ChipSize, string> = {
   xs: "px-2 py-0.5 rounded-lg text-xs font-medium",
 };
 
-const CHIP_BASE_CLASS = "disabled:opacity-50 transition-colors duration-150 active:scale-[0.98]";
+// `press` only sets duration/timing — paired with transition-all (not
+// transition-colors) so the global theme rule (now in @layer base) yields and
+// the 90ms press scale actually runs. Theme switching on chips rides the same
+// 90ms; imperceptible for a color cross-fade.
+const CHIP_BASE_CLASS = "press disabled:opacity-50 transition-all duration-150 active:scale-[0.98]";
 
 export interface ChipButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   tone?: ChipTone;

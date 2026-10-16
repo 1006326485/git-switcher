@@ -12,6 +12,7 @@ import { useContextMenu } from "../hooks/useContextMenu";
 import { setProjectDescription, setProjectNotes, setProjectColor, setProjectAlias, listGroups, assignToGroup } from "../lib/tauri";
 import { useTranslation, Trans } from "react-i18next";
 import { useProjectActions } from "../context/ProjectContext";
+import { isDirtyChord } from "../lib/heldKeys";
 import type { ActiveGitOp } from "../hooks/useGitOpTracker";
 
 const GitLogViewer = lazy(() => import("./GitLogViewer"));
@@ -251,6 +252,7 @@ export const NotesEditor = memo(function NotesEditor({
         setEditing(false);
       } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
+        if (isDirtyChord(e)) return;
         handleSave();
       }
     },
@@ -763,6 +765,7 @@ export const ProjectRowShell = memo(function ProjectRowShell({
     confirmResolveRef.current?.(false);
     confirmResolveRef.current = null;
 
+    // `modified` already includes staged changes (see useProjectRow).
     const total = modified + untracked;
     setConfirmMsg(
       <>

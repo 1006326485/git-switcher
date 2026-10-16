@@ -127,6 +127,42 @@ pub struct AppSettings {
     /// Global hotkey that summons the standalone terminal window.
     #[serde(default = "default_terminal_hotkey")]
     pub terminal_hotkey: String,
+    /// In-app shortcut: add project.
+    #[serde(default = "default_in_app_add_project")]
+    pub in_app_add_project: String,
+    /// In-app shortcut: refresh all.
+    #[serde(default = "default_in_app_refresh_all")]
+    pub in_app_refresh_all: String,
+    /// In-app shortcut: focus search.
+    #[serde(default = "default_in_app_focus_search")]
+    pub in_app_focus_search: String,
+    /// In-app shortcut: export/import.
+    #[serde(default = "default_in_app_export_import")]
+    pub in_app_export_import: String,
+    /// In-app shortcut: toggle sidebar.
+    #[serde(default = "default_in_app_toggle_sidebar")]
+    pub in_app_toggle_sidebar: String,
+    /// In-app shortcut: command palette.
+    #[serde(default = "default_in_app_command_palette")]
+    pub in_app_command_palette: String,
+    /// In-app shortcut: shortcuts help.
+    #[serde(default = "default_in_app_shortcuts_help")]
+    pub in_app_shortcuts_help: String,
+    /// In-app shortcut: quick diff.
+    #[serde(default = "default_in_app_quick_diff")]
+    pub in_app_quick_diff: String,
+    /// In-app shortcut: navigate down.
+    #[serde(default = "default_in_app_navigate_down")]
+    pub in_app_navigate_down: String,
+    /// In-app shortcut: navigate up.
+    #[serde(default = "default_in_app_navigate_up")]
+    pub in_app_navigate_up: String,
+    /// In-app shortcut: select focused.
+    #[serde(default = "default_in_app_select_focused")]
+    pub in_app_select_focused: String,
+    /// In-app shortcut: toggle embedded terminal panel.
+    #[serde(default = "default_in_app_toggle_terminal")]
+    pub in_app_toggle_terminal: String,
     /// Hide the summoned terminal window as soon as it loses focus.
     #[serde(default)]
     pub terminal_hide_on_blur: bool,
@@ -145,6 +181,18 @@ impl Default for AppSettings {
             llm: LlmConfig::default(),
             auto_fetch_on_launch: true,
             terminal_hotkey: default_terminal_hotkey(),
+            in_app_add_project: default_in_app_add_project(),
+            in_app_refresh_all: default_in_app_refresh_all(),
+            in_app_focus_search: default_in_app_focus_search(),
+            in_app_export_import: default_in_app_export_import(),
+            in_app_toggle_sidebar: default_in_app_toggle_sidebar(),
+            in_app_command_palette: default_in_app_command_palette(),
+            in_app_shortcuts_help: default_in_app_shortcuts_help(),
+            in_app_quick_diff: default_in_app_quick_diff(),
+            in_app_navigate_down: default_in_app_navigate_down(),
+            in_app_navigate_up: default_in_app_navigate_up(),
+            in_app_select_focused: default_in_app_select_focused(),
+            in_app_toggle_terminal: default_in_app_toggle_terminal(),
             terminal_hide_on_blur: false,
             tray: TraySettings::default(),
         }
@@ -153,6 +201,54 @@ impl Default for AppSettings {
 
 pub fn default_terminal_hotkey() -> String {
     "CmdOrCtrl+Shift+`".to_string()
+}
+
+pub fn default_in_app_add_project() -> String {
+    "CmdOrCtrl+N".to_string()
+}
+
+pub fn default_in_app_refresh_all() -> String {
+    "CmdOrCtrl+R".to_string()
+}
+
+pub fn default_in_app_focus_search() -> String {
+    "CmdOrCtrl+F".to_string()
+}
+
+pub fn default_in_app_export_import() -> String {
+    "CmdOrCtrl+E".to_string()
+}
+
+pub fn default_in_app_toggle_sidebar() -> String {
+    "CmdOrCtrl+B".to_string()
+}
+
+pub fn default_in_app_command_palette() -> String {
+    "CmdOrCtrl+K".to_string()
+}
+
+pub fn default_in_app_shortcuts_help() -> String {
+    "CmdOrCtrl+/".to_string()
+}
+
+pub fn default_in_app_quick_diff() -> String {
+    "CmdOrCtrl+D".to_string()
+}
+
+pub fn default_in_app_navigate_down() -> String {
+    "J".to_string()
+}
+
+pub fn default_in_app_navigate_up() -> String {
+    "K".to_string()
+}
+
+pub fn default_in_app_select_focused() -> String {
+    "Enter".to_string()
+}
+
+pub fn default_in_app_toggle_terminal() -> String {
+    "Control+~".to_string()
 }
 
 fn default_true() -> bool {
@@ -190,6 +286,44 @@ mod tests {
         let settings: AppSettings = serde_json::from_str(r#"{"theme":"dark"}"#).unwrap();
         assert_eq!(settings.terminal_hotkey, default_terminal_hotkey());
         assert!(!settings.terminal_hide_on_blur);
+    }
+
+    #[test]
+    fn missing_in_app_shortcuts_deserialize_to_defaults() {
+        let settings: AppSettings = serde_json::from_str(r#"{"theme":"dark"}"#).unwrap();
+        assert_eq!(settings.in_app_add_project, default_in_app_add_project());
+        assert_eq!(settings.in_app_refresh_all, default_in_app_refresh_all());
+        assert_eq!(settings.in_app_focus_search, default_in_app_focus_search());
+        assert_eq!(
+            settings.in_app_export_import,
+            default_in_app_export_import()
+        );
+        assert_eq!(
+            settings.in_app_toggle_sidebar,
+            default_in_app_toggle_sidebar()
+        );
+        assert_eq!(
+            settings.in_app_command_palette,
+            default_in_app_command_palette()
+        );
+        assert_eq!(
+            settings.in_app_shortcuts_help,
+            default_in_app_shortcuts_help()
+        );
+        assert_eq!(settings.in_app_quick_diff, default_in_app_quick_diff());
+        assert_eq!(
+            settings.in_app_navigate_down,
+            default_in_app_navigate_down()
+        );
+        assert_eq!(settings.in_app_navigate_up, default_in_app_navigate_up());
+        assert_eq!(
+            settings.in_app_select_focused,
+            default_in_app_select_focused()
+        );
+        assert_eq!(
+            settings.in_app_toggle_terminal,
+            default_in_app_toggle_terminal()
+        );
     }
 
     #[test]

@@ -4,6 +4,7 @@ import type { TFunction } from "i18next";
 import * as api from "../lib/tauri";
 import { useHorizontalScroll } from "../hooks/useScrollEdge";
 import type { OperationLogEntry } from "../lib/types";
+import { popoverAnimation, popoverExitAnimation, listItemAnimation, usePresence } from "./ui/primitives";
 
 const OP_ICONS: Record<string, string> = {
   fetch: "📥",
@@ -144,12 +145,17 @@ export const OperationLogPanel = memo(function OperationLogPanel({
 
   const opTypes = [...new Set(entries.map((e) => e.operation_type))].sort();
 
-  if (!open) return null;
+  // 110ms popover exit shared with menus: the panel stays mounted one cycle
+  // after `open` turns false so popoverOut has a target. Origin top-right —
+  // the panel is anchored under the header's right-side bell.
+  const { present, closing } = usePresence(open, 110);
+
+  if (!present) return null;
 
   return (
     <div className="fixed inset-0 z-40" onClick={onClose}>
       <div
-        className="absolute right-4 top-12 w-96 max-h-[80vh] bg-[var(--surface-1)] rounded-xl shadow-2xl border border-[var(--border-color)] flex flex-col overflow-hidden"
+        className={`absolute right-4 top-12 w-96 max-h-[80vh] bg-[var(--surface-1)] rounded-xl shadow-2xl border border-[var(--border-color)] flex flex-col overflow-hidden origin-top-right ${closing ? popoverExitAnimation : popoverAnimation}`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -266,10 +272,14 @@ export const OperationLogPanel = memo(function OperationLogPanel({
             </div>
           )}
 
-          {!loading && filtered.map((entry) => (
+          {/* List — keyed by filter so a chip switch replays one staggered
+              entrance (≤8 rows × 14ms) instead of swapping mounted rows.
+              Rows are small and non-virtualized, so itemIn is safe here. */}
+          {!loading && filtered.map((entry, i) => (
             <div
-              key={entry.id}
-              className={`flex items-start gap-2.5 px-4 py-2.5 border-b border-[var(--border-color)] last:border-b-0 hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors ${
+              key={filter === "all" ? entry.id : `${filter}:${entry.id}`}
+              style={i < 8 ? { animationDelay: `${i * 14}ms` } : undefined}
+              className={`${listItemAnimation} flex items-start gap-2.5 px-4 py-2.5 border-b border-[var(--border-color)] last:border-b-0 hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors ${
                 entry.status === "error" ? "bg-red-50/50 dark:bg-red-900/10" : ""
               }`}
             >

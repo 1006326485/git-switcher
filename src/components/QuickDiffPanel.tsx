@@ -3,8 +3,10 @@ import { createPortal } from "react-dom";
 import * as api from "../lib/tauri";
 import type { ProjectDiffSummary } from "../lib/types";
 import { parseError } from "../lib/types";
-import { dialogAnimation, scrimAnimation } from "./ui/primitives";
+import { dialogAnimation, dialogExitAnimation, scrimAnimation, scrimExitAnimation, usePresence } from "./ui/primitives";
 import { useTranslation } from "react-i18next";
+import { isShortcutCapturing } from "../lib/shortcutCapture";
+import { isDirtyChord } from "../lib/heldKeys";
 
 interface QuickDiffPanelProps {
   open: boolean;
@@ -45,8 +47,12 @@ export const QuickDiffPanel = memo(function QuickDiffPanel({
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
+      if (isShortcutCapturing()) return;
       if (e.key === "Escape" || ((e.metaKey || e.ctrlKey) && e.key === "w")) {
-        if (e.key === "w") e.preventDefault();
+        if (e.key === "w") {
+          e.preventDefault();
+          if (isDirtyChord(e)) return;
+        }
         onClose();
       }
     };
@@ -54,7 +60,11 @@ export const QuickDiffPanel = memo(function QuickDiffPanel({
     return () => document.removeEventListener("keydown", handler);
   }, [open, onClose]);
 
-  if (!open) return null;
+  // 160ms dialog+scrim exit shared with Modal: the portal stays mounted one
+  // cycle after `open` turns false so sheetOut/scrimOut have a target.
+  const { present, closing } = usePresence(open, 160);
+
+  if (!present) return null;
 
   const totalProjects = summaries.length;
   const totalFiles = summaries.reduce((sum, s) => sum + s.files_changed, 0);
@@ -63,11 +73,11 @@ export const QuickDiffPanel = memo(function QuickDiffPanel({
 
   return createPortal(
     <div
-      className={`fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm ${scrimAnimation}`}
+      className={`fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm ${closing ? scrimExitAnimation : scrimAnimation}`}
       onClick={onClose}
     >
       <div
-        className={`w-full max-w-2xl max-h-[80vh] bg-[var(--surface-1)] rounded-xl shadow-2xl border border-[var(--border-color)] overflow-hidden flex flex-col ${dialogAnimation}`}
+        className={`w-full max-w-2xl max-h-[80vh] bg-[var(--surface-1)] rounded-xl shadow-2xl border border-[var(--border-color)] overflow-hidden flex flex-col ${closing ? dialogExitAnimation : dialogAnimation}`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

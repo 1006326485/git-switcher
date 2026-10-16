@@ -7,5 +7,6 @@ afterEach(() => {
   cleanup();
   // Tests assert on English literals; always leave the catalogue in English.
   applyLanguageChoice("en");
-  localStorage.clear();
+  if (typeof localStorage !== "undefined" && typeof localStorage.clear === "function")
+    localStorage.clear();
 });

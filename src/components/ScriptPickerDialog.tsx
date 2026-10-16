@@ -9,8 +9,10 @@ import {
   type PickerItem,
   type SavedCommandInput,
 } from "../lib/scriptPicker";
-import { dialogAnimation, scrimAnimation } from "./ui/primitives";
+import { dialogAnimation, dialogExitAnimation, scrimAnimation, scrimExitAnimation, usePresence } from "./ui/primitives";
 import { CloseIcon, SearchIcon } from "./ui/icons";
+import { isShortcutCapturing } from "../lib/shortcutCapture";
+import { isDirtyChord } from "../lib/heldKeys";
 
 interface ScriptPickerDialogProps {
   open: boolean;
@@ -80,8 +82,12 @@ export const ScriptPickerDialog = memo(function ScriptPickerDialog({
     if (!open) return;
     inputRef.current?.focus();
     const handler = (e: KeyboardEvent) => {
+      if (isShortcutCapturing()) return;
       if (e.key === "Escape" || ((e.metaKey || e.ctrlKey) && e.key === "w")) {
-        if (e.key === "w") e.preventDefault();
+        if (e.key === "w") {
+          e.preventDefault();
+          if (isDirtyChord(e)) return;
+        }
         onClose();
       }
     };
@@ -121,7 +127,11 @@ export const ScriptPickerDialog = memo(function ScriptPickerDialog({
     [filtered, selected, run]
   );
 
-  if (!open) return null;
+  // 160ms dialog+scrim exit shared with Modal: the portal stays mounted one
+  // cycle after `open` turns false so sheetOut/scrimOut have a target.
+  const { present, closing } = usePresence(open, 160);
+
+  if (!present) return null;
 
   const savedItems = filtered.filter((i) => i.kind === "saved");
   const scriptItems = filtered.filter((i) => i.kind === "script");
@@ -152,11 +162,11 @@ export const ScriptPickerDialog = memo(function ScriptPickerDialog({
 
   return createPortal(
     <div
-      className={`fixed inset-0 z-50 flex items-start justify-center pt-[18vh] bg-black/40 backdrop-blur-sm ${scrimAnimation}`}
+      className={`fixed inset-0 z-50 flex items-start justify-center pt-[18vh] bg-black/40 backdrop-blur-sm ${closing ? scrimExitAnimation : scrimAnimation}`}
       onClick={onClose}
     >
       <div
-        className={`select-none w-[calc(100vw-2rem)] max-w-md overflow-hidden rounded-xl bg-[var(--surface-1)] border border-[var(--border-color)] shadow-2xl ${dialogAnimation}`}
+        className={`select-none w-[calc(100vw-2rem)] max-w-md overflow-hidden rounded-xl bg-[var(--surface-1)] border border-[var(--border-color)] shadow-2xl ${closing ? dialogExitAnimation : dialogAnimation}`}
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
       >

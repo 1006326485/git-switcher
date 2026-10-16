@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { isShortcutCapturing } from "../lib/shortcutCapture";
 
 interface UseDropdownPortalOptions {
   minWidth?: number;
@@ -68,6 +69,7 @@ export function useDropdownPortal({ minWidth = 200, align = "left" }: UseDropdow
   useEffect(() => {
     if (!open) return;
     const handleEscape = (e: KeyboardEvent) => {
+      if (isShortcutCapturing()) return;
       if (e.key !== "Escape") return;
       e.preventDefault();
       e.stopImmediatePropagation();

@@ -347,8 +347,13 @@ pub async fn terminal_close(
     Ok(())
 }
 
+// Must stay synchronous: async commands are dispatched onto a tokio worker
+// thread, but `dismiss_terminal_window` hands focus back to the previously
+// active app via AppKit (`platform::focus_previous_app`), which requires the
+// main thread and silently no-ops elsewhere. Dismissing from a worker thread
+// therefore skipped the hand-off and left this app's main window in front.
 #[tauri::command]
-pub async fn terminal_window_dismiss(app: AppHandle) -> Result<(), AppError> {
+pub fn terminal_window_dismiss(app: AppHandle) -> Result<(), AppError> {
     if let Some(window) = app.get_webview_window(crate::hotkeys::TERMINAL_WINDOW_LABEL) {
         crate::hotkeys::dismiss_terminal_window(&window);
     }

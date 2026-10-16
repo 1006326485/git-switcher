@@ -14,6 +14,20 @@ vi.mock("../lib/tauri", () => ({
   terminalResize: vi.fn(),
   terminalClose: vi.fn(),
   listRunPresets: vi.fn(() => Promise.resolve([])),
+  listCustomCommands: vi.fn(() =>
+    Promise.resolve([
+      {
+        id: "c1",
+        name: "dev",
+        command: "pnpm run dev:web",
+        shortcut: null,
+        project_path: null,
+        sort_order: 0,
+        created_at: "",
+      },
+    ])
+  ),
+  listProjectScripts: vi.fn(() => Promise.resolve([{ name: "test", command: "pnpm test" }])),
   listProjects: vi.fn(() =>
     Promise.resolve([
       {
@@ -91,6 +105,18 @@ describe("TerminalWorkspace smoke", () => {
     await waitFor(() =>
       expect(screen.queryByText("No workspaces saved")).not.toBeInTheDocument()
     );
+  });
+
+  it("blank slate lists projects with their quick-run chips", async () => {
+    render(
+      <TerminalWorkspace open initial={null} workspaceLaunch={null} onClose={() => {}} />
+    );
+    // Project row from listProjects …
+    expect(await screen.findByText("/tmp/demo")).toBeInTheDocument();
+    // … with that project's own quick-run chips (saved + scripts).
+    const chip = await screen.findByRole("button", { name: "pnpm run dev:web" });
+    fireEvent.click(chip);
+    await waitFor(() => expect(api.terminalOpen).toHaveBeenCalled());
   });
 
   it("asks for confirmation before killing all terminals", async () => {

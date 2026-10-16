@@ -7,6 +7,8 @@ import { parseDiff, parseDiffSideBySide, computeDiffStats, type DiffLine, type D
 import { useTranslation } from "react-i18next";
 import { getLanguage, getLanguageLabel, highlightLine } from "../lib/syntaxHighlight";
 import { getOrComputeHighlight } from "../lib/highlightCache";
+import { isShortcutCapturing } from "../lib/shortcutCapture";
+import { isDirtyChord } from "../lib/heldKeys";
 
 /**
  * Wrap all case-insensitive occurrences of `query` in an HTML string with <mark> tags.
@@ -646,6 +648,7 @@ export const DiffViewer = memo(function DiffViewer({ path, filePath, onClose, st
   // Global keyboard shortcuts for diff navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (isShortcutCapturing()) return;
       // Skip when typing in inputs
       const tag = (e.target as HTMLElement).tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement).isContentEditable) return;
@@ -711,6 +714,7 @@ export const DiffViewer = memo(function DiffViewer({ path, filePath, onClose, st
         case "w":
           if (e.metaKey || e.ctrlKey) {
             e.preventDefault();
+            if (isDirtyChord(e)) break;
             onClose();
           }
           break;
@@ -761,7 +765,11 @@ export const DiffViewer = memo(function DiffViewer({ path, filePath, onClose, st
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}
       onKeyDown={(e) => {
-        if ((e.metaKey || e.ctrlKey) && e.key === "f") { e.preventDefault(); openSearch(); }
+        if ((e.metaKey || e.ctrlKey) && e.key === "f") {
+          e.preventDefault();
+          if (isDirtyChord(e)) return;
+          openSearch();
+        }
       }}
     >
       <div
@@ -941,8 +949,12 @@ export const DiffViewer = memo(function DiffViewer({ path, filePath, onClose, st
                 const addPct = (diffSummary.totalAdditions / total) * 100;
                 return (
                   <>
-                    <div className="h-full bg-green-500" style={{ width: `${addPct}%` }} />
-                    <div className="h-full bg-red-500" style={{ width: `${100 - addPct}%` }} />
+                    {/* Width rides the spring so switching files sweeps the
+                        ratio instead of snapping it. Parent clips (flex +
+                        overflow-hidden), so the mid-frame overshoot never
+                        leaks outside the 6px track. */}
+                    <div className="h-full bg-green-500 transition-[width] duration-300 ease-[var(--ease-spring)]" style={{ width: `${addPct}%` }} />
+                    <div className="h-full bg-red-500 transition-[width] duration-300 ease-[var(--ease-spring)]" style={{ width: `${100 - addPct}%` }} />
                   </>
                 );
               })()}

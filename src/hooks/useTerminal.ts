@@ -5,6 +5,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import * as api from "../lib/tauri";
 import { resyncTerminalViewport } from "../lib/terminalViewport";
+import { diag, diagEnabled, diagExpose, diagReset } from "../lib/terminalDiag";
 import {
   applySessions,
   nextActiveInProject,
@@ -90,6 +91,9 @@ export function useTerminal() {
       const view = viewsRef.current.get(id);
       if (view) {
         view.term.write(bytes);
+        // TEMP-DIAG: diag() dedups on state change, so this is cheap unless the
+        // scroll state actually moved — that is exactly the transition to catch.
+        diag(id, "output", view.term, false, `bytes=${bytes.length}`);
         return;
       }
       // Output can arrive before the xterm container mounts; buffer it briefly.
@@ -253,7 +257,13 @@ export function useTerminal() {
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     term.open(container);
-    term.onData((data) => writeToPty(id, data));
+    diagReset(id);
+    diag(id, "attach", term, true);
+    term.onData((data) => {
+      // TEMP-DIAG: record what the user typed and whether it jumped the viewport.
+      diag(id, "onData", term, true, `data=${JSON.stringify(data.slice(0, 24))}`);
+      writeToPty(id, data);
+    });
     viewsRef.current.set(id, { term, fitAddon });
     const pending = pendingRef.current.get(id);
     if (pending) {
@@ -261,6 +271,7 @@ export function useTerminal() {
       for (const chunk of pending) term.write(chunk);
     }
     fitAddon.fit();
+    diag(id, "attach-fit", term, true);
   }, []);
 
   const detachTerminal = useCallback((id: string) => {
@@ -275,8 +286,11 @@ export function useTerminal() {
   const fitTerminal = useCallback((id: string) => {
     const view = viewsRef.current.get(id);
     if (!view) return;
+    diag(id, "fit:before", view.term, true);
     view.fitAddon.fit();
+    diag(id, "fit:after-fit", view.term, true);
     resyncTerminalViewport(view.term);
+    diag(id, "fit:after-resync", view.term, true);
     if (!document.hasFocus()) return;
     api.terminalResize(id, view.term.cols, view.term.rows).catch(() => {});
   }, []);
@@ -323,6 +337,18 @@ export function useTerminal() {
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [fitTerminal]);
+
+  // TEMP-DIAG: sample every view at 4 Hz. `diag` only emits on state change, so
+  // a steady terminal costs one Map lookup per tick; the log only grows when the
+  // scroll state actually moves (the transition we are hunting).
+  useEffect(() => {
+    if (!diagEnabled()) return;
+    diagExpose();
+    const timer = window.setInterval(() => {
+      for (const [id, view] of viewsRef.current) diag(id, "sample", view.term, false);
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, []);
 
   return {
     sessions: tabs.sessions,

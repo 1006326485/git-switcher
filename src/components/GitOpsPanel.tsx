@@ -118,10 +118,13 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
   }, [onToggle]);
 
   // Load panel data whenever it opens (controlled or self-managed).
+  // Also refresh the card badges/branch state so external git changes made
+  // while the panel was closed are visible immediately on open.
   useEffect(() => {
     if (!open) return;
+    void onRefresh();
     void Promise.all([loadFiles(), loadStashList()]);
-  }, [open, loadFiles, loadStashList]);
+  }, [open, loadFiles, loadStashList, onRefresh]);
 
   const handleAction = useCallback(
     async (name: string, fn: () => Promise<void>, successMsg?: string) => {
@@ -170,7 +173,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
       setStagingFiles((prev) => new Set(prev).add(filePath));
       try {
         await api.gitStageFile(path, filePath);
-        await loadFiles();
+        await Promise.all([loadFiles(), onRefresh()]);
       } catch (e) {
         onError(String(e));
       } finally {
@@ -181,7 +184,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
         });
       }
     },
-    [path, loadFiles, onError]
+    [path, loadFiles, onError, onRefresh]
   );
 
   const handleUnstage = useCallback(
@@ -189,7 +192,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
       setStagingFiles((prev) => new Set(prev).add(filePath));
       try {
         await api.gitUnstageFile(path, filePath);
-        await loadFiles();
+        await Promise.all([loadFiles(), onRefresh()]);
       } catch (e) {
         onError(String(e));
       } finally {
@@ -200,7 +203,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
         });
       }
     },
-    [path, loadFiles, onError]
+    [path, loadFiles, onError, onRefresh]
   );
 
   const handleStageAll = useCallback(() => handleAction("stage_all", async () => { await api.gitStageAll(path); }, t("panelToast.staged")), [handleAction, path, t]);
@@ -307,7 +310,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
         aria-label={t("panel.toggle")}
         className="w-full px-4 py-2 text-xs text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800/50 flex items-center gap-2 transition-colors"
       >
-        <span className={`transition-transform ${open ? "rotate-90" : ""}`}>&#x25B6;</span>
+        <span className={`transition-transform duration-200 ${open ? "rotate-90" : ""}`}>&#x25B6;</span>
         {t("panel.trigger")}
       </button>
     </div>
@@ -473,6 +476,9 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
               >
                 {files.map((f) => (
                   <div
+                    // Keyed by path only: staging flips the badge/buttons in
+                    // place (150ms theme color swap) instead of remounting the
+                    // row, which used to pop the row out and back in.
                     key={f.path}
                     className="flex items-center gap-2 text-xs"
                     onContextMenu={(e) => openFileMenu(e, { kind: "file", file: f })}
@@ -507,17 +513,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
                     >
                       {f.path}
                     </button>
-                    {f.status === "untracked" ? (
-                      <button
-                        onClick={() => handleStage(f.path)}
-                        disabled={stagingFiles.has(f.path)}
-                        className="px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/50 disabled:opacity-50"
-                        aria-label={t("panel.stageAria", { path: f.path })}
-                        title={t("panel.stage")}
-                      >
-                        {stagingFiles.has(f.path) ? "..." : "+"}
-                      </button>
-                    ) : (
+                    {f.staged ? (
                       <button
                         onClick={() => handleUnstage(f.path)}
                         disabled={stagingFiles.has(f.path)}
@@ -526,6 +522,16 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
                         title={t("panel.unstage")}
                       >
                         {stagingFiles.has(f.path) ? "..." : "-"}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleStage(f.path)}
+                        disabled={stagingFiles.has(f.path)}
+                        className="px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/50 disabled:opacity-50"
+                        aria-label={t("panel.stageAria", { path: f.path })}
+                        title={t("panel.stage")}
+                      >
+                        {stagingFiles.has(f.path) ? "..." : "+"}
                       </button>
                     )}
                   </div>
@@ -687,10 +693,10 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
           anchor={fileMenu.anchor ?? { x: 0, y: 0 }}
           onClose={closeFileMenu}
         >
-          {fileMenuTarget.file.status === "untracked" ? (
-            <MenuItem label={t("panel.stage")} onClick={() => handleStage(fileMenuTarget.file.path)} />
-          ) : (
+          {fileMenuTarget.file.staged ? (
             <MenuItem label={t("panel.unstage")} onClick={() => handleUnstage(fileMenuTarget.file.path)} />
+          ) : (
+            <MenuItem label={t("panel.stage")} onClick={() => handleStage(fileMenuTarget.file.path)} />
           )}
           {fileMenuTarget.file.status !== "untracked" && (
             <>

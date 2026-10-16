@@ -78,13 +78,25 @@ describe("TerminalWindowApp", () => {
       await screen.findByText(`${formatHotkey("CmdOrCtrl+Shift+`")} to summon / hide`)
     ).toBeInTheDocument();
     expect(screen.getByText("Terminal")).toBeInTheDocument();
+    // One title row: the Overlay title bar carries the title next to the
+    // native traffic lights; the workspace header row below is hidden.
+    expect(screen.getAllByText("Terminal")).toHaveLength(1);
   });
 
-  it("dismisses through the app so the main window never takes focus", async () => {
+  it("relies on native traffic lights instead of a custom close button", async () => {
+    render(<TerminalWindowApp />);
+    await screen.findByText(`${formatHotkey("CmdOrCtrl+Shift+`")} to summon / hide`);
+    // headerDraggable hides the workspace close button: the Overlay title bar
+    // above it carries the system traffic lights (incl. close).
+    expect(screen.queryByLabelText("Close")).not.toBeInTheDocument();
+  });
+
+  it("dismisses with Cmd+W through the app so the main window never takes focus", async () => {
     render(<TerminalWindowApp />);
     const { invoke } = await import("@tauri-apps/api/core");
+    await screen.findByText(`${formatHotkey("CmdOrCtrl+Shift+`")} to summon / hide`);
 
-    fireEvent.click(screen.getByLabelText("Close"));
+    fireEvent.keyDown(window, { key: "w", metaKey: true });
 
     await waitFor(() => expect(vi.mocked(invoke)).toHaveBeenCalledWith("terminal_window_dismiss"));
     expect(hide).not.toHaveBeenCalled();

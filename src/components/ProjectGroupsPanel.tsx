@@ -10,6 +10,7 @@ import { popoverAnimation, MenuItem } from "./ui/primitives";
 import { ContextMenu, MenuSeparator } from "./ui/ContextMenu";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { useTranslation } from "react-i18next";
+import { isShortcutCapturing } from "../lib/shortcutCapture";
 
 // Module-level groups cache shared across all GroupAssignDropdown instances
 let _groupsCache: Group[] | null = null;
@@ -171,6 +172,7 @@ export const ProjectGroupsPanel = memo(function ProjectGroupsPanel({
   useEffect(() => {
     if (!recoloringId) return;
     const onKey = (e: KeyboardEvent) => {
+      if (isShortcutCapturing()) return;
       if (e.key === "Escape") setRecoloringId(null);
     };
     const onDown = (e: MouseEvent) => {

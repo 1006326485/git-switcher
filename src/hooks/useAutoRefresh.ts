@@ -30,6 +30,26 @@ export function useAutoRefresh(
     };
   }, []);
 
+  // Window focus refresh — catches external git changes (other tools, CLI,
+  // IDE) to file status and branch state. Coalesced + gated like the timer:
+  // skip while hidden/offline/busy so focus storms don't cause IPC churn.
+  useEffect(() => {
+    let cooldown: ReturnType<typeof setTimeout> | null = null;
+    const onFocus = () => {
+      if (document.hidden || !navigator.onLine || busyOpsRef.current !== 0) return;
+      if (cooldown) return;
+      cooldown = setTimeout(() => {
+        cooldown = null;
+      }, 1500);
+      refreshAll();
+    };
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      if (cooldown) clearTimeout(cooldown);
+    };
+  }, [refreshAll]);
+
   // Auto-refresh timer — re-reads settings when settingsVersion changes
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null;

@@ -333,6 +333,13 @@ impl GitService {
 
         for entry in statuses.iter() {
             let s = entry.status();
+            // Conflicted (unmerged) paths carry Status::CONFLICTED and would
+            // otherwise be invisible in every counter. Count them as modified
+            // so badges, totals and "clean" checks stay accurate during merges.
+            if s.contains(Status::CONFLICTED) {
+                modified += 1;
+                continue;
+            }
             if s.contains(Status::WT_MODIFIED)
                 || s.contains(Status::WT_DELETED)
                 || s.contains(Status::WT_RENAMED)
@@ -451,6 +458,18 @@ impl GitService {
         for entry in statuses.iter() {
             let s = entry.status();
             let file_path = entry.path().unwrap_or("").to_string();
+
+            // Conflicted paths show neither index nor worktree flags in a way
+            // the labels below understand — surface them as an unstaged
+            // modified row so they stay actionable in the panel.
+            if s.contains(Status::CONFLICTED) {
+                files.push(GitFileEntry {
+                    path: file_path,
+                    status: FileStatus::Modified,
+                    staged: false,
+                });
+                continue;
+            }
 
             // Check if file has staged (index) changes
             let has_staged = s.contains(Status::INDEX_NEW)
@@ -4256,6 +4275,29 @@ mod git_workflow_tests {
 
         assert_eq!(GitService::operation_state(path).expect("state"), "clean");
         assert_eq!(log_messages(&fixture)[0], "second");
+    }
+
+    #[test]
+    fn conflicted_paths_count_as_modified_and_surface_in_file_list() {
+        let fixture = divergent_fixture();
+        let path = fixture.path();
+
+        let result = GitService::rebase(path, "topic").expect("rebase attempt");
+        assert!(!result.success);
+
+        // CONFLICTED carries neither WT_* nor INDEX_* flags — it must still
+        // count toward modified so badges/totals stay accurate mid-conflict.
+        let repo = fixture.open();
+        let status = GitService::get_status(&repo).expect("status");
+        assert_eq!(status.modified, 1);
+
+        // …and surface as an actionable unstaged row in the panel file list.
+        let files = GitService::get_file_list(path).expect("file list");
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, "a.txt");
+        assert!(!files[0].staged);
+
+        GitService::abort_rebase(path).expect("abort rebase");
     }
 
     #[test]

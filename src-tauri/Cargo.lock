@@ -1510,6 +1510,8 @@ dependencies = [
  "keyring",
  "log",
  "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
  "portable-pty",
  "r2d2",
  "r2d2_sqlite",

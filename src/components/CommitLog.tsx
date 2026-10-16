@@ -362,8 +362,9 @@ export const CommitLog = memo(function CommitLog({ path, onSuccess, onError, onR
                     {isCherryPicking ? "..." : t("commitLog.cherryPick")}
                   </button>
 
-                  {/* Author + time */}
-                  <span className="text-gray-400 shrink-0 hidden group-hover:inline">
+                  {/* Author + time — opacity reveal (not display swap) so the
+                      row height never changes under measureElement. */}
+                  <span className="text-gray-400 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity duration-150 max-w-0 group-hover:max-w-24 overflow-hidden whitespace-nowrap">
                     {entry.author}
                   </span>
                   <span className="text-gray-400 shrink-0 w-14 text-right">
