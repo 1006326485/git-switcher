@@ -5,12 +5,14 @@ import { Modal, KbdBadge } from "./ui/primitives";
 import { ShortcutRecorder } from "./ShortcutRecorder";
 import {
   DEFAULT_IN_APP_SHORTCUTS,
+  overridesFromSettings,
   resolveInAppShortcuts,
   type ActionId,
 } from "../lib/inAppShortcuts";
 import {
   SHORTCUT_GROUP_ORDER,
   getDisplayParts,
+  getEditorDisplayParts,
   inAppDefinitions,
   referenceDefinitions,
   type ShortcutDefinition,
@@ -50,11 +52,17 @@ type ShortcutDescriptionKey =
   | "shortcuts.view.dashboard"
   | "shortcuts.terminal.switchGroup"
   | "shortcuts.terminal.switchTab"
+  | "shortcuts.terminal.switchGroupPrev"
+  | "shortcuts.terminal.switchGroupNext"
+  | "shortcuts.terminal.switchTabPrev"
+  | "shortcuts.terminal.switchTabNext"
   | "shortcuts.terminal.jumpIndex"
   | "shortcuts.terminal.jumpProject"
   | "shortcuts.terminal.newTab"
   | "shortcuts.terminal.closeTab"
   | "shortcuts.terminal.closeTabKey"
+  | "shortcuts.terminal.focusInput"
+  | "shortcuts.terminal.clearScreen"
   | "shortcuts.inApp.addProject"
   | "shortcuts.inApp.refreshAll"
   | "shortcuts.inApp.focusSearch"
@@ -66,7 +74,8 @@ type ShortcutDescriptionKey =
   | "shortcuts.inApp.navigateDown"
   | "shortcuts.inApp.navigateUp"
   | "shortcuts.inApp.selectFocused"
-  | "shortcuts.inApp.toggleTerminal";
+  | "shortcuts.inApp.toggleTerminal"
+  | "shortcuts.inApp.openSettings";
 
 type InAppDescriptionKey = Extract<ShortcutDescriptionKey, `shortcuts.inApp.${string}`>;
 
@@ -83,20 +92,27 @@ const IN_APP_FALLBACK_EN: Record<InAppDescriptionKey, string> = {
   "shortcuts.inApp.navigateUp": "Navigate up in project list",
   "shortcuts.inApp.selectFocused": "Select focused project",
   "shortcuts.inApp.toggleTerminal": "Toggle terminal panel",
+  "shortcuts.inApp.openSettings": "Open Settings",
 };
 
 interface InAppRow {
+  def: ShortcutDefinition;
   actionId: ActionId;
   settingsField: keyof AppSettings;
-  descriptionKey: InAppDescriptionKey;
+  descriptionKey: string;
+  digitRange: boolean;
 }
 
-// The 12 rebindable rows, derived from the canonical registry (single source
-// of truth with inAppShortcuts.ts and useKeyboardShortcuts).
+// Every rebindable row, derived from the canonical registry (single source
+// of truth with inAppShortcuts.ts, useKeyboardShortcuts, and
+// TerminalWorkspace). Since Phase 2 this is all rebindable actions — app,
+// view, git, and terminal — not just the original 12.
 const IN_APP_ROWS: InAppRow[] = inAppDefinitions().map((def) => ({
+  def,
   actionId: def.inAppActionId as ActionId,
   settingsField: def.settingsField as keyof AppSettings,
-  descriptionKey: def.descriptionKey as InAppDescriptionKey,
+  descriptionKey: def.descriptionKey,
+  digitRange: def.digitRange ?? false,
 }));
 
 // Reference rows, derived from the registry (FR5). Unlike the old hardcoded
@@ -140,20 +156,9 @@ interface ShortcutsHelpProps {
 }
 
 function settingsToOverrides(s: AppSettings): Partial<Record<ActionId, string>> {
-  const next: Partial<Record<ActionId, string>> = {};
-  if (s.in_app_add_project) next.addProject = s.in_app_add_project;
-  if (s.in_app_refresh_all) next.refreshAll = s.in_app_refresh_all;
-  if (s.in_app_focus_search) next.focusSearch = s.in_app_focus_search;
-  if (s.in_app_export_import) next.exportImport = s.in_app_export_import;
-  if (s.in_app_toggle_sidebar) next.toggleSidebar = s.in_app_toggle_sidebar;
-  if (s.in_app_command_palette) next.commandPalette = s.in_app_command_palette;
-  if (s.in_app_shortcuts_help) next.shortcutsHelp = s.in_app_shortcuts_help;
-  if (s.in_app_quick_diff) next.quickDiff = s.in_app_quick_diff;
-  if (s.in_app_navigate_down) next.navigateDown = s.in_app_navigate_down;
-  if (s.in_app_navigate_up) next.navigateUp = s.in_app_navigate_up;
-  if (s.in_app_select_focused) next.selectFocused = s.in_app_select_focused;
-  if (s.in_app_toggle_terminal) next.toggleTerminal = s.in_app_toggle_terminal;
-  return next;
+  // Registry-driven (Phase 2): every rebindable action's stored binding is
+  // picked up here automatically, including Phase 2 additions.
+  return overridesFromSettings(s as unknown as Record<string, unknown>);
 }
 
 export const ShortcutsHelp = memo(function ShortcutsHelp({ open, onClose }: ShortcutsHelpProps) {
@@ -237,11 +242,29 @@ export const ShortcutsHelp = memo(function ShortcutsHelp({ open, onClose }: Shor
     [t]
   );
 
+  // Conflict spaces (FR9, Phase 2): bindings only clash within one
+  // handler space. The app/list actions share useKeyboardShortcuts, so two
+  // of them can never share a chord; terminal actions live in
+  // TerminalWorkspace's capture-phase handler, so the same chord in both
+  // spaces is legal by design (context priority decides) — CmdOrCtrl+N is
+  // both addProject and terminalNewTab, and that must stay saveable.
+  const spaceOf = useCallback((actionId: ActionId): "terminal" | "app" => {
+    const row = IN_APP_ROWS.find((r) => r.actionId === actionId);
+    return row?.def.context === "terminal" ? "terminal" : "app";
+  }, []);
+
   const findClash = useCallback(
     (actionId: ActionId, candidate: string): string | null => {
+      // Escape is the one fixed key: it dismisses dialogs everywhere and
+      // can never be rebound to an action.
+      if (normalizeBinding(candidate) === "Escape") {
+        return labelFor("shortcuts.general.cancel");
+      }
+      const space = spaceOf(actionId);
       const row = IN_APP_ROWS.find(
         (r) =>
           r.actionId !== actionId &&
+          spaceOf(r.actionId) === space &&
           bindingsConflict(candidate, bindings[r.actionId] ?? DEFAULT_IN_APP_SHORTCUTS[r.actionId])
       );
       if (row) return labelFor(row.descriptionKey);
@@ -251,13 +274,27 @@ export const ShortcutsHelp = memo(function ShortcutsHelp({ open, onClose }: Shor
       }
       return null;
     },
-    [bindings, globalHotkey, labelFor]
+    [bindings, globalHotkey, labelFor, spaceOf]
   );
 
   const commitBinding = useCallback(
     async (actionId: ActionId, settingsField: keyof AppSettings, raw: string) => {
-      const normalized = normalizeBinding(raw);
+      let normalized = normalizeBinding(raw);
       if (!normalized) return;
+      // Digit-range rows (jump by index/project) need a digit key: the
+      // stored form canonicalises the recorded digit to "Digit", the
+      // placeholder matchDigitRange understands. Anything else would be
+      // a dead binding, so refuse it with an explanation.
+      const row = IN_APP_ROWS.find((r) => r.actionId === actionId);
+      if (row?.digitRange) {
+        const parts = normalized.split("+");
+        const last = parts[parts.length - 1];
+        if (!/^[0-9]$/.test(last) && last !== "Digit") {
+          setNotice(trEditor("shortcuts.editor.digitRange", "Jump shortcuts need a digit key (e.g. Alt+1)"));
+          return;
+        }
+        normalized = [...parts.slice(0, -1), "Digit"].join("+");
+      }
       if (bindings[actionId] === normalized) {
         setEditing(null);
         return;
@@ -278,7 +315,7 @@ export const ShortcutsHelp = memo(function ShortcutsHelp({ open, onClose }: Shor
         setNotice(`${normalized}: ${String(e)}`);
       }
     },
-    [bindings, globalHotkey, labelFor, trEditor]
+    [bindings, findClash, trEditor]
   );
 
   const resetBinding = useCallback(
@@ -300,7 +337,7 @@ export const ShortcutsHelp = memo(function ShortcutsHelp({ open, onClose }: Shor
         setNotice(`Failed to reset: ${String(e)}`);
       }
     },
-    [bindings, globalHotkey, labelFor, trEditor]
+    [bindings, findClash, trEditor]
   );
 
   return (
@@ -324,7 +361,10 @@ export const ShortcutsHelp = memo(function ShortcutsHelp({ open, onClose }: Shor
         )}
 
         <div className="max-h-[50vh] overflow-y-auto space-y-3 pr-0.5">
-          {filtered.map((cat) => (
+          {/* Groups left with no reference rows (git, view since Phase 2:
+              all their actions are rebindable editor rows now) render no
+              heading at all, instead of an empty section. */}
+          {filtered.filter((cat) => cat.rows.length > 0).map((cat) => (
             <div key={cat.group}>
               <h3 className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">
                 {t(cat.nameKey as never)}
@@ -378,12 +418,22 @@ export const ShortcutsHelp = memo(function ShortcutsHelp({ open, onClose }: Shor
                       ) : (
                         <div className="flex items-center gap-1 ml-3 shrink-0">
                           <div className="flex items-center gap-0.5">
-                            {bindingToDisplayParts(binding).map((k, i) => (
-                              <span key={i} className="flex items-center gap-0.5">
-                                {i > 0 && <span className="text-[11px] text-gray-400">+</span>}
-                                <KbdBadge label={k} size="sm" />
-                              </span>
-                            ))}
+                            {(() => {
+                              const parts = getEditorDisplayParts(row.def, binding);
+                              if (parts.length === 0) {
+                                return (
+                                  <span className="text-[11px] text-gray-400 dark:text-gray-500 italic">
+                                    {trEditor("shortcuts.editor.unbound", "Unbound")}
+                                  </span>
+                                );
+                              }
+                              return parts.map((k, i) => (
+                                <span key={i} className="flex items-center gap-0.5">
+                                  {i > 0 && <span className="text-[11px] text-gray-400">+</span>}
+                                  <KbdBadge label={k} size="sm" />
+                                </span>
+                              ));
+                            })()}
                           </div>
                           <button
                             type="button"
@@ -415,7 +465,7 @@ export const ShortcutsHelp = memo(function ShortcutsHelp({ open, onClose }: Shor
               </div>
             </div>
           )}
-          {filtered.length === 0 && filteredInApp.length === 0 && (
+          {filtered.every((cat) => cat.rows.length === 0) && filteredInApp.length === 0 && (
             <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-4">
               {t("shortcuts.noMatch")}
             </p>

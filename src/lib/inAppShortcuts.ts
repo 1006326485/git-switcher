@@ -10,9 +10,30 @@ export type ActionId =
   | "navigateDown"
   | "navigateUp"
   | "selectFocused"
-  | "toggleTerminal";
+  | "toggleTerminal"
+  | "viewCard"
+  | "viewList"
+  | "viewCompact"
+  | "viewTable"
+  | "viewDashboard"
+  | "fetchAll"
+  | "openSettings"
+  | "terminalSwitchGroupPrev"
+  | "terminalSwitchGroupNext"
+  | "terminalSwitchTabPrev"
+  | "terminalSwitchTabNext"
+  | "terminalJumpIndex"
+  | "terminalJumpProject"
+  | "terminalNewTab"
+  | "terminalCloseTab"
+  | "terminalFocusInput"
+  | "terminalClearScreen";
 
-import { getInAppDefaults, getSettingsFieldMap } from "./shortcutRegistry";
+import {
+  getInAppDefaults,
+  getSettingsFieldMap,
+  inAppDefinitions,
+} from "./shortcutRegistry";
 
 // The 12 rebindable defaults now live in the canonical registry
 // (src/lib/shortcutRegistry.ts) and are re-exported here so existing
@@ -127,4 +148,54 @@ export function resolveInAppShortcuts(
     if (typeof v === "string" && v) merged[k as ActionId] = v;
   }
   return merged;
+}
+
+/**
+ * Settings object -> binding overrides, driven by the registry: every
+ * rebindable action with a settingsField contributes its stored value when
+ * non-empty. App.tsx, ShortcutsHelp, and TerminalWorkspace all use this,
+ * so a new rebindable action needs no per-call-site mapping code.
+ */
+export function overridesFromSettings(
+  settings: Record<string, unknown>
+): Partial<Record<ActionId, string>> {
+  const next: Partial<Record<ActionId, string>> = {};
+  for (const def of inAppDefinitions()) {
+    if (!def.settingsField || !def.inAppActionId) continue;
+    const v = settings[def.settingsField];
+    if (typeof v === "string" && v) next[def.inAppActionId] = v;
+  }
+  return next;
+}
+
+/**
+ * Digit-range bindings ("Alt+Digit", "CmdOrCtrl+Digit") mean "the binding's
+ * modifiers + any digit 1-9" — the digit in the stored string is a
+ * placeholder, not one specific tab. Returns the zero-based digit index
+ * (0 for Digit1) when the event matches, null otherwise. Modifier logic
+ * mirrors matchesGlobalHotkey: CmdOrCtrl resolves to Cmd on macOS and Ctrl
+ * elsewhere (never both, so Ctrl+key still reaches the shell on macOS).
+ */
+export function matchDigitRange(
+  e: KeyboardEvent,
+  binding: string,
+  isMac: boolean
+): number | null {
+  const p = parseBinding(binding);
+  if (!p) return null;
+  if (p.needCmdOrCtrl) {
+    if (isMac) {
+      if (!e.metaKey || e.ctrlKey) return null;
+    } else if (!e.ctrlKey || e.metaKey) return null;
+  } else if (p.needCtrl || p.needMeta) {
+    if (p.needCtrl !== e.ctrlKey) return null;
+    if (p.needMeta !== e.metaKey) return null;
+  } else if (e.metaKey || e.ctrlKey) {
+    return null;
+  }
+  if (e.altKey !== p.needAlt) return null;
+  if (e.shiftKey !== p.needShift) return null;
+  const m = /^Digit([1-9])$/.exec(e.code);
+  if (!m) return null;
+  return Number(m[1]) - 1;
 }

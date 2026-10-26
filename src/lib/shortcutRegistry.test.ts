@@ -22,8 +22,9 @@ describe("shortcutRegistry (Phase 1)", () => {
     }
   });
 
-  it("keeps the 12 rebindable defaults exactly as shipped (no default changes)", () => {
-    expect(getInAppDefaults()).toEqual({
+  it("keeps the original 12 rebindable defaults exactly as shipped (no default changes)", () => {
+    const defaults = getInAppDefaults();
+    expect(defaults).toMatchObject({
       addProject: "CmdOrCtrl+N",
       refreshAll: "CmdOrCtrl+R",
       focusSearch: "CmdOrCtrl+F",
@@ -39,8 +40,50 @@ describe("shortcutRegistry (Phase 1)", () => {
     });
     // inAppShortcuts re-exports the registry defaults, so the old import
     // path and the registry cannot drift apart.
-    expect(DEFAULT_IN_APP_SHORTCUTS).toEqual(getInAppDefaults());
-    expect(inAppDefinitions()).toHaveLength(12);
+    expect(DEFAULT_IN_APP_SHORTCUTS).toEqual(defaults);
+  });
+
+  it("makes view modes, fetch-all, Settings, and terminal actions rebindable (Phase 2)", () => {
+    const defaults = getInAppDefaults();
+    expect(defaults).toMatchObject({
+      viewCard: "CmdOrCtrl+1",
+      viewList: "CmdOrCtrl+2",
+      viewCompact: "CmdOrCtrl+3",
+      viewTable: "CmdOrCtrl+4",
+      viewDashboard: "CmdOrCtrl+5",
+      fetchAll: "CmdOrCtrl+Shift+G",
+      openSettings: "CmdOrCtrl+,",
+      terminalSwitchGroupPrev: "CmdOrCtrl+ArrowUp",
+      terminalSwitchGroupNext: "CmdOrCtrl+ArrowDown",
+      terminalSwitchTabPrev: "CmdOrCtrl+ArrowLeft",
+      terminalSwitchTabNext: "CmdOrCtrl+ArrowRight",
+      terminalJumpIndex: "Alt+Digit",
+      terminalJumpProject: "CmdOrCtrl+Digit",
+      terminalNewTab: "CmdOrCtrl+N",
+      terminalCloseTab: "CmdOrCtrl+W",
+      // Unbound by default: no free universal convention (see registry notes).
+      terminalFocusInput: "",
+      terminalClearScreen: "",
+    });
+    // 12 original + 5 views + fetch-all + Settings + 10 terminal actions.
+    expect(inAppDefinitions()).toHaveLength(29);
+    for (const def of inAppDefinitions()) {
+      expect(def.rebindable).toBe(true);
+      expect(def.settingsField).toMatch(/^in_app_/);
+    }
+    const fields = inAppDefinitions().map((d) => d.settingsField);
+    expect(new Set(fields).size).toBe(fields.length);
+  });
+
+  it("marks digit-range bindings and renders them as a range", () => {
+    const jumpIndex = definitionById("terminalJumpIndex");
+    const jumpProject = definitionById("terminalJumpProject");
+    expect(jumpIndex?.digitRange).toBe(true);
+    expect(jumpProject?.digitRange).toBe(true);
+    expect(getDisplayParts(jumpIndex!, false)).toEqual(["Alt", "1…9"]);
+    expect(getDisplayParts(jumpProject!, true)).toEqual(["⌘", "1…9"]);
+    // A digit-range row is still a rebindable editor row, not a reference row.
+    expect(referenceDefinitions("terminal").map((d) => d.id)).not.toContain("terminalJumpIndex");
   });
 
   it("pins the FR2 context priority order", () => {
@@ -66,10 +109,14 @@ describe("shortcutRegistry (Phase 1)", () => {
       "globalTerminal",
       "terminalNewTab",
       "terminalCloseTab",
-      "terminalSwitchGroup",
-      "terminalSwitchTab",
+      "terminalSwitchGroupPrev",
+      "terminalSwitchGroupNext",
+      "terminalSwitchTabPrev",
+      "terminalSwitchTabNext",
       "terminalJumpIndex",
       "terminalJumpProject",
+      "terminalFocusInput",
+      "terminalClearScreen",
     ]) {
       expect(definitionById(id)).toBeDefined();
     }
@@ -95,8 +142,9 @@ describe("shortcutRegistry (Phase 1)", () => {
         }
       }
       // And the canonical binding round-trips through the existing display
-      // helper for every keyboard row.
-      if (def.defaultBinding && !def.displayParts) {
+      // helper for every keyboard row except digit-range rows, whose
+      // display replaces the placeholder digit with "1…9" by design.
+      if (def.defaultBinding && !def.displayParts && !def.digitRange) {
         expect(getDisplayParts(def, true)).toEqual(
           bindingToDisplayParts(def.defaultBinding, true)
         );
@@ -105,17 +153,16 @@ describe("shortcutRegistry (Phase 1)", () => {
   });
 
   it("derives reference groups for the help panel without the rebindable rows", () => {
-    // Reference sections show each action once; the 12 rebindable actions
-    // live only in the In-App editor section, so no stale duplicate row.
-    expect(referenceDefinitions("view").map((d) => d.id)).toEqual([
-      "viewCard",
-      "viewList",
-      "viewCompact",
-      "viewTable",
-      "viewDashboard",
+    // Reference sections show each action once; rebindable actions live
+    // only in the In-App editor section, so no stale duplicate row. Since
+    // Phase 2 the view and git groups have no reference rows left (all
+    // their actions are rebindable), and the terminal group keeps only
+    // the non-keyboard middle-click row.
+    expect(referenceDefinitions("view")).toEqual([]);
+    expect(referenceDefinitions("git")).toEqual([]);
+    expect(referenceDefinitions("terminal").map((d) => d.id)).toEqual([
+      "terminalCloseTabMouse",
     ]);
-    expect(referenceDefinitions("git").map((d) => d.id)).toEqual(["fetchAll"]);
-    expect(referenceDefinitions("terminal").map((d) => d.id)).toContain("terminalNewTab");
     for (const def of SHORTCUT_REGISTRY) {
       if (def.rebindable) {
         expect(referenceDefinitions(def.group)).not.toContain(def);
@@ -139,14 +186,20 @@ describe("shortcutRegistry (Phase 1)", () => {
   it("marks composite rows display-only so they are never fed to matchesBinding", () => {
     for (const id of [
       "navigateArrows",
+      "navigateToggleDetails",
       "navigateRefreshProject",
-      "terminalSwitchGroup",
-      "terminalSwitchTab",
-      "terminalJumpIndex",
-      "terminalJumpProject",
       "terminalCloseTabMouse",
     ]) {
       expect(definitionById(id)?.displayOnly).toBe(true);
+    }
+    // Phase 2: the former terminal pair/range rows are real rebindable
+    // single chords / digit-range bindings now, not display-only.
+    for (const id of [
+      "terminalSwitchGroupPrev",
+      "terminalJumpIndex",
+      "terminalNewTab",
+    ]) {
+      expect(definitionById(id)?.displayOnly).not.toBe(true);
     }
   });
 });

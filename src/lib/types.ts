@@ -112,6 +112,24 @@ export interface AppSettings {
   in_app_navigate_up?: string;
   in_app_select_focused?: string;
   in_app_toggle_terminal?: string;
+  in_app_view_card?: string;
+  in_app_view_list?: string;
+  in_app_view_compact?: string;
+  in_app_view_table?: string;
+  in_app_view_dashboard?: string;
+  in_app_fetch_all?: string;
+  in_app_open_settings?: string;
+  in_app_terminal_switch_group_prev?: string;
+  in_app_terminal_switch_group_next?: string;
+  in_app_terminal_switch_tab_prev?: string;
+  in_app_terminal_switch_tab_next?: string;
+  in_app_terminal_jump_index?: string;
+  in_app_terminal_jump_project?: string;
+  in_app_terminal_new_tab?: string;
+  in_app_terminal_close_tab?: string;
+  in_app_terminal_focus_input?: string;
+  in_app_terminal_clear_screen?: string;
+  disable_bare_key_navigation?: boolean;
   /** Hide the summoned terminal window as soon as it loses focus. */
   terminal_hide_on_blur: boolean;
   tray: TraySettings;

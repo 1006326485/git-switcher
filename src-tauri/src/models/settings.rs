@@ -163,6 +163,60 @@ pub struct AppSettings {
     /// In-app shortcut: toggle embedded terminal panel.
     #[serde(default = "default_in_app_toggle_terminal")]
     pub in_app_toggle_terminal: String,
+    /// In-app shortcut: card view.
+    #[serde(default = "default_in_app_view_card")]
+    pub in_app_view_card: String,
+    /// In-app shortcut: list view.
+    #[serde(default = "default_in_app_view_list")]
+    pub in_app_view_list: String,
+    /// In-app shortcut: compact view.
+    #[serde(default = "default_in_app_view_compact")]
+    pub in_app_view_compact: String,
+    /// In-app shortcut: table view.
+    #[serde(default = "default_in_app_view_table")]
+    pub in_app_view_table: String,
+    /// In-app shortcut: dashboard view.
+    #[serde(default = "default_in_app_view_dashboard")]
+    pub in_app_view_dashboard: String,
+    /// In-app shortcut: fetch all projects.
+    #[serde(default = "default_in_app_fetch_all")]
+    pub in_app_fetch_all: String,
+    /// In-app shortcut: open settings.
+    #[serde(default = "default_in_app_open_settings")]
+    pub in_app_open_settings: String,
+    /// Terminal shortcut: switch to the previous project group.
+    #[serde(default = "default_in_app_terminal_switch_group_prev")]
+    pub in_app_terminal_switch_group_prev: String,
+    /// Terminal shortcut: switch to the next project group.
+    #[serde(default = "default_in_app_terminal_switch_group_next")]
+    pub in_app_terminal_switch_group_next: String,
+    /// Terminal shortcut: switch to the previous terminal tab.
+    #[serde(default = "default_in_app_terminal_switch_tab_prev")]
+    pub in_app_terminal_switch_tab_prev: String,
+    /// Terminal shortcut: switch to the next terminal tab.
+    #[serde(default = "default_in_app_terminal_switch_tab_next")]
+    pub in_app_terminal_switch_tab_next: String,
+    /// Terminal shortcut: jump to a terminal by index (modifier + any digit).
+    #[serde(default = "default_in_app_terminal_jump_index")]
+    pub in_app_terminal_jump_index: String,
+    /// Terminal shortcut: jump to a terminal in the current project (modifier + any digit).
+    #[serde(default = "default_in_app_terminal_jump_project")]
+    pub in_app_terminal_jump_project: String,
+    /// Terminal shortcut: new terminal tab.
+    #[serde(default = "default_in_app_terminal_new_tab")]
+    pub in_app_terminal_new_tab: String,
+    /// Terminal shortcut: close the current terminal tab.
+    #[serde(default = "default_in_app_terminal_close_tab")]
+    pub in_app_terminal_close_tab: String,
+    /// Terminal shortcut: focus the active terminal's input. Empty = unbound.
+    #[serde(default)]
+    pub in_app_terminal_focus_input: String,
+    /// Terminal shortcut: clear the active terminal's scrollback. Empty = unbound.
+    #[serde(default)]
+    pub in_app_terminal_clear_screen: String,
+    /// Disable bare-key (J/K/Space) project-list navigation entirely.
+    #[serde(default)]
+    pub disable_bare_key_navigation: bool,
     /// Hide the summoned terminal window as soon as it loses focus.
     #[serde(default)]
     pub terminal_hide_on_blur: bool,
@@ -193,6 +247,24 @@ impl Default for AppSettings {
             in_app_navigate_up: default_in_app_navigate_up(),
             in_app_select_focused: default_in_app_select_focused(),
             in_app_toggle_terminal: default_in_app_toggle_terminal(),
+            in_app_view_card: default_in_app_view_card(),
+            in_app_view_list: default_in_app_view_list(),
+            in_app_view_compact: default_in_app_view_compact(),
+            in_app_view_table: default_in_app_view_table(),
+            in_app_view_dashboard: default_in_app_view_dashboard(),
+            in_app_fetch_all: default_in_app_fetch_all(),
+            in_app_open_settings: default_in_app_open_settings(),
+            in_app_terminal_switch_group_prev: default_in_app_terminal_switch_group_prev(),
+            in_app_terminal_switch_group_next: default_in_app_terminal_switch_group_next(),
+            in_app_terminal_switch_tab_prev: default_in_app_terminal_switch_tab_prev(),
+            in_app_terminal_switch_tab_next: default_in_app_terminal_switch_tab_next(),
+            in_app_terminal_jump_index: default_in_app_terminal_jump_index(),
+            in_app_terminal_jump_project: default_in_app_terminal_jump_project(),
+            in_app_terminal_new_tab: default_in_app_terminal_new_tab(),
+            in_app_terminal_close_tab: default_in_app_terminal_close_tab(),
+            in_app_terminal_focus_input: String::new(),
+            in_app_terminal_clear_screen: String::new(),
+            disable_bare_key_navigation: false,
             terminal_hide_on_blur: false,
             tray: TraySettings::default(),
         }
@@ -249,6 +321,66 @@ pub fn default_in_app_select_focused() -> String {
 
 pub fn default_in_app_toggle_terminal() -> String {
     "Control+~".to_string()
+}
+
+pub fn default_in_app_view_card() -> String {
+    "CmdOrCtrl+1".to_string()
+}
+
+pub fn default_in_app_view_list() -> String {
+    "CmdOrCtrl+2".to_string()
+}
+
+pub fn default_in_app_view_compact() -> String {
+    "CmdOrCtrl+3".to_string()
+}
+
+pub fn default_in_app_view_table() -> String {
+    "CmdOrCtrl+4".to_string()
+}
+
+pub fn default_in_app_view_dashboard() -> String {
+    "CmdOrCtrl+5".to_string()
+}
+
+pub fn default_in_app_fetch_all() -> String {
+    "CmdOrCtrl+Shift+G".to_string()
+}
+
+pub fn default_in_app_open_settings() -> String {
+    "CmdOrCtrl+,".to_string()
+}
+
+pub fn default_in_app_terminal_switch_group_prev() -> String {
+    "CmdOrCtrl+ArrowUp".to_string()
+}
+
+pub fn default_in_app_terminal_switch_group_next() -> String {
+    "CmdOrCtrl+ArrowDown".to_string()
+}
+
+pub fn default_in_app_terminal_switch_tab_prev() -> String {
+    "CmdOrCtrl+ArrowLeft".to_string()
+}
+
+pub fn default_in_app_terminal_switch_tab_next() -> String {
+    "CmdOrCtrl+ArrowRight".to_string()
+}
+
+pub fn default_in_app_terminal_jump_index() -> String {
+    "Alt+Digit".to_string()
+}
+
+pub fn default_in_app_terminal_jump_project() -> String {
+    "CmdOrCtrl+Digit".to_string()
+}
+
+pub fn default_in_app_terminal_new_tab() -> String {
+    "CmdOrCtrl+N".to_string()
+}
+
+pub fn default_in_app_terminal_close_tab() -> String {
+    "CmdOrCtrl+W".to_string()
 }
 
 fn default_true() -> bool {
@@ -324,6 +456,27 @@ mod tests {
             settings.in_app_toggle_terminal,
             default_in_app_toggle_terminal()
         );
+        assert_eq!(settings.in_app_view_card, default_in_app_view_card());
+        assert_eq!(settings.in_app_fetch_all, default_in_app_fetch_all());
+        assert_eq!(
+            settings.in_app_open_settings,
+            default_in_app_open_settings()
+        );
+        assert_eq!(
+            settings.in_app_terminal_switch_group_prev,
+            default_in_app_terminal_switch_group_prev()
+        );
+        assert_eq!(
+            settings.in_app_terminal_jump_index,
+            default_in_app_terminal_jump_index()
+        );
+        assert_eq!(
+            settings.in_app_terminal_new_tab,
+            default_in_app_terminal_new_tab()
+        );
+        assert_eq!(settings.in_app_terminal_focus_input, "");
+        assert_eq!(settings.in_app_terminal_clear_screen, "");
+        assert!(!settings.disable_bare_key_navigation);
     }
 
     #[test]

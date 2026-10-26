@@ -158,6 +158,18 @@ export function bindingToDisplayParts(binding: string, isMac = detectMac()): str
     .map((part) => formatHotkey(part, isMac));
 }
 
+/**
+ * Display parts for a digit-range binding ("Alt+Digit", or a rebound
+ * "Alt+3"): the modifiers render normally and the digit renders as the
+ * range "1…9", because the binding means "modifier + any digit 1-9", not
+ * one specific digit. See matchDigitRange in inAppShortcuts.ts.
+ */
+export function digitRangeDisplayParts(binding: string, isMac = detectMac()): string[] {
+  const parts = bindingToDisplayParts(binding, isMac);
+  if (parts.length === 0) return parts;
+  return [...parts.slice(0, -1), "1…9"];
+}
+
 /** Renders a Tauri accelerator (e.g. "CmdOrCtrl+Shift+`") as "⌘⇧`" / "Ctrl+Shift+`". */
 export function formatHotkey(hotkey: string, isMac = detectMac()): string {
   const map = isMac ? MAC_SYMBOLS : PC_LABELS;

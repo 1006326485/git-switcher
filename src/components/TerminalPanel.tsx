@@ -11,6 +11,10 @@ interface TerminalPanelProps {
   initial: TerminalLaunchTarget | null;
   workspaceLaunch: WorkspaceLaunch | null;
   onClose: () => void;
+  /** Increment to focus the active terminal (palette command path). */
+  focusSignal?: number;
+  /** Increment to clear the active terminal's scrollback (palette path). */
+  clearSignal?: number;
 }
 
 export const TerminalPanel = memo(function TerminalPanel({
@@ -18,6 +22,8 @@ export const TerminalPanel = memo(function TerminalPanel({
   initial,
   workspaceLaunch,
   onClose,
+  focusSignal,
+  clearSignal,
 }: TerminalPanelProps) {
   return createPortal(
     <div
@@ -35,6 +41,8 @@ export const TerminalPanel = memo(function TerminalPanel({
           initial={initial}
           workspaceLaunch={workspaceLaunch}
           onClose={onClose}
+          focusSignal={focusSignal}
+          clearSignal={clearSignal}
         />
       </div>
     </div>,

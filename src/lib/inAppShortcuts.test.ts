@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_IN_APP_SHORTCUTS,
+  matchDigitRange,
   matchesBinding,
   matchesGlobalHotkey,
+  overridesFromSettings,
   resolveInAppShortcuts,
 } from "./inAppShortcuts";
 
@@ -69,6 +71,49 @@ describe("matchesBinding for Control+~", () => {
       matchesBinding(keyEvent({ key: "~", code: "Backquote", metaKey: true, shiftKey: true }), binding)
     ).toBe(false);
     expect(matchesBinding(keyEvent({ key: "`", code: "Backquote" }), binding)).toBe(false);
+  });
+});
+
+describe("matchDigitRange", () => {
+  it("matches any digit 1-9 and returns its zero-based index", () => {
+    expect(matchDigitRange(keyEvent({ code: "Digit1", altKey: true }), "Alt+Digit", false)).toBe(0);
+    expect(matchDigitRange(keyEvent({ code: "Digit9", altKey: true }), "Alt+Digit", false)).toBe(8);
+    expect(matchDigitRange(keyEvent({ code: "Digit5", ctrlKey: true }), "CmdOrCtrl+Digit", false)).toBe(4);
+    expect(matchDigitRange(keyEvent({ code: "Digit5", metaKey: true }), "CmdOrCtrl+Digit", true)).toBe(4);
+  });
+
+  it("ignores the placeholder digit in the stored binding", () => {
+    // A rebound "Alt+3" still means Alt + any digit, not only tab 3.
+    expect(matchDigitRange(keyEvent({ code: "Digit7", altKey: true }), "Alt+3", false)).toBe(6);
+  });
+
+  it("rejects wrong modifiers, shift variants, and non-digit codes", () => {
+    expect(matchDigitRange(keyEvent({ code: "Digit1" }), "Alt+Digit", false)).toBeNull();
+    expect(matchDigitRange(keyEvent({ code: "Digit1", altKey: true, shiftKey: true }), "Alt+Digit", false)).toBeNull();
+    expect(matchDigitRange(keyEvent({ code: "Digit1", metaKey: true }), "Alt+Digit", false)).toBeNull();
+    expect(matchDigitRange(keyEvent({ code: "KeyA", altKey: true }), "Alt+Digit", false)).toBeNull();
+    expect(matchDigitRange(keyEvent({ code: "Digit0", altKey: true }), "Alt+Digit", false)).toBeNull();
+  });
+
+  it("resolves CmdOrCtrl platform-aware: Ctrl never matches on macOS", () => {
+    expect(matchDigitRange(keyEvent({ code: "Digit2", ctrlKey: true }), "CmdOrCtrl+Digit", true)).toBeNull();
+    expect(matchDigitRange(keyEvent({ code: "Digit2", metaKey: true }), "CmdOrCtrl+Digit", false)).toBeNull();
+  });
+});
+
+describe("overridesFromSettings", () => {
+  it("maps stored settings fields to actions, skipping empty and unknown fields", () => {
+    expect(
+      overridesFromSettings({
+        in_app_view_card: "CmdOrCtrl+9",
+        in_app_terminal_new_tab: "CmdOrCtrl+T",
+        in_app_terminal_focus_input: "",
+        unrelated_field: "CmdOrCtrl+Z",
+      })
+    ).toEqual({
+      viewCard: "CmdOrCtrl+9",
+      terminalNewTab: "CmdOrCtrl+T",
+    });
   });
 });
 

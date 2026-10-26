@@ -102,7 +102,10 @@
       "inAppTerminalHint": "切换内嵌终端面板的应用内快捷键（可在快捷键面板中配置）。主窗口聚焦时，全局快捷键同样会翻转该面板。",
       "hideTerminalOnBlur": "失焦时隐藏终端",
       "hideTerminalOnBlurDesc": "终端窗口失去焦点时自动隐藏",
-      "hideTerminalOnBlurAria": "失焦时隐藏终端"
+      "hideTerminalOnBlurAria": "失焦时隐藏终端",
+      "disableBareKeyNavigation": "禁用单键导航",
+      "disableBareKeyNavigationDesc": "J、K 和空格不再导航项目列表。方向键和回车仍可用。",
+      "disableBareKeyNavigationAria": "禁用单键导航"
     },
     "data": {
       "description": "将所有设置、项目和分组导出为 JSON 文件，或从之前的导出文件导入。",
@@ -438,7 +441,13 @@
       "jumpProject": "跳转到当前项目的终端",
       "closeTab": "关闭终端标签页",
       "newTab": "在所选项目中新建终端",
-      "closeTabKey": "关闭当前终端标签页"
+      "closeTabKey": "关闭当前终端标签页",
+      "switchGroupPrev": "切换到上一个终端项目分组",
+      "switchGroupNext": "切换到下一个终端项目分组",
+      "switchTabPrev": "切换到上一个终端标签页",
+      "switchTabNext": "切换到下一个终端标签页",
+      "focusInput": "聚焦终端输入",
+      "clearScreen": "清除终端滚动内容"
     },
     "inApp": {
       "addProject": "新增项目",
@@ -452,7 +461,8 @@
       "navigateDown": "下移",
       "navigateUp": "上移",
       "selectFocused": "展开选中",
-      "toggleTerminal": "切换内嵌终端"
+      "toggleTerminal": "切换内嵌终端",
+      "openSettings": "打开设置"
     },
     "editor": {
       "capture": "正在录制…请按下组合键",
@@ -462,7 +472,9 @@
       "restoreDefaults": "恢复默认",
       "save": "保存",
       "cancel": "取消",
-      "pressKeys": "请按下组合键"
+      "pressKeys": "请按下组合键",
+      "digitRange": "跳转快捷键需要数字键（例如 Alt+1）",
+      "unbound": "未绑定"
     }
   },
   "dashboard": {
@@ -1018,6 +1030,15 @@
     "bulkImport": "批量导入",
     "exportArchive": "导出归档",
     "settings": "设置",
+    "catTerminal": "终端",
+    "openBuiltinTerminal": "在内置终端中打开",
+    "openSystemTerminal": "在系统终端中打开",
+    "openFinder": "在 Finder 中打开",
+    "openVscode": "在 VS Code 中打开",
+    "copyPath": "复制项目路径",
+    "copiedPath": "已复制路径",
+    "focusTerminal": "聚焦终端",
+    "clearTerminal": "清除终端",
     "workspaceSuffix": "工作区 · {{count}} 个终端"
   },
   "palette": {
