@@ -9,6 +9,14 @@ import {
   type ActionId,
 } from "../lib/inAppShortcuts";
 import {
+  SHORTCUT_GROUP_ORDER,
+  getDisplayParts,
+  inAppDefinitions,
+  referenceDefinitions,
+  type ShortcutDefinition,
+  type ShortcutGroup,
+} from "../lib/shortcutRegistry";
+import {
   bindingToDisplayParts,
   bindingsConflict,
   detectMac,
@@ -83,94 +91,48 @@ interface InAppRow {
   descriptionKey: InAppDescriptionKey;
 }
 
-const IN_APP_ROWS: InAppRow[] = [
-  { actionId: "addProject", settingsField: "in_app_add_project", descriptionKey: "shortcuts.inApp.addProject" },
-  { actionId: "refreshAll", settingsField: "in_app_refresh_all", descriptionKey: "shortcuts.inApp.refreshAll" },
-  { actionId: "focusSearch", settingsField: "in_app_focus_search", descriptionKey: "shortcuts.inApp.focusSearch" },
-  { actionId: "exportImport", settingsField: "in_app_export_import", descriptionKey: "shortcuts.inApp.exportImport" },
-  { actionId: "toggleSidebar", settingsField: "in_app_toggle_sidebar", descriptionKey: "shortcuts.inApp.toggleSidebar" },
-  { actionId: "commandPalette", settingsField: "in_app_command_palette", descriptionKey: "shortcuts.inApp.commandPalette" },
-  { actionId: "shortcutsHelp", settingsField: "in_app_shortcuts_help", descriptionKey: "shortcuts.inApp.shortcutsHelp" },
-  { actionId: "quickDiff", settingsField: "in_app_quick_diff", descriptionKey: "shortcuts.inApp.quickDiff" },
-  { actionId: "navigateDown", settingsField: "in_app_navigate_down", descriptionKey: "shortcuts.inApp.navigateDown" },
-  { actionId: "navigateUp", settingsField: "in_app_navigate_up", descriptionKey: "shortcuts.inApp.navigateUp" },
-  { actionId: "selectFocused", settingsField: "in_app_select_focused", descriptionKey: "shortcuts.inApp.selectFocused" },
-  { actionId: "toggleTerminal", settingsField: "in_app_toggle_terminal", descriptionKey: "shortcuts.inApp.toggleTerminal" },
-];
+// The 12 rebindable rows, derived from the canonical registry (single source
+// of truth with inAppShortcuts.ts and useKeyboardShortcuts).
+const IN_APP_ROWS: InAppRow[] = inAppDefinitions().map((def) => ({
+  actionId: def.inAppActionId as ActionId,
+  settingsField: def.settingsField as keyof AppSettings,
+  descriptionKey: def.descriptionKey as InAppDescriptionKey,
+}));
 
-interface Shortcut {
-  keys: string[];
-  descriptionKey: ShortcutDescriptionKey;
+// Reference rows, derived from the registry (FR5). Unlike the old hardcoded
+// lists, these render through bindingToDisplayParts, so Windows/Linux show
+// Ctrl/Alt/Shift instead of ⌘/⌥/⇧. Each action appears exactly once: the
+// rebindable actions live only in the In-App editor section below, so a
+// rebound binding can never sit next to a stale hardcoded default row.
+interface ReferenceRow {
+  def: ShortcutDefinition;
+  parts: string[];
 }
 
-interface ShortcutCategory {
-  nameKey: "shortcuts.group.global" | "shortcuts.group.general" | "shortcuts.group.navigation" | "shortcuts.group.git" | "shortcuts.group.view" | "shortcuts.group.terminal";
-  shortcuts: Shortcut[];
+interface ReferenceCategory {
+  group: ShortcutGroup;
+  nameKey: string;
+  rows: ReferenceRow[];
 }
 
-const SHORTCUTS: ShortcutCategory[] = [
-  {
-    nameKey: "shortcuts.group.global",
-    shortcuts: [
-      {
-        keys: ["⌘", "⇧", "`"],
-        descriptionKey: "shortcuts.global.terminal",
-      },
-    ],
-  },
-  {
-    nameKey: "shortcuts.group.general",
-    shortcuts: [
-      { keys: ["⌘", "N"], descriptionKey: "shortcuts.general.addProject" },
-      { keys: ["⌘", "K"], descriptionKey: "shortcuts.general.commandPalette" },
-      { keys: ["⌘", "/"], descriptionKey: "shortcuts.general.shortcuts" },
-      { keys: ["Escape"], descriptionKey: "shortcuts.general.cancel" },
-      { keys: ["⌘", "W"], descriptionKey: "shortcuts.general.closeWindow" },
-    ],
-  },
-  {
-    nameKey: "shortcuts.group.navigation",
-    shortcuts: [
-      { keys: ["j"], descriptionKey: "shortcuts.nav.down" },
-      { keys: ["k"], descriptionKey: "shortcuts.nav.up" },
-      { keys: ["↑", "↓"], descriptionKey: "shortcuts.nav.arrows" },
-      { keys: ["Enter"], descriptionKey: "shortcuts.nav.toggleDetails" },
-      { keys: ["Space"], descriptionKey: "shortcuts.nav.refreshProject" },
-      { keys: ["⌘", "B"], descriptionKey: "shortcuts.nav.toggleSidebar" },
-    ],
-  },
-  {
-    nameKey: "shortcuts.group.git",
-    shortcuts: [
-      { keys: ["⌘", "R"], descriptionKey: "shortcuts.git.refreshAll" },
-      { keys: ["⌘", "E"], descriptionKey: "shortcuts.git.importExport" },
-      { keys: ["⌘", "D"], descriptionKey: "shortcuts.git.quickDiff" },
-    ],
-  },
-  {
-    nameKey: "shortcuts.group.view",
-    shortcuts: [
-      { keys: ["⌘", "F"], descriptionKey: "shortcuts.view.focusSearch" },
-      { keys: ["⌘", "1"], descriptionKey: "shortcuts.view.card" },
-      { keys: ["⌘", "2"], descriptionKey: "shortcuts.view.list" },
-      { keys: ["⌘", "3"], descriptionKey: "shortcuts.view.compact" },
-      { keys: ["⌘", "4"], descriptionKey: "shortcuts.view.table" },
-      { keys: ["⌘", "5"], descriptionKey: "shortcuts.view.dashboard" },
-    ],
-  },
-  {
-    nameKey: "shortcuts.group.terminal",
-    shortcuts: [
-      { keys: ["⌘", "↑", "↓"], descriptionKey: "shortcuts.terminal.switchGroup" },
-      { keys: ["⌘", "←", "→"], descriptionKey: "shortcuts.terminal.switchTab" },
-      { keys: ["⌥", "1", "…", "9"], descriptionKey: "shortcuts.terminal.jumpIndex" },
-      { keys: ["⌘", "1", "…", "9"], descriptionKey: "shortcuts.terminal.jumpProject" },
-      { keys: ["⌘", "N"], descriptionKey: "shortcuts.terminal.newTab" },
-      { keys: ["⌘", "W"], descriptionKey: "shortcuts.terminal.closeTabKey" },
-      { keys: ["Middle click"], descriptionKey: "shortcuts.terminal.closeTab" },
-    ],
-  },
-];
+function buildReferenceCategories(
+  globalHotkey: string,
+  isMac: boolean
+): ReferenceCategory[] {
+  return SHORTCUT_GROUP_ORDER.map((group) => ({
+    group,
+    nameKey: `shortcuts.group.${group}`,
+    rows: referenceDefinitions(group).map((def) => ({
+      def,
+      // The global row shows the user's actual configured hotkey, not just
+      // the default, once settings have loaded.
+      parts:
+        def.id === "globalTerminal" && globalHotkey
+          ? bindingToDisplayParts(globalHotkey, isMac)
+          : getDisplayParts(def, isMac),
+    })),
+  }));
+}
 
 interface ShortcutsHelpProps {
   open: boolean;
@@ -203,7 +165,7 @@ export const ShortcutsHelp = memo(function ShortcutsHelp({ open, onClose }: Shor
   const [notice, setNotice] = useState<string | null>(null);
 
   const labelFor = useCallback(
-    (key: ShortcutDescriptionKey): string => {
+    (key: string): string => {
       const v = t(key as never) as unknown as string;
       if (typeof v === "string" && v !== key) return v;
       const fb = (IN_APP_FALLBACK_EN as Partial<Record<string, string>>)[key];
@@ -233,17 +195,21 @@ export const ShortcutsHelp = memo(function ShortcutsHelp({ open, onClose }: Shor
   }, [open ]);
 
   const filtered = useMemo(() => {
+    const categories = buildReferenceCategories(globalHotkey, detectMac());
     const q = query.trim().toLowerCase();
-    if (!q) return SHORTCUTS;
-    return SHORTCUTS.map((cat) => ({
-      nameKey: cat.nameKey,
-      shortcuts: cat.shortcuts.filter(
-        (s) =>
-          labelFor(s.descriptionKey).toLowerCase().includes(q) ||
-          s.keys.some((k) => k.toLowerCase().includes(q))
-      ),
-    })).filter((cat) => cat.shortcuts.length > 0);
-  }, [query, labelFor]);
+    if (!q) return categories;
+    return categories
+      .map((cat) => ({
+        ...cat,
+        rows: cat.rows.filter(
+          (row) =>
+            labelFor(row.def.descriptionKey).toLowerCase().includes(q) ||
+            row.parts.some((k) => k.toLowerCase().includes(q)) ||
+            row.def.defaultBinding.toLowerCase().includes(q)
+        ),
+      }))
+      .filter((cat) => cat.rows.length > 0);
+  }, [query, globalHotkey, labelFor]);
 
   const filteredInApp = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -359,21 +325,21 @@ export const ShortcutsHelp = memo(function ShortcutsHelp({ open, onClose }: Shor
 
         <div className="max-h-[50vh] overflow-y-auto space-y-3 pr-0.5">
           {filtered.map((cat) => (
-            <div key={cat.nameKey}>
+            <div key={cat.group}>
               <h3 className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">
-                {t(cat.nameKey)}
+                {t(cat.nameKey as never)}
               </h3>
               <div>
-                {cat.shortcuts.map((s) => (
+                {cat.rows.map((row) => (
                   <div
-                    key={s.descriptionKey}
+                    key={row.def.id}
                     className="flex items-center justify-between py-1 px-1.5 rounded-md hover:bg-gray-50 dark:hover:bg-gray-800/50"
                   >
                     <span className="text-[13px] text-gray-700 dark:text-gray-300">
-                      {labelFor(s.descriptionKey)}
+                      {labelFor(row.def.descriptionKey)}
                     </span>
                     <div className="flex items-center gap-0.5 ml-3 shrink-0">
-                      {s.keys.map((k, i) => (
+                      {row.parts.map((k, i) => (
                         <span key={i} className="flex items-center gap-0.5">
                           {i > 0 && <span className="text-[11px] text-gray-400">+</span>}
                           <KbdBadge label={k} size="sm" />

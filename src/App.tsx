@@ -40,6 +40,8 @@ import { parseError, isBenignFetchFailure, createErrorAggregator } from "./lib/t
 import { setRecentCommand } from "./lib/recentCommands";
 import { isShortcutCapturing } from "./lib/shortcutCapture";
 import { isDirtyChord } from "./lib/heldKeys";
+import { definitionById } from "./lib/shortcutRegistry";
+import { matchesBinding } from "./lib/inAppShortcuts";
 import type { DashboardFilter } from "./components/DashboardView";
 import { gitFetch, gitPull, gitPush, gitStash, getSettings, onDragDropEnter, onDragDropLeave, onDragDropResult, logOperation } from "./lib/tauri";
 import { useTranslation } from "react-i18next";
@@ -628,40 +630,38 @@ export default function App() {
       // (`Ctrl` `z` `1` must not be `Ctrl+1`). Bare keys/Escape are unaffected.
       const chordClean = !isDirtyChord(e);
 
-      // View mode shortcuts: Ctrl/Cmd+1 through Ctrl/Cmd+5
+      // View modes and fetch-all, looked up in the canonical registry
+      // (shortcutRegistry.ts) instead of hardcoded key literals.
+      //
+      // Refresh-all is deliberately NOT handled here anymore: it has exactly
+      // ONE owner, the rebindable table in useKeyboardShortcuts (registry
+      // entry refreshAll). That handler also swallows a dirty Cmd+R, so
+      // removing the duplicate here cannot leak the chord to the webview's
+      // native reload. Cmd+/ (shortcuts help) and Cmd+D (quick diff) are
+      // likewise owned by that table.
       if (e.ctrlKey || e.metaKey) {
         const viewModes: ViewMode[] = ["card", "list", "compact", "table", "dashboard"];
-        const num = parseInt(e.key, 10);
-        const isChord =
-          (num >= 1 && num <= 5) ||
-          (e.key === "r" && !e.shiftKey) ||
-          (e.shiftKey && e.key === "G");
-
-        // A dirty chord is swallowed, not reinterpreted: it must neither run
-        // our action nor fall through to the webview's native Cmd+R reload.
-        if (!chordClean && isChord) {
-          e.preventDefault();
-          return;
+        const viewIds = ["viewCard", "viewList", "viewCompact", "viewTable", "viewDashboard"];
+        for (let i = 0; i < viewIds.length; i++) {
+          const def = definitionById(viewIds[i]);
+          if (def && matchesBinding(e, def.defaultBinding)) {
+            // A dirty chord is swallowed, not reinterpreted.
+            if (!chordClean) {
+              e.preventDefault();
+              return;
+            }
+            e.preventDefault();
+            setViewMode(viewModes[i]);
+            return;
+          }
         }
 
-        if (num >= 1 && num <= 5) {
-          e.preventDefault();
-          setViewMode(viewModes[num - 1]);
-          return;
-        }
-
-        // Cmd+/ (shortcuts help) and Cmd+D (quick diff) are owned by the
-        // rebindable table in useKeyboardShortcuts, which toggles them.
-
-        // Cmd+R — refresh all projects
-        if (e.key === "r" && !e.shiftKey) {
-          e.preventDefault();
-          refreshAll();
-          return;
-        }
-
-        // Cmd+Shift+G — fetch all projects
-        if (e.shiftKey && e.key === "G") {
+        const fetchDef = definitionById("fetchAll");
+        if (fetchDef && matchesBinding(e, fetchDef.defaultBinding)) {
+          if (!chordClean) {
+            e.preventDefault();
+            return;
+          }
           e.preventDefault();
           fetchAll();
           return;
@@ -713,7 +713,7 @@ export default function App() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [setViewMode, refreshAll, fetchAll, handleCloseTerminalPanel, dialogOpen, confirmDelete, exportImportOpen, exportArchiveOpen, bulkImportOpen, settingsOpen, paletteOpen, shortcutsHelpOpen, quickDiffOpen, taskWorkspacesOpen, conflictResolvePath, batchPickerOpen, terminalPanelOpen]);
+  }, [setViewMode, fetchAll, handleCloseTerminalPanel, dialogOpen, confirmDelete, exportImportOpen, exportArchiveOpen, bulkImportOpen, settingsOpen, paletteOpen, shortcutsHelpOpen, quickDiffOpen, taskWorkspacesOpen, conflictResolvePath, batchPickerOpen, terminalPanelOpen]);
 
   // Project keyboard navigation (↑/↓/Enter/Space)
   useEffect(() => {
@@ -721,8 +721,24 @@ export default function App() {
       if (isShortcutCapturing()) return;
       const el = e.target as HTMLElement;
       if (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable) return;
-      // Skip if any dialog or palette is open
-      if (paletteOpen || dialogOpen || settingsOpen || exportImportOpen || confirmDelete) return;
+      // Skip if any dialog or panel is open (FR2: dialog context outranks
+      // list context, so list keys never fire underneath an overlay).
+      if (
+        paletteOpen ||
+        dialogOpen ||
+        settingsOpen ||
+        exportImportOpen ||
+        exportArchiveOpen ||
+        bulkImportOpen ||
+        shortcutsHelpOpen ||
+        quickDiffOpen ||
+        taskWorkspacesOpen ||
+        conflictResolvePath !== null ||
+        batchPickerOpen ||
+        terminalPanelOpen ||
+        confirmDelete
+      )
+        return;
 
       const count = sortedProjects.length;
       if (count === 0) return;
@@ -748,7 +764,7 @@ export default function App() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [paletteOpen, dialogOpen, settingsOpen, exportImportOpen, confirmDelete, sortedProjects, focusIndex, refreshProject]);
+  }, [paletteOpen, dialogOpen, settingsOpen, exportImportOpen, exportArchiveOpen, bulkImportOpen, shortcutsHelpOpen, quickDiffOpen, taskWorkspacesOpen, conflictResolvePath, batchPickerOpen, terminalPanelOpen, confirmDelete, sortedProjects, focusIndex, refreshProject]);
 
   // Scroll focused project into view
   useEffect(() => {
