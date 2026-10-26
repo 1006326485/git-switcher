@@ -3,9 +3,11 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import App from "./App";
 
 /**
- * App.tsx owns a second set of Cmd/Ctrl chords (view modes, Cmd+/, Cmd+D,
- * Cmd+R, Cmd+W). They must obey the same clean-chord rule as the rebindable
- * shortcuts: `Ctrl` `z` `/` is not `Ctrl+/`.
+ * App.tsx owns a second set of Cmd/Ctrl chords (view modes, Cmd+W). They
+ * must obey the same clean-chord rule as the rebindable shortcuts:
+ * `Ctrl` `z` `/` is not `Ctrl+/`. Cmd+/, Cmd+D and Cmd+R are owned by the
+ * rebindable table in useKeyboardShortcuts (registry entries) — Cmd+R has
+ * exactly one owner since the Phase 1 single-owner fix.
  */
 
 vi.mock("@tauri-apps/api/event", () => ({

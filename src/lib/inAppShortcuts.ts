@@ -12,35 +12,14 @@ export type ActionId =
   | "selectFocused"
   | "toggleTerminal";
 
-export const DEFAULT_IN_APP_SHORTCUTS: Record<ActionId, string> = {
-  addProject: "CmdOrCtrl+N",
-  refreshAll: "CmdOrCtrl+R",
-  focusSearch: "CmdOrCtrl+F",
-  exportImport: "CmdOrCtrl+E",
-  toggleSidebar: "CmdOrCtrl+B",
-  commandPalette: "CmdOrCtrl+K",
-  shortcutsHelp: "CmdOrCtrl+/",
-  quickDiff: "CmdOrCtrl+D",
-  navigateDown: "J",
-  navigateUp: "K",
-  selectFocused: "Enter",
-  toggleTerminal: "Control+~",
-};
+import { getInAppDefaults, getSettingsFieldMap } from "./shortcutRegistry";
 
-export const SETTINGS_FIELD_TO_ACTION_ID: Record<string, ActionId> = {
-  in_app_add_project: "addProject",
-  in_app_refresh_all: "refreshAll",
-  in_app_focus_search: "focusSearch",
-  in_app_export_import: "exportImport",
-  in_app_toggle_sidebar: "toggleSidebar",
-  in_app_command_palette: "commandPalette",
-  in_app_shortcuts_help: "shortcutsHelp",
-  in_app_quick_diff: "quickDiff",
-  in_app_navigate_down: "navigateDown",
-  in_app_navigate_up: "navigateUp",
-  in_app_select_focused: "selectFocused",
-  in_app_toggle_terminal: "toggleTerminal",
-};
+// The 12 rebindable defaults now live in the canonical registry
+// (src/lib/shortcutRegistry.ts) and are re-exported here so existing
+// imports and tests keep working. Values are unchanged.
+export const DEFAULT_IN_APP_SHORTCUTS: Record<ActionId, string> = getInAppDefaults();
+
+export const SETTINGS_FIELD_TO_ACTION_ID: Record<string, ActionId> = getSettingsFieldMap();
 
 interface ParsedBinding {
   needCmdOrCtrl: boolean;

@@ -9,6 +9,12 @@ const MAC_SYMBOLS: Record<string, string> = {
   alt: "⌥",
   option: "⌥",
   shift: "⇧",
+  // Arrow keys render as glyphs on every platform (the registry's arrow
+  // rows are display-only pairs, e.g. "ArrowUp+ArrowDown" -> ["↑", "↓"]).
+  arrowup: "↑",
+  arrowdown: "↓",
+  arrowleft: "←",
+  arrowright: "→",
 };
 
 const PC_LABELS: Record<string, string> = {
@@ -22,6 +28,10 @@ const PC_LABELS: Record<string, string> = {
   alt: "Alt",
   option: "Alt",
   shift: "Shift",
+  arrowup: "↑",
+  arrowdown: "↓",
+  arrowleft: "←",
+  arrowright: "→",
 };
 
 export function detectMac(): boolean {
