@@ -20,4 +20,11 @@ describe("formatHotkey", () => {
   it("tolerates stray whitespace around segments", () => {
     expect(formatHotkey(" CmdOrCtrl + Shift + ` ", true)).toBe("⌘⇧`");
   });
+
+  it("renders arrow keys as glyphs on both platforms (registry arrow rows)", () => {
+    expect(formatHotkey("ArrowUp+ArrowDown", true)).toBe("↑↓");
+    expect(formatHotkey("ArrowUp+ArrowDown", false)).toBe("↑+↓");
+    expect(formatHotkey("CmdOrCtrl+ArrowLeft+ArrowRight", true)).toBe("⌘←→");
+    expect(formatHotkey("CmdOrCtrl+ArrowLeft+ArrowRight", false)).toBe("Ctrl+←+→");
+  });
 });

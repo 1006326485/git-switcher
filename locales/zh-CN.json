@@ -420,7 +420,8 @@
     "git": {
       "refreshAll": "刷新所有项目",
       "importExport": "导入 / 导出",
-      "quickDiff": "快速差异概览"
+      "quickDiff": "快速差异概览",
+      "fetchAll": "拉取所有项目"
     },
     "view": {
       "focusSearch": "聚焦搜索",

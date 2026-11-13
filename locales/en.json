@@ -420,7 +420,8 @@
     "git": {
       "refreshAll": "Refresh all projects",
       "importExport": "Import / Export",
-      "quickDiff": "Quick Diff overview"
+      "quickDiff": "Quick Diff overview",
+      "fetchAll": "Fetch all projects"
     },
     "view": {
       "focusSearch": "Focus search",

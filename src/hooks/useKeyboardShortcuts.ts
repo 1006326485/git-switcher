@@ -1,11 +1,17 @@
 import { useEffect } from "react";
 import {
-  DEFAULT_IN_APP_SHORTCUTS,
   bindingUsesModifier,
   matchesBinding,
   matchesGlobalHotkey,
+  resolveInAppShortcuts,
   type ActionId,
 } from "../lib/inAppShortcuts";
+// Context priority (FR2, see shortcutRegistry.ts CONTEXT_PRIORITY): this
+// handler owns the app/list levels. Recorder capture (1) is checked first,
+// the backend global hotkey (7) is suppressed below so it never double-fires,
+// and dialog (2) / terminal (3) / palette (4) contexts own their keys in
+// their own handlers (App.tsx, TerminalWorkspace's capture-phase listener,
+// CommandPalette) before this handler can act on them.
 import { hasOtherKeyHeld, installHeldKeyTracking } from "../lib/heldKeys";
 import { detectMac } from "../lib/hotkey";
 import { isShortcutCapturing } from "../lib/shortcutCapture";
@@ -35,11 +41,10 @@ export function useKeyboardShortcuts(
   useEffect(() => {
     const overrides: Partial<Record<ActionId, string>> =
       (JSON.parse(bindingsKey) as Partial<Record<ActionId, string>> | null) ?? {};
-    const merged: Record<ActionId, string> = { ...DEFAULT_IN_APP_SHORTCUTS };
-    (Object.keys(DEFAULT_IN_APP_SHORTCUTS) as ActionId[]).forEach((k) => {
-      const v = overrides[k];
-      if (typeof v === "string" && v) merged[k] = v;
-    });
+    // Defaults come from the canonical registry via resolveInAppShortcuts;
+    // this handler is the SINGLE OWNER of refreshAll (registry note), so a
+    // rebind here cannot leave a second hardcoded handler behind.
+    const merged = resolveInAppShortcuts(overrides);
 
     const handler = (e: KeyboardEvent) => {
       if (isShortcutCapturing()) return;
