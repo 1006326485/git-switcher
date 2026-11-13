@@ -32,6 +32,13 @@ const actions: Actions = {
   currentTheme: "light",
   onRunProjectScript: vi.fn(),
   onLaunchWorkspace: vi.fn(),
+  onOpenBuiltInTerminal: vi.fn(),
+  onOpenSystemTerminal: vi.fn(),
+  onOpenFinder: vi.fn(),
+  onOpenVscode: vi.fn(),
+  onCopyPath: vi.fn(),
+  onFocusTerminal: vi.fn(),
+  onClearTerminal: vi.fn(),
 };
 
 function press(

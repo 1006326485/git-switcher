@@ -102,7 +102,10 @@
       "inAppTerminalHint": "In-app shortcut that toggles the built-in terminal panel (configurable in the Shortcuts panel). The global shortcut also toggles the panel while the main window is focused.",
       "hideTerminalOnBlur": "Hide Terminal on Blur",
       "hideTerminalOnBlurDesc": "Dismiss the summoned terminal window when it loses focus",
-      "hideTerminalOnBlurAria": "Hide terminal on blur"
+      "hideTerminalOnBlurAria": "Hide terminal on blur",
+      "disableBareKeyNavigation": "Disable bare-key navigation",
+      "disableBareKeyNavigationDesc": "J, K and Space stop navigating the project list. Arrow keys and Enter keep working.",
+      "disableBareKeyNavigationAria": "Disable bare-key navigation"
     },
     "data": {
       "description": "Export all settings, projects, and groups to a JSON file, or import from a previous export.",
@@ -438,7 +441,13 @@
       "jumpProject": "Jump to terminal in current project",
       "closeTab": "Close terminal tab",
       "newTab": "New terminal in selected project",
-      "closeTabKey": "Close current terminal tab"
+      "closeTabKey": "Close current terminal tab",
+      "switchGroupPrev": "Switch to previous project group in terminal",
+      "switchGroupNext": "Switch to next project group in terminal",
+      "switchTabPrev": "Switch to previous terminal tab",
+      "switchTabNext": "Switch to next terminal tab",
+      "focusInput": "Focus terminal input",
+      "clearScreen": "Clear terminal scrollback"
     },
     "inApp": {
       "addProject": "Add project",
@@ -452,7 +461,8 @@
       "navigateDown": "Move selection down",
       "navigateUp": "Move selection up",
       "selectFocused": "Expand focused project",
-      "toggleTerminal": "Toggle built-in terminal"
+      "toggleTerminal": "Toggle built-in terminal",
+      "openSettings": "Open Settings"
     },
     "editor": {
       "capture": "Recording… press a key combination",
@@ -462,7 +472,9 @@
       "restoreDefaults": "Restore defaults",
       "save": "Save",
       "cancel": "Cancel",
-      "pressKeys": "Press a key combination"
+      "pressKeys": "Press a key combination",
+      "digitRange": "Jump shortcuts need a digit key (e.g. Alt+1)",
+      "unbound": "Unbound"
     }
   },
   "dashboard": {
@@ -1018,6 +1030,15 @@
     "bulkImport": "Bulk Import",
     "exportArchive": "Export Archive",
     "settings": "Settings",
+    "catTerminal": "Terminal",
+    "openBuiltinTerminal": "Open in Built-in Terminal",
+    "openSystemTerminal": "Open in System Terminal",
+    "openFinder": "Open in Finder",
+    "openVscode": "Open in VS Code",
+    "copyPath": "Copy Project Path",
+    "copiedPath": "Path copied",
+    "focusTerminal": "Focus Terminal",
+    "clearTerminal": "Clear Terminal",
     "workspaceSuffix": "Workspace · {{count}} terminals"
   },
   "palette": {

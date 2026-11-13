@@ -35,9 +35,42 @@ import { ContextMenu, MenuSeparator } from "./ui/ContextMenu";
 import { useContextMenu } from "../hooks/useContextMenu";
 import { isShortcutCapturing } from "../lib/shortcutCapture";
 import { isDirtyChord } from "../lib/heldKeys";
+import { listen } from "@tauri-apps/api/event";
+import { detectMac } from "../lib/hotkey";
+import {
+  matchDigitRange,
+  matchesGlobalHotkey,
+  overridesFromSettings,
+  parseBinding,
+  resolveInAppShortcuts,
+  type ActionId,
+} from "../lib/inAppShortcuts";
 
-/** The keys this workspace claims as its own Cmd/Ctrl chords. */
+/** The keys this workspace claims as its own Cmd/Ctrl chords (defaults). */
 const WORKSPACE_CHORD_CODE = /^(Key[NW]|Arrow(Up|Down|Left|Right)|Digit[1-9])$/;
+
+/**
+ * True when a (possibly rebound) binding's key maps to this physical code.
+ * Used only for the dirty-chord swallow: a chord that still has another key
+ * held must not fire, but must not leak to the shell either, for keys this
+ * handler owns. Digit-range bindings own every Digit1-9 code.
+ */
+function bindingOwnsCode(binding: string, code: string): boolean {
+  const p = parseBinding(binding);
+  if (!p) return false;
+  if (p.isBackquote) return code === "Backquote";
+  const key = p.key;
+  if (key === "Digit") return /^Digit[1-9]$/.test(code);
+  if (/^Arrow/.test(key)) return code === key;
+  if (/^[a-zA-Z]$/.test(key)) return code === "Key" + key.toUpperCase();
+  if (/^[0-9]$/.test(key)) return code === "Digit" + key;
+  if (key === ",") return code === "Comma";
+  if (key === " ") return code === "Space";
+  if (key.toLowerCase() === "enter") return code === "Enter";
+  if (key.toLowerCase() === "escape") return code === "Escape";
+  if (key.toLowerCase() === "tab") return code === "Tab";
+  return code === key;
+}
 
 const HOME_TARGET = "__home__";
 
@@ -58,6 +91,10 @@ interface TerminalWorkspaceProps {
   initial: TerminalLaunchTarget | null;
   workspaceLaunch: WorkspaceLaunch | null;
   onClose: () => void;
+  /** Increment to focus the active terminal (palette command path). */
+  focusSignal?: number;
+  /** Increment to clear the active terminal's scrollback (palette path). */
+  clearSignal?: number;
   /** Extra content on the title band (e.g. the summon hotkey hint). */
   headerExtra?: ReactNode;
   /** Render the header as the window title bar: draggable, red-light inset. */
@@ -256,6 +293,8 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
   headerExtra,
   headerDraggable,
   hideHeader,
+  focusSignal,
+  clearSignal,
 }: TerminalWorkspaceProps) {
   const {
     sessions,
@@ -285,6 +324,54 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
   const { t } = useTranslation();
   const fallbackTitle = t("terminal.title");
   const { theme } = useTheme();
+
+  // FR2 (Phase 2 narrowing): terminal context means focus is inside this
+  // workspace's own DOM. The ref is attached to the window-root element
+  // below; in the standalone window that covers everything, in the main
+  // window only the terminal panel.
+  const workspaceRootRef = useRef<HTMLDivElement | null>(null);
+
+  // Rebindable terminal bindings (Phase 2, FR3), resolved from settings
+  // the same way App.tsx resolves the app actions. Defaults come from the
+  // registry, so a missing settings field (or an older settings file)
+  // simply keeps the default.
+  const [termBindings, setTermBindings] = useState<Partial<Record<ActionId, string>>>({});
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      const getSettings = (api as { getSettings?: unknown }).getSettings;
+      if (typeof getSettings !== "function") return;
+      (getSettings as () => Promise<unknown>)()
+        .then((s) => {
+          if (!cancelled) setTermBindings(overridesFromSettings(s as Record<string, unknown>));
+        })
+        .catch(() => {});
+    };
+    load();
+    const unlisten = listen("settings-changed", load);
+    return () => {
+      cancelled = true;
+      unlisten.then((f) => f());
+    };
+  }, []);
+
+  // Palette command paths (Phase 2, FR10): a signal increment focuses or
+  // clears the active terminal. The prev refs keep the initial signal
+  // value from firing on mount; opening the panel already auto-focuses
+  // via the open/activeId effect, so consuming a signal while closed
+  // loses nothing.
+  const prevFocusSignal = useRef(focusSignal);
+  const prevClearSignal = useRef(clearSignal);
+  useEffect(() => {
+    if (focusSignal === undefined || focusSignal === prevFocusSignal.current) return;
+    prevFocusSignal.current = focusSignal;
+    if (open && activeId) focusTerminal(activeId);
+  }, [focusSignal, open, activeId, focusTerminal]);
+  useEffect(() => {
+    if (clearSignal === undefined || clearSignal === prevClearSignal.current) return;
+    prevClearSignal.current = clearSignal;
+    if (open && activeId) clearScreen(activeId);
+  }, [clearSignal, open, activeId, clearScreen]);
   const [error, setError] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
   const [presets, setPresets] = useState<RunPreset[]>([]);
@@ -472,57 +559,122 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
       if (isShortcutCapturing()) return;
-      if (e.metaKey && !e.ctrlKey && !e.altKey) {
-        // A chord that still has another key held must not fire. Swallow it
-        // only for the keys this handler owns, so a simultaneous Cmd+C/Cmd+A
-        // keeps its native meaning.
-        if (isDirtyChord(e)) {
-          if (WORKSPACE_CHORD_CODE.test(e.code)) e.preventDefault();
-          return;
-        }
-        if (e.code === "KeyN") {
+      // FR2 (Phase 2 narrowing): this handler owns the keystroke only
+      // when focus is inside the workspace's own DOM. In the standalone
+      // window that is everything; in the main window an open panel no
+      // longer steals app shortcuts while the user works in the project
+      // list, and a dialog above the panel wins outright.
+      const root = workspaceRootRef.current;
+      if (!root || !(e.target instanceof Node) || !root.contains(e.target)) return;
+      const merged = resolveInAppShortcuts(termBindings);
+      const isMac = detectMac();
+      // A chord that still has another key held must not fire. Swallow it
+      // only for the keys this handler owns, so a simultaneous Cmd+C/Cmd+A
+      // keeps its native meaning, and a rebound binding's keys are owned
+      // the same way the defaults are.
+      if (isDirtyChord(e)) {
+        // Only terminal bindings own keys here: an app binding's dirty
+        // chord is the app handler's business, not this handler's.
+        const terminalIds: ActionId[] = [
+          "terminalSwitchGroupPrev",
+          "terminalSwitchGroupNext",
+          "terminalSwitchTabPrev",
+          "terminalSwitchTabNext",
+          "terminalJumpIndex",
+          "terminalJumpProject",
+          "terminalNewTab",
+          "terminalCloseTab",
+          "terminalFocusInput",
+          "terminalClearScreen",
+        ];
+        if (
+          (e.metaKey || e.ctrlKey || e.altKey) &&
+          (WORKSPACE_CHORD_CODE.test(e.code) ||
+            terminalIds.some((id) => bindingOwnsCode(merged[id] ?? "", e.code)))
+        ) {
           e.preventDefault();
-          e.stopPropagation();
-          setNewMenuSignal((s) => s + 1);
-          return;
-        }
-        if (e.code === "KeyW") {
-          // No tabs: let it propagate (dialog-close or native hide).
-          if (activeId == null) return;
-          e.preventDefault();
-          e.stopPropagation();
-          void closeTerminal(activeId);
-          return;
-        }
-        if (e.code === "ArrowUp" || e.code === "ArrowDown") {
-          e.preventDefault();
-          selectAdjacentProject(e.code === "ArrowUp" ? -1 : 1);
-          return;
-        }
-        if (e.code === "ArrowLeft" || e.code === "ArrowRight") {
-          e.preventDefault();
-          selectAdjacentTerminal(e.code === "ArrowLeft" ? -1 : 1);
-          return;
-        }
-        const digit = /^Digit([1-9])$/.exec(e.code);
-        if (digit) {
-          e.preventDefault();
-          selectTerminalByIndex(Number(digit[1]) - 1);
         }
         return;
       }
-      if (e.altKey && !e.metaKey && !e.ctrlKey) {
-        const digit = /^Digit([1-9])$/.exec(e.code);
-        if (digit) {
-          e.preventDefault();
-          if (isDirtyChord(e)) return;
-          selectTerminalByIndex(Number(digit[1]) - 1);
-        }
+      // Bindings resolve platform-aware (Cmd on macOS, Ctrl elsewhere):
+      // Ctrl+key now reaches the shell on macOS instead of being claimed
+      // here, and the terminal shortcuts work on Windows/Linux, where the
+      // old metaKey-only check never fired. Shift variants are distinct
+      // chords (FR8), so Cmd+Shift+N is no longer a new tab.
+      if (matchesGlobalHotkey(e, merged.terminalNewTab, isMac)) {
+        e.preventDefault();
+        e.stopPropagation();
+        setNewMenuSignal((s) => s + 1);
+        return;
+      }
+      if (matchesGlobalHotkey(e, merged.terminalCloseTab, isMac)) {
+        // No tabs: let it propagate (dialog-close or native hide).
+        if (activeId == null) return;
+        e.preventDefault();
+        e.stopPropagation();
+        void closeTerminal(activeId);
+        return;
+      }
+      if (matchesGlobalHotkey(e, merged.terminalSwitchGroupPrev, isMac)) {
+        e.preventDefault();
+        selectAdjacentProject(-1);
+        return;
+      }
+      if (matchesGlobalHotkey(e, merged.terminalSwitchGroupNext, isMac)) {
+        e.preventDefault();
+        selectAdjacentProject(1);
+        return;
+      }
+      if (matchesGlobalHotkey(e, merged.terminalSwitchTabPrev, isMac)) {
+        e.preventDefault();
+        selectAdjacentTerminal(-1);
+        return;
+      }
+      if (matchesGlobalHotkey(e, merged.terminalSwitchTabNext, isMac)) {
+        e.preventDefault();
+        selectAdjacentTerminal(1);
+        return;
+      }
+      const jumpIndex = matchDigitRange(e, merged.terminalJumpIndex, isMac);
+      if (jumpIndex !== null) {
+        e.preventDefault();
+        selectTerminalByIndex(jumpIndex);
+        return;
+      }
+      const jumpProject = matchDigitRange(e, merged.terminalJumpProject, isMac);
+      if (jumpProject !== null) {
+        e.preventDefault();
+        selectTerminalByIndex(jumpProject);
+        return;
+      }
+      // Unbound by default (empty binding never matches): these fire only
+      // when the user records a binding in the Shortcuts editor, or via
+      // the palette commands. They stop propagation so the shell never
+      // sees a chord the app consumed.
+      if (
+        merged.terminalFocusInput &&
+        matchesGlobalHotkey(e, merged.terminalFocusInput, isMac)
+      ) {
+        if (activeId == null) return;
+        e.preventDefault();
+        e.stopPropagation();
+        focusTerminal(activeId);
+        return;
+      }
+      if (
+        merged.terminalClearScreen &&
+        matchesGlobalHotkey(e, merged.terminalClearScreen, isMac)
+      ) {
+        if (activeId == null) return;
+        e.preventDefault();
+        e.stopPropagation();
+        clearScreen(activeId);
+        return;
       }
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [open, activeId, closeTerminal, selectAdjacentProject, selectTerminalByIndex, selectAdjacentTerminal]);
+  }, [open, activeId, closeTerminal, selectAdjacentProject, selectTerminalByIndex, selectAdjacentTerminal, termBindings, focusTerminal, clearScreen]);
 
   const loadPresets = useCallback(() => {
     api
@@ -719,7 +871,7 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
 
   return (
     <>
-    <div className="window-root flex h-full min-h-0 flex-col overflow-hidden">
+    <div ref={workspaceRootRef} className="window-root flex h-full min-h-0 flex-col overflow-hidden">
       {/* Header — edge-to-edge title band with only a bottom hairline.
           Not rendered when the host window draws the title itself (the
           summoned window puts it in the overlay bar next to the traffic

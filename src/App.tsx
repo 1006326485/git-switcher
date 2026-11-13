@@ -34,16 +34,15 @@ import { useRecentProjects } from "./hooks/useRecentProjects";
 import { useGitOpTracker } from "./hooks/useGitOpTracker";
 import { useOperationHistory } from "./hooks/useOperationHistory";
 import { syncLanguageFromSettings } from "./hooks/useLanguage";
-import type { ViewMode, SortOption, RunPresetItem, AppSettings } from "./lib/types";
+import type { SortOption, RunPresetItem, AppSettings } from "./lib/types";
 import type { ActionId } from "./lib/inAppShortcuts";
 import { parseError, isBenignFetchFailure, createErrorAggregator } from "./lib/types";
 import { setRecentCommand } from "./lib/recentCommands";
 import { isShortcutCapturing } from "./lib/shortcutCapture";
 import { isDirtyChord } from "./lib/heldKeys";
-import { definitionById } from "./lib/shortcutRegistry";
-import { matchesBinding } from "./lib/inAppShortcuts";
+import { overridesFromSettings } from "./lib/inAppShortcuts";
 import type { DashboardFilter } from "./components/DashboardView";
-import { gitFetch, gitPull, gitPush, gitStash, getSettings, onDragDropEnter, onDragDropLeave, onDragDropResult, logOperation } from "./lib/tauri";
+import { gitFetch, gitPull, gitPush, gitStash, getSettings, openInTerminal, openInFinder, openInVscode, onDragDropEnter, onDragDropLeave, onDragDropResult, logOperation } from "./lib/tauri";
 import { useTranslation } from "react-i18next";
 import { Modal } from "./components/ui/primitives";
 
@@ -88,6 +87,8 @@ export default function App() {
   const [shortcutsHelpOpen, setShortcutsHelpOpen] = useState(false);
   const [quickDiffOpen, setQuickDiffOpen] = useState(false);
   const [terminalPanelOpen, setTerminalPanelOpen] = useState(false);
+  // FR6: bare-key navigation switch (loaded from settings below).
+  const [bareKeysDisabled, setBareKeysDisabled] = useState(false);
   const [terminalInitial, setTerminalInitial] = useState<{
     cwd: string;
     title: string;
@@ -466,6 +467,39 @@ export default function App() {
     [projects, handleLaunchWorkspace]
   );
   const handleToggleTerminalPanel = useCallback(() => setTerminalPanelOpen((v) => !v), []);
+
+  // Palette commands for terminal focus/clear (Phase 2, FR10). Opening the
+  // panel is part of the action — a closed panel has nothing to focus —
+  // and the signal makes TerminalWorkspace act even when the panel was
+  // already open (its existing open/activeId effect only fires on open).
+  const [terminalFocusSignal, setTerminalFocusSignal] = useState(0);
+  const [terminalClearSignal, setTerminalClearSignal] = useState(0);
+  const handleFocusTerminal = useCallback(() => {
+    setTerminalPanelOpen(true);
+    setTerminalFocusSignal((s) => s + 1);
+  }, []);
+  const handleClearTerminal = useCallback(() => {
+    setTerminalPanelOpen(true);
+    setTerminalClearSignal((s) => s + 1);
+  }, []);
+
+  // Palette commands for per-project "open in …" actions (Phase 2, FR10).
+  // These reuse the exact implementations behind the context menu.
+  const handleOpenSystemTerminal = useCallback((path: string) => {
+    void openInTerminal(path).catch((e) => toast.error(parseError(e)));
+  }, [toast]);
+  const handleOpenFinder = useCallback((path: string) => {
+    void openInFinder(path).catch((e) => toast.error(parseError(e)));
+  }, [toast]);
+  const handleOpenVscode = useCallback((path: string) => {
+    void openInVscode(path).catch((e) => toast.error(parseError(e)));
+  }, [toast]);
+  const handleCopyPath = useCallback((path: string) => {
+    void navigator.clipboard
+      .writeText(path)
+      .then(() => toast.success(t("cmd.copiedPath")))
+      .catch((e) => toast.error(parseError(e)));
+  }, [toast, t]);
   const handleCloseTerminalPanel = useCallback(() => {
     setTerminalPanelOpen(false);
     setTerminalInitial(null);
@@ -517,6 +551,17 @@ export default function App() {
       currentTheme: theme,
       onRunProjectScript: handleRunProjectScript,
       onLaunchWorkspace: handleLaunchWorkspace,
+      onOpenBuiltInTerminal: (path) =>
+        handleOpenBuiltInTerminal(
+          path,
+          projects.find((p) => p.project.path === path)?.project.name ?? path
+        ),
+      onOpenSystemTerminal: handleOpenSystemTerminal,
+      onOpenFinder: handleOpenFinder,
+      onOpenVscode: handleOpenVscode,
+      onCopyPath: handleCopyPath,
+      onFocusTerminal: handleFocusTerminal,
+      onClearTerminal: handleClearTerminal,
     },
     projects,
     recentProjectsList,
@@ -630,43 +675,11 @@ export default function App() {
       // (`Ctrl` `z` `1` must not be `Ctrl+1`). Bare keys/Escape are unaffected.
       const chordClean = !isDirtyChord(e);
 
-      // View modes and fetch-all, looked up in the canonical registry
-      // (shortcutRegistry.ts) instead of hardcoded key literals.
-      //
-      // Refresh-all is deliberately NOT handled here anymore: it has exactly
-      // ONE owner, the rebindable table in useKeyboardShortcuts (registry
-      // entry refreshAll). That handler also swallows a dirty Cmd+R, so
-      // removing the duplicate here cannot leak the chord to the webview's
-      // native reload. Cmd+/ (shortcuts help) and Cmd+D (quick diff) are
-      // likewise owned by that table.
-      if (e.ctrlKey || e.metaKey) {
-        const viewModes: ViewMode[] = ["card", "list", "compact", "table", "dashboard"];
-        const viewIds = ["viewCard", "viewList", "viewCompact", "viewTable", "viewDashboard"];
-        for (let i = 0; i < viewIds.length; i++) {
-          const def = definitionById(viewIds[i]);
-          if (def && matchesBinding(e, def.defaultBinding)) {
-            // A dirty chord is swallowed, not reinterpreted.
-            if (!chordClean) {
-              e.preventDefault();
-              return;
-            }
-            e.preventDefault();
-            setViewMode(viewModes[i]);
-            return;
-          }
-        }
-
-        const fetchDef = definitionById("fetchAll");
-        if (fetchDef && matchesBinding(e, fetchDef.defaultBinding)) {
-          if (!chordClean) {
-            e.preventDefault();
-            return;
-          }
-          e.preventDefault();
-          fetchAll();
-          return;
-        }
-      }
+      // View modes, fetch-all, and Open Settings are NOT handled here
+      // anymore: since Phase 2 they are rebindable actions owned by
+      // useKeyboardShortcuts (registry entries viewCard…viewDashboard,
+      // fetchAll, openSettings), just like refreshAll since Phase 1. A
+      // rebind there can no longer leave a hardcoded chord behind here.
 
       // Escape or Cmd+W closes whatever dialog/panel is open.
       const closingChord = (e.metaKey || e.ctrlKey) && e.key === "w";
@@ -713,7 +726,7 @@ export default function App() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [setViewMode, fetchAll, handleCloseTerminalPanel, dialogOpen, confirmDelete, exportImportOpen, exportArchiveOpen, bulkImportOpen, settingsOpen, paletteOpen, shortcutsHelpOpen, quickDiffOpen, taskWorkspacesOpen, conflictResolvePath, batchPickerOpen, terminalPanelOpen]);
+  }, [handleCloseTerminalPanel, dialogOpen, confirmDelete, exportImportOpen, exportArchiveOpen, bulkImportOpen, settingsOpen, paletteOpen, shortcutsHelpOpen, quickDiffOpen, taskWorkspacesOpen, conflictResolvePath, batchPickerOpen, terminalPanelOpen]);
 
   // Project keyboard navigation (↑/↓/Enter/Space)
   useEffect(() => {
@@ -743,6 +756,12 @@ export default function App() {
       const count = sortedProjects.length;
       if (count === 0) return;
 
+      // FR6: with bare-key navigation disabled, J/K/Space never navigate
+      // here. Arrows and Enter are unaffected (Enter also activates
+      // focused controls, so it is not a navigation-only key).
+      const bare = (e.key === "j" || e.key === "k" || e.key === " ") && bareKeysDisabled;
+      if (bare) return;
+
       if (e.key === "ArrowDown" || e.key === "j") {
         e.preventDefault();
         setFocusIndex((i) => Math.min(i + 1, count - 1));
@@ -764,7 +783,7 @@ export default function App() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [paletteOpen, dialogOpen, settingsOpen, exportImportOpen, exportArchiveOpen, bulkImportOpen, shortcutsHelpOpen, quickDiffOpen, taskWorkspacesOpen, conflictResolvePath, batchPickerOpen, terminalPanelOpen, confirmDelete, sortedProjects, focusIndex, refreshProject]);
+  }, [paletteOpen, dialogOpen, settingsOpen, exportImportOpen, exportArchiveOpen, bulkImportOpen, shortcutsHelpOpen, quickDiffOpen, taskWorkspacesOpen, conflictResolvePath, batchPickerOpen, terminalPanelOpen, confirmDelete, sortedProjects, focusIndex, refreshProject, bareKeysDisabled]);
 
   // Scroll focused project into view
   useEffect(() => {
@@ -781,20 +800,10 @@ export default function App() {
       getSettings()
         .then((s: AppSettings) => {
           if (cancelled) return;
-          const next: Partial<Record<ActionId, string>> = {};
-          if (s.in_app_add_project) next.addProject = s.in_app_add_project;
-          if (s.in_app_refresh_all) next.refreshAll = s.in_app_refresh_all;
-          if (s.in_app_focus_search) next.focusSearch = s.in_app_focus_search;
-          if (s.in_app_export_import) next.exportImport = s.in_app_export_import;
-          if (s.in_app_toggle_sidebar) next.toggleSidebar = s.in_app_toggle_sidebar;
-          if (s.in_app_command_palette) next.commandPalette = s.in_app_command_palette;
-          if (s.in_app_shortcuts_help) next.shortcutsHelp = s.in_app_shortcuts_help;
-          if (s.in_app_quick_diff) next.quickDiff = s.in_app_quick_diff;
-          if (s.in_app_navigate_down) next.navigateDown = s.in_app_navigate_down;
-          if (s.in_app_navigate_up) next.navigateUp = s.in_app_navigate_up;
-          if (s.in_app_select_focused) next.selectFocused = s.in_app_select_focused;
-          if (s.in_app_toggle_terminal) next.toggleTerminal = s.in_app_toggle_terminal;
-          setInAppBindings(next);
+          // Registry-driven: every rebindable action's stored binding is
+          // picked up here automatically, including Phase 2 additions.
+          setInAppBindings(overridesFromSettings(s as unknown as Record<string, unknown>));
+          setBareKeysDisabled(s.disable_bare_key_navigation ?? false);
           setGlobalTerminalHotkey(s.terminal_hotkey ?? "");
         })
         .catch(() => {});
@@ -817,9 +826,13 @@ export default function App() {
       onToggleShortcutsHelp: handleToggleShortcutsHelp,
       onToggleQuickDiff: handleToggleQuickDiff,
       onToggleTerminal: handleToggleTerminalPanel,
+      onViewModeChange: setViewMode,
+      onFetchAll: fetchAll,
+      onOpenSettings: handleOpenSettings,
     },
     inAppBindings,
-    globalTerminalHotkey
+    globalTerminalHotkey,
+    { bareKeysDisabled }
   );
 
   const projectActions = useMemo(
@@ -1114,6 +1127,8 @@ export default function App() {
           initial={terminalInitial}
           workspaceLaunch={workspaceLaunch}
           onClose={handleCloseTerminalPanel}
+          focusSignal={terminalFocusSignal}
+          clearSignal={terminalClearSignal}
         />
       </Suspense>
 

@@ -34,6 +34,13 @@ interface Actions {
     script: { name: string; command: string }
   ) => void;
   onLaunchWorkspace: (items: RunPresetItem[]) => void;
+  onOpenBuiltInTerminal: (path: string) => void;
+  onOpenSystemTerminal: (path: string) => void;
+  onOpenFinder: (path: string) => void;
+  onOpenVscode: (path: string) => void;
+  onCopyPath: (path: string) => void;
+  onFocusTerminal: () => void;
+  onClearTerminal: () => void;
 }
 
 const QUICK_TAGS: {
@@ -292,6 +299,66 @@ export function useCommandPalette(
         action: () => {},
         _needsProject: true,
         _projectAction: actions.onExportArchive,
+      },
+
+      // Open in … / copy path (Phase 2, FR10): per-project commands that
+      // reuse the exact implementations behind the context menu. They
+      // need a project, so they run through the palette's project picker.
+      {
+        id: "open-builtin-terminal",
+        label: t("cmd.openBuiltinTerminal"),
+        category: t("cmd.catProjects"),
+        action: () => {},
+        _needsProject: true,
+        _projectAction: actions.onOpenBuiltInTerminal,
+      },
+      {
+        id: "open-system-terminal",
+        label: t("cmd.openSystemTerminal"),
+        category: t("cmd.catProjects"),
+        action: () => {},
+        _needsProject: true,
+        _projectAction: actions.onOpenSystemTerminal,
+      },
+      {
+        id: "open-finder",
+        label: t("cmd.openFinder"),
+        category: t("cmd.catProjects"),
+        action: () => {},
+        _needsProject: true,
+        _projectAction: actions.onOpenFinder,
+      },
+      {
+        id: "open-vscode",
+        label: t("cmd.openVscode"),
+        category: t("cmd.catProjects"),
+        action: () => {},
+        _needsProject: true,
+        _projectAction: actions.onOpenVscode,
+      },
+      {
+        id: "copy-path",
+        label: t("cmd.copyPath"),
+        category: t("cmd.catProjects"),
+        action: () => {},
+        _needsProject: true,
+        _projectAction: actions.onCopyPath,
+      },
+
+      // Terminal (Phase 2, FR10): focus input and clear scrollback. No
+      // direct keys by default; these palette commands are their access
+      // path until the user records a binding in the Shortcuts editor.
+      {
+        id: "focus-terminal",
+        label: t("cmd.focusTerminal"),
+        category: t("cmd.catTerminal"),
+        action: actions.onFocusTerminal,
+      },
+      {
+        id: "clear-terminal",
+        label: t("cmd.clearTerminal"),
+        category: t("cmd.catTerminal"),
+        action: actions.onClearTerminal,
       },
 
       // App

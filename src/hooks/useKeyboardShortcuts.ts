@@ -15,6 +15,7 @@ import {
 import { hasOtherKeyHeld, installHeldKeyTracking } from "../lib/heldKeys";
 import { detectMac } from "../lib/hotkey";
 import { isShortcutCapturing } from "../lib/shortcutCapture";
+import type { ViewMode } from "../lib/types";
 
 interface Handlers {
   onAddProject: () => void;
@@ -28,15 +29,30 @@ interface Handlers {
   onSelectFocused?: () => void;
   onToggleQuickDiff?: () => void;
   onToggleTerminal?: () => void;
+  onViewModeChange?: (mode: ViewMode) => void;
+  onFetchAll?: () => void;
+  onOpenSettings?: () => void;
+}
+
+export interface KeyboardShortcutOptions {
+  /**
+   * FR6: when true, bare-key navigation is off — J/K bindings without a
+   * modifier do not fire here (Space is handled in App's navigation
+   * handler). A rebound chord binding still works: the setting disables
+   * bare keys, not the navigate actions themselves.
+   */
+  bareKeysDisabled?: boolean;
 }
 
 export function useKeyboardShortcuts(
   handlers: Handlers,
   bindings?: Partial<Record<ActionId, string>>,
-  globalHotkey?: string
+  globalHotkey?: string,
+  options?: KeyboardShortcutOptions
 ) {
   const bindingsKey = JSON.stringify(bindings ?? null);
   const globalKey = globalHotkey ?? "";
+  const bareKeysDisabled = options?.bareKeysDisabled ?? false;
 
   useEffect(() => {
     const overrides: Partial<Record<ActionId, string>> =
@@ -57,6 +73,17 @@ export function useKeyboardShortcuts(
 
       const match = (actionId: ActionId, run: () => void): boolean => {
         const binding = merged[actionId];
+        // FR6: with bare-key navigation disabled, a bare J/K binding must
+        // not fire at all — and must not swallow the keystroke either, so
+        // it keeps whatever native meaning it has elsewhere.
+        if (
+          bareKeysDisabled &&
+          (actionId === "navigateDown" || actionId === "navigateUp") &&
+          binding &&
+          !bindingUsesModifier(binding)
+        ) {
+          return false;
+        }
         if (binding && matchesBinding(e, binding)) {
           // A chord only counts while nothing else is still down: `Ctrl` `z`
           // `~` is not `Ctrl+~`, but `Ctrl` `z` `z↑` `~` still is.
@@ -99,6 +126,18 @@ export function useKeyboardShortcuts(
 
       if (match("toggleTerminal", () => handlers.onToggleTerminal?.())) return;
 
+      // View modes, fetch-all, and Open Settings (Phase 2, FR3/FR10).
+      // These used to live as hardcoded chords in App.tsx; they are now
+      // rebindable actions owned here, with the same dirty-chord swallow
+      // semantics as every other modifier binding in this table.
+      if (match("viewCard", () => handlers.onViewModeChange?.("card"))) return;
+      if (match("viewList", () => handlers.onViewModeChange?.("list"))) return;
+      if (match("viewCompact", () => handlers.onViewModeChange?.("compact"))) return;
+      if (match("viewTable", () => handlers.onViewModeChange?.("table"))) return;
+      if (match("viewDashboard", () => handlers.onViewModeChange?.("dashboard"))) return;
+      if (match("fetchAll", () => handlers.onFetchAll?.())) return;
+      if (match("openSettings", () => handlers.onOpenSettings?.())) return;
+
       if (match("navigateDown", () => handlers.onNavigateDown?.())) return;
       if (match("navigateUp", () => handlers.onNavigateUp?.())) return;
       if (match("selectFocused", () => handlers.onSelectFocused?.())) return;
@@ -124,7 +163,11 @@ export function useKeyboardShortcuts(
     handlers.onSelectFocused,
     handlers.onToggleQuickDiff,
     handlers.onToggleTerminal,
+    handlers.onViewModeChange,
+    handlers.onFetchAll,
+    handlers.onOpenSettings,
     bindingsKey,
     globalKey,
+    bareKeysDisabled,
   ]);
 }

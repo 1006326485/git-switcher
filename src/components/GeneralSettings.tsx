@@ -313,6 +313,38 @@ export const GeneralSettings = memo(function GeneralSettings({ onError, accentCo
         </button>
       </div>
 
+      {/* Disable bare-key navigation (Phase 2, FR6): J/K/Space stop
+          navigating the project list. Arrow keys and Enter keep working,
+          and a rebound chord binding for navigate up/down still works —
+          the setting disables bare keys, not the actions. */}
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+            {t("settings.general.disableBareKeyNavigation")}
+          </div>
+          <div className="text-xs text-gray-500 dark:text-gray-400">
+            {t("settings.general.disableBareKeyNavigationDesc")}
+          </div>
+        </div>
+        <button
+          role="switch"
+          aria-checked={settings.disable_bare_key_navigation ?? false}
+          aria-label={t("settings.general.disableBareKeyNavigationAria")}
+          onClick={() => update("disable_bare_key_navigation", !(settings.disable_bare_key_navigation ?? false))}
+          className={`relative w-10 h-6 rounded-full transition-colors ${
+            settings.disable_bare_key_navigation
+              ? "bg-blue-600"
+              : "bg-gray-300 dark:bg-gray-600"
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
+              settings.disable_bare_key_navigation ? "translate-x-4" : ""
+            }`}
+          />
+        </button>
+      </div>
+
       <LanguageSettings onSelect={selectLanguage} />
 
       {/* Saved indicator — reserved row so toggling never shifts layout */}

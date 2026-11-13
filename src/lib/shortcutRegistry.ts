@@ -1,5 +1,9 @@
 import type { ActionId } from "./inAppShortcuts";
-import { bindingToDisplayParts, detectMac } from "./hotkey";
+import {
+  bindingToDisplayParts,
+  detectMac,
+  digitRangeDisplayParts,
+} from "./hotkey";
 
 /**
  * Canonical shortcut registry (Phase 1 foundation).
@@ -13,9 +17,10 @@ import { bindingToDisplayParts, detectMac } from "./hotkey";
  * their own key literals for actions listed here (see the exceptions noted
  * on individual entries).
  *
- * NO default key changes in Phase 1: the bindings below are exactly the
- * bindings the app already shipped. New actions and rebindable-ising the
- * currently fixed actions are Phase 2 work.
+ * Phase 2 made the view modes, fetch-all, and terminal actions rebindable
+ * and added the Open Settings action; no pre-existing default key changed.
+ * Unbound-by-default actions (terminal focus input, clear screen) have an
+ * empty defaultBinding and are bound only if the user records one.
  */
 
 export type ShortcutPlatform = "mac" | "windows" | "linux";
@@ -33,11 +38,13 @@ export type ShortcutPlatform = "mac" | "windows" | "linux";
  * 3. terminal — terminal-owned keys only, handled by TerminalWorkspace's
  *    capture-phase window listener, which runs before all bubble-phase
  *    handlers and stops propagation for the keys it owns (new tab, close
- *    tab, switch group/tab, jump by index/project). "Terminal context"
- *    here means the standalone terminal window or an open terminal
- *    workspace/panel — the existing implementation keys off the workspace
- *    being open, not off DOM focus; narrowing that to true focus is
- *    Phase 2 work.
+ *    tab, switch group/tab, jump by index/project, focus input, clear).
+ *    "Terminal context" means keyboard focus is inside the workspace's
+ *    own DOM (its window-root element): in the standalone window that is
+ *    everything, in the main window it is only the terminal panel, so an
+ *    open panel no longer steals app shortcuts while the user works in
+ *    the project list (Phase 2 narrowing; before, workspace-open alone
+ *    was enough).
  * 4. palette — while the command palette is open, its own component owns
  *    arrows/Enter/Escape; other app actions are already unreachable because
  *    the palette input holds focus and the in-app handler skips text
@@ -109,8 +116,14 @@ export interface ShortcutDefinition {
   context: ShortcutContext;
   /** Help-panel group this row renders under. */
   group: ShortcutGroup;
-  /** Rebindable through the Shortcuts panel editor (the 12 in-app actions). */
+  /** Rebindable through the Shortcuts panel editor. */
   rebindable: boolean;
+  /**
+   * True when the binding is a digit range ("Alt+Digit"): the modifiers
+   * plus any digit 1-9, matched by matchDigitRange, displayed as "1…9".
+   * The digit in the stored string is a placeholder, never one tab.
+   */
+  digitRange?: boolean;
   /** True when the binding deliberately overrides an OS/browser default. */
   overridesOsOrBrowser: boolean;
   /**
@@ -252,6 +265,18 @@ export const SHORTCUT_REGISTRY: readonly ShortcutDefinition[] = [
     inAppActionId: "shortcutsHelp",
   },
   {
+    id: "openSettings",
+    descriptionKey: "shortcuts.inApp.openSettings",
+    defaultBinding: "CmdOrCtrl+,",
+    context: "app",
+    group: "inApp",
+    rebindable: true,
+    overridesOsOrBrowser: false,
+    settingsField: "in_app_open_settings",
+    inAppActionId: "openSettings",
+    note: "PROPOSED default (Phase 2, review branch): the universal Settings convention (CmdOrCtrl+,). Flagged for the user's call — D2 in the requirements doc.",
+  },
+  {
     id: "quickDiff",
     descriptionKey: "shortcuts.inApp.quickDiff",
     defaultBinding: "CmdOrCtrl+D",
@@ -346,28 +371,32 @@ export const SHORTCUT_REGISTRY: readonly ShortcutDefinition[] = [
     note: "Matched in App.tsx by e.key === ' ' (the Space character is not expressible in '+'-notation), so this row is display-only.",
   },
 
-  // ── Git: fetch-all (non-rebindable in Phase 1) ────────────────────────
+  // ── Git: fetch-all (rebindable since Phase 2) ─────────────────────────
   {
     id: "fetchAll",
     descriptionKey: "shortcuts.git.fetchAll",
     defaultBinding: "CmdOrCtrl+Shift+G",
     context: "app",
     group: "git",
-    rebindable: false,
+    rebindable: true,
     overridesOsOrBrowser: false,
-    note: "Becomes rebindable in Phase 2 (FR3).",
+    settingsField: "in_app_fetch_all",
+    inAppActionId: "fetchAll",
+    note: "Handled by useKeyboardShortcuts (app context). Terminal context does not override it.",
   },
 
-  // ── View modes (non-rebindable in Phase 1) ────────────────────────────
+  // ── View modes (rebindable since Phase 2) ─────────────────────────────
   {
     id: "viewCard",
     descriptionKey: "shortcuts.view.card",
     defaultBinding: "CmdOrCtrl+1",
     context: "app",
     group: "view",
-    rebindable: false,
+    rebindable: true,
     overridesOsOrBrowser: false,
-    note: "Becomes rebindable in Phase 2 (FR3). Terminal context overrides digits 1-9 when a terminal workspace is open (terminalJumpProject, capture phase).",
+    settingsField: "in_app_view_card",
+    inAppActionId: "viewCard",
+    note: "Terminal context overrides digits 1-9 when focus is inside the terminal (terminalJumpProject, capture phase).",
   },
   {
     id: "viewList",
@@ -375,9 +404,10 @@ export const SHORTCUT_REGISTRY: readonly ShortcutDefinition[] = [
     defaultBinding: "CmdOrCtrl+2",
     context: "app",
     group: "view",
-    rebindable: false,
+    rebindable: true,
     overridesOsOrBrowser: false,
-    note: "Becomes rebindable in Phase 2 (FR3).",
+    settingsField: "in_app_view_list",
+    inAppActionId: "viewList",
   },
   {
     id: "viewCompact",
@@ -385,9 +415,10 @@ export const SHORTCUT_REGISTRY: readonly ShortcutDefinition[] = [
     defaultBinding: "CmdOrCtrl+3",
     context: "app",
     group: "view",
-    rebindable: false,
+    rebindable: true,
     overridesOsOrBrowser: false,
-    note: "Becomes rebindable in Phase 2 (FR3).",
+    settingsField: "in_app_view_compact",
+    inAppActionId: "viewCompact",
   },
   {
     id: "viewTable",
@@ -395,9 +426,10 @@ export const SHORTCUT_REGISTRY: readonly ShortcutDefinition[] = [
     defaultBinding: "CmdOrCtrl+4",
     context: "app",
     group: "view",
-    rebindable: false,
+    rebindable: true,
     overridesOsOrBrowser: false,
-    note: "Becomes rebindable in Phase 2 (FR3).",
+    settingsField: "in_app_view_table",
+    inAppActionId: "viewTable",
   },
   {
     id: "viewDashboard",
@@ -405,55 +437,89 @@ export const SHORTCUT_REGISTRY: readonly ShortcutDefinition[] = [
     defaultBinding: "CmdOrCtrl+5",
     context: "app",
     group: "view",
-    rebindable: false,
+    rebindable: true,
     overridesOsOrBrowser: false,
-    note: "Becomes rebindable in Phase 2 (FR3).",
+    settingsField: "in_app_view_dashboard",
+    inAppActionId: "viewDashboard",
   },
 
-  // ── Terminal (capture phase, TerminalWorkspace) ───────────────────────
+  // ── Terminal (capture phase, TerminalWorkspace; rebindable since ─────
+  // Phase 2). Arrow-pair actions are split into directional single chords
+  // so the single-chord recorder can capture them; digit actions are
+  // digit-range bindings (see digitRange).
   {
-    id: "terminalSwitchGroup",
-    descriptionKey: "shortcuts.terminal.switchGroup",
-    defaultBinding: "CmdOrCtrl+ArrowUp+ArrowDown",
+    id: "terminalSwitchGroupPrev",
+    descriptionKey: "shortcuts.terminal.switchGroupPrev",
+    defaultBinding: "CmdOrCtrl+ArrowUp",
     context: "terminal",
     group: "terminal",
-    rebindable: false,
+    rebindable: true,
     overridesOsOrBrowser: false,
-    displayOnly: true,
-    note: "Either arrow key with Cmd/Ctrl; capture-phase handler, wins over list navigation and view modes.",
+    settingsField: "in_app_terminal_switch_group_prev",
+    inAppActionId: "terminalSwitchGroupPrev",
+    note: "Capture-phase handler, wins over list navigation when focus is inside the terminal.",
   },
   {
-    id: "terminalSwitchTab",
-    descriptionKey: "shortcuts.terminal.switchTab",
-    defaultBinding: "CmdOrCtrl+ArrowLeft+ArrowRight",
+    id: "terminalSwitchGroupNext",
+    descriptionKey: "shortcuts.terminal.switchGroupNext",
+    defaultBinding: "CmdOrCtrl+ArrowDown",
     context: "terminal",
     group: "terminal",
-    rebindable: false,
+    rebindable: true,
     overridesOsOrBrowser: false,
-    displayOnly: true,
-    note: "Either arrow key with Cmd/Ctrl; capture-phase handler.",
+    settingsField: "in_app_terminal_switch_group_next",
+    inAppActionId: "terminalSwitchGroupNext",
+    note: "Capture-phase handler, wins over list navigation when focus is inside the terminal.",
+  },
+  {
+    id: "terminalSwitchTabPrev",
+    descriptionKey: "shortcuts.terminal.switchTabPrev",
+    defaultBinding: "CmdOrCtrl+ArrowLeft",
+    context: "terminal",
+    group: "terminal",
+    rebindable: true,
+    overridesOsOrBrowser: false,
+    settingsField: "in_app_terminal_switch_tab_prev",
+    inAppActionId: "terminalSwitchTabPrev",
+    note: "Capture-phase handler.",
+  },
+  {
+    id: "terminalSwitchTabNext",
+    descriptionKey: "shortcuts.terminal.switchTabNext",
+    defaultBinding: "CmdOrCtrl+ArrowRight",
+    context: "terminal",
+    group: "terminal",
+    rebindable: true,
+    overridesOsOrBrowser: false,
+    settingsField: "in_app_terminal_switch_tab_next",
+    inAppActionId: "terminalSwitchTabNext",
+    note: "Capture-phase handler.",
   },
   {
     id: "terminalJumpIndex",
     descriptionKey: "shortcuts.terminal.jumpIndex",
-    defaultBinding: "Alt+1…9",
+    defaultBinding: "Alt+Digit",
     context: "terminal",
     group: "terminal",
-    rebindable: false,
+    rebindable: true,
     overridesOsOrBrowser: false,
-    displayOnly: true,
-    note: "Alt/Option + Digit 1-9; '…' denotes the range. Capture-phase handler.",
+    digitRange: true,
+    settingsField: "in_app_terminal_jump_index",
+    inAppActionId: "terminalJumpIndex",
+    note: "Alt/Option + any digit 1-9 (digit-range binding). Capture-phase handler.",
   },
   {
     id: "terminalJumpProject",
     descriptionKey: "shortcuts.terminal.jumpProject",
-    defaultBinding: "CmdOrCtrl+1…9",
+    defaultBinding: "CmdOrCtrl+Digit",
     context: "terminal",
     group: "terminal",
-    rebindable: false,
+    rebindable: true,
     overridesOsOrBrowser: false,
-    displayOnly: true,
-    note: "Cmd/Ctrl + Digit 1-9; '…' denotes the range. Capture-phase handler, wins over view modes 1-5 when a terminal workspace is open.",
+    digitRange: true,
+    settingsField: "in_app_terminal_jump_project",
+    inAppActionId: "terminalJumpProject",
+    note: "Cmd/Ctrl + any digit 1-9 (digit-range binding). Capture-phase handler, wins over view modes 1-5 when focus is inside the terminal.",
   },
   {
     id: "terminalNewTab",
@@ -461,9 +527,11 @@ export const SHORTCUT_REGISTRY: readonly ShortcutDefinition[] = [
     defaultBinding: "CmdOrCtrl+N",
     context: "terminal",
     group: "terminal",
-    rebindable: false,
+    rebindable: true,
     overridesOsOrBrowser: false,
-    note: "Capture-phase handler, wins over app addProject when a terminal workspace is open.",
+    settingsField: "in_app_terminal_new_tab",
+    inAppActionId: "terminalNewTab",
+    note: "Capture-phase handler, wins over app addProject when focus is inside the terminal. CmdOrCtrl resolves platform-aware (Cmd on macOS, Ctrl elsewhere), so Ctrl+N/Ctrl+W no longer leak to the shell on macOS and now work on Windows/Linux.",
   },
   {
     id: "terminalCloseTab",
@@ -471,9 +539,35 @@ export const SHORTCUT_REGISTRY: readonly ShortcutDefinition[] = [
     defaultBinding: "CmdOrCtrl+W",
     context: "terminal",
     group: "terminal",
-    rebindable: false,
+    rebindable: true,
     overridesOsOrBrowser: false,
+    settingsField: "in_app_terminal_close_tab",
+    inAppActionId: "terminalCloseTab",
     note: "Capture-phase handler. With no tabs it propagates, so dialog-close (or the native menu) handles it.",
+  },
+  {
+    id: "terminalFocusInput",
+    descriptionKey: "shortcuts.terminal.focusInput",
+    defaultBinding: "",
+    context: "terminal",
+    group: "terminal",
+    rebindable: true,
+    overridesOsOrBrowser: false,
+    settingsField: "in_app_terminal_focus_input",
+    inAppActionId: "terminalFocusInput",
+    note: "Unbound by default: no free universal convention exists (VS Code's Ctrl+` is this app's terminal toggle, and the clear convention Cmd+K is the palette). Bind it in the Shortcuts editor, or use the palette's Focus Terminal command.",
+  },
+  {
+    id: "terminalClearScreen",
+    descriptionKey: "shortcuts.terminal.clearScreen",
+    defaultBinding: "",
+    context: "terminal",
+    group: "terminal",
+    rebindable: true,
+    overridesOsOrBrowser: false,
+    settingsField: "in_app_terminal_clear_screen",
+    inAppActionId: "terminalClearScreen",
+    note: "Unbound by default: the usual clear-scrollback convention (Cmd+K, iTerm2) is taken by the command palette here. Clears scrollback only; the shell session keeps running. Bind it in the Shortcuts editor, or use the palette's Clear Terminal command.",
   },
   {
     id: "terminalCloseTabMouse",
@@ -493,7 +587,7 @@ export function definitionById(id: string): ShortcutDefinition | undefined {
   return SHORTCUT_REGISTRY.find((d) => d.id === id);
 }
 
-/** The 12 rebindable in-app actions, in Shortcuts-panel order. */
+/** All rebindable actions, in Shortcuts-panel order (registry order). */
 export function inAppDefinitions(): ShortcutDefinition[] {
   return SHORTCUT_REGISTRY.filter((d) => d.inAppActionId !== undefined);
 }
@@ -530,10 +624,25 @@ export function getDisplayParts(
 ): string[] {
   if (def.displayParts) return def.displayParts;
   if (!def.defaultBinding) return [];
+  if (def.digitRange) return digitRangeDisplayParts(def.defaultBinding, isMac);
   return bindingToDisplayParts(def.defaultBinding, isMac);
 }
 
-/** Defaults for the 12 rebindable actions, keyed by ActionId. */
+/**
+ * Editor display parts for a rebindable row's current binding: digit-range
+ * rows render their modifiers + "1…9" instead of one recorded digit.
+ */
+export function getEditorDisplayParts(
+  def: ShortcutDefinition,
+  binding: string,
+  isMac: boolean = detectMac()
+): string[] {
+  if (!binding) return [];
+  if (def.digitRange) return digitRangeDisplayParts(binding, isMac);
+  return bindingToDisplayParts(binding, isMac);
+}
+
+/** Defaults for all rebindable actions, keyed by ActionId ("": unbound). */
 export function getInAppDefaults(): Record<ActionId, string> {
   const out = {} as Record<ActionId, string>;
   for (const def of SHORTCUT_REGISTRY) {
@@ -542,7 +651,7 @@ export function getInAppDefaults(): Record<ActionId, string> {
   return out;
 }
 
-/** settingsField -> ActionId, for the 12 rebindable actions. */
+/** settingsField -> ActionId, for all rebindable actions. */
 export function getSettingsFieldMap(): Record<string, ActionId> {
   const out: Record<string, ActionId> = {};
   for (const def of SHORTCUT_REGISTRY) {

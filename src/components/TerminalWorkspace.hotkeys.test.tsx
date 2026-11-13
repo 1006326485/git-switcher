@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import TerminalWorkspace from "./TerminalWorkspace";
 import * as api from "../lib/tauri";
@@ -47,6 +47,19 @@ vi.mock("../lib/tauri", () => ({
   ),
 }));
 
+/**
+ * Phase 2 notes: the terminal handler resolves CmdOrCtrl platform-aware
+ * (Cmd on macOS, Ctrl elsewhere) and owns a chord only when focus is
+ * inside the workspace's own DOM. jsdom is a non-Mac environment, so the
+ * tests below use Ctrl; the macOS (Cmd) path is covered by
+ * TerminalWorkspace.hotkeys.mac.test.tsx.
+ */
+function workspaceRoot(): Element {
+  const root = document.querySelector(".window-root");
+  if (!root) throw new Error("workspace root not rendered");
+  return root;
+}
+
 describe("TerminalWorkspace hotkeys", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -70,20 +83,64 @@ describe("TerminalWorkspace hotkeys", () => {
     }));
   });
 
-  it("Cmd+N opens the New project dropdown", async () => {
+  it("Ctrl+N opens the New project dropdown", async () => {
     render(
       <TerminalWorkspace open initial={null} workspaceLaunch={null} onClose={() => {}} />
     );
     await waitFor(() => expect(screen.getByText("No terminals open")).toBeInTheDocument());
 
-    fireEvent.keyDown(document, { key: "n", code: "KeyN", metaKey: true });
+    fireEvent.keyDown(workspaceRoot(), { key: "n", code: "KeyN", ctrlKey: true });
 
     expect(await screen.findByRole("listbox")).toBeInTheDocument();
     // "demo" also renders in the blank-slate project row — scope to the dropdown.
     expect(await screen.findByRole("listbox")).toHaveTextContent("demo");
   });
 
-  it("Cmd+W closes the active terminal tab", async () => {
+  it("ignores terminal chords when focus is outside the workspace", async () => {
+    render(
+      <TerminalWorkspace open initial={null} workspaceLaunch={null} onClose={() => {}} />
+    );
+    await waitFor(() => expect(screen.getByText("No terminals open")).toBeInTheDocument());
+
+    // Focus in the main window (outside the panel): the chord belongs to
+    // the app, not the terminal, so no dropdown opens.
+    fireEvent.keyDown(document.body, { key: "n", code: "KeyN", ctrlKey: true });
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+
+    // Same chord with focus inside the workspace: terminal owns it.
+    fireEvent.keyDown(workspaceRoot(), { key: "n", code: "KeyN", ctrlKey: true });
+    expect(await screen.findByRole("listbox")).toBeInTheDocument();
+  });
+
+  it("uses a rebound new-tab binding from settings", async () => {
+    // Queued twice: useTheme loads settings on mount too, and consumes
+    // the first one-shot value before the workspace's own load effect.
+    const rebound = {
+      theme: "light",
+      terminal_hotkey: "CmdOrCtrl+Shift+`",
+      terminal_hide_on_blur: false,
+      in_app_terminal_new_tab: "CmdOrCtrl+Shift+N",
+    } as never;
+    vi.mocked(api.getSettings).mockResolvedValueOnce(rebound);
+    vi.mocked(api.getSettings).mockResolvedValueOnce(rebound);
+    render(
+      <TerminalWorkspace open initial={null} workspaceLaunch={null} onClose={() => {}} />
+    );
+    await waitFor(() => expect(screen.getByText("No terminals open")).toBeInTheDocument());
+    // Wait for the async settings load to land before pressing keys, or
+    // the still-default bindings would answer first.
+    await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
+    await act(async () => {});
+
+    // The old default no longer opens anything…
+    fireEvent.keyDown(workspaceRoot(), { key: "n", code: "KeyN", ctrlKey: true });
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    // …while the rebound chord does.
+    fireEvent.keyDown(workspaceRoot(), { key: "n", code: "KeyN", ctrlKey: true, shiftKey: true });
+    expect(await screen.findByRole("listbox")).toBeInTheDocument();
+  });
+
+  it("Ctrl+W closes the active terminal tab", async () => {
     vi.mocked(api.terminalList).mockResolvedValue([
       {
         id: "t1",
@@ -100,7 +157,7 @@ describe("TerminalWorkspace hotkeys", () => {
     );
     await screen.findByText("zsh");
 
-    fireEvent.keyDown(document, { key: "w", code: "KeyW", metaKey: true });
+    fireEvent.keyDown(workspaceRoot(), { key: "w", code: "KeyW", ctrlKey: true });
 
     await waitFor(() => expect(api.terminalClose).toHaveBeenCalledWith("t1"));
   });
