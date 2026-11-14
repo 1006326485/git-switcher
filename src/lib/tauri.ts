@@ -721,6 +721,11 @@ export async function aiReviewStreaming(
   return invoke("ai_review_streaming", { path, baseBranch, headBranch });
 }
 
+/** Model ids offered by an OpenAI-compatible endpoint (`GET {base}/models`). */
+export async function listLlmModels(endpoint: string, apiKey?: string): Promise<string[]> {
+  return invoke("list_llm_models", { endpoint, apiKey: apiKey || null });
+}
+
 export async function generateCommitMsg(path: string): Promise<string> {
   return invoke("generate_commit_msg", { path });
 }

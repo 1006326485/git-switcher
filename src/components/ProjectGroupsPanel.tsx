@@ -11,6 +11,7 @@ import { ContextMenu, MenuSeparator } from "./ui/ContextMenu";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { useTranslation } from "react-i18next";
 import { isShortcutCapturing } from "../lib/shortcutCapture";
+import { filterByFuzzy, parseFuzzyQuery } from "../lib/fuzzyMatch";
 
 // Module-level groups cache shared across all GroupAssignDropdown instances
 let _groupsCache: Group[] | null = null;
@@ -392,7 +393,7 @@ export const GroupAssignDropdown = memo(function GroupAssignDropdown({
   const [pendingGroupId, setPendingGroupId] = useState<string | null>(null);
   const {
     open, search, setSearch, activeIndex, setActiveIndex,
-    pos, triggerRef, inputRef, listRef, portalRef,
+    pos, portalHeight, triggerRef, inputRef, listRef, portalRef,
     toggle, handleKeyDown,
   } = useDropdownPortal({ minWidth: 200, align: "right" });
 
@@ -426,7 +427,7 @@ export const GroupAssignDropdown = memo(function GroupAssignDropdown({
   }, [open]);
 
   const filtered = useMemo(
-    () => allGroups.filter((g) => g.name.toLowerCase().includes(search.toLowerCase())),
+    () => filterByFuzzy(allGroups, parseFuzzyQuery(search), (g) => [g.name]),
     [allGroups, search]
   );
 
@@ -465,11 +466,19 @@ export const GroupAssignDropdown = memo(function GroupAssignDropdown({
         <FolderIcon />
       </button>
 
-      {open && createPortal(
+      {open && pos && createPortal(
         <div
           ref={portalRef}
-          style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width, zIndex: 9999 }}
-          className={`origin-top-left max-h-80 bg-(--surface-1) border border-(--border-color) rounded-xl shadow-lg overflow-hidden ${popoverAnimation}`}
+          onContextMenu={(e) => e.preventDefault()}
+          style={{
+            position: "fixed",
+            top: pos.top,
+            left: pos.left,
+            width: pos.width,
+            zIndex: 9999,
+            ...(pos.placeAbove ? { transform: `translateY(-${portalHeight}px)` } : null),
+          }}
+          className={`origin-bottom-left max-h-80 bg-(--surface-1) border border-(--border-color) rounded-xl shadow-lg overflow-hidden ${popoverAnimation}`}
         >
           <div className="p-2 border-b border-gray-200 dark:border-gray-700">
             <input

@@ -53,4 +53,9 @@ describe("filterPickerItems", () => {
   it("returns empty for a non-matching query", () => {
     expect(filterPickerItems(items, "deploy")).toEqual([]);
   });
+
+  it("matches initials of a script name", () => {
+    // "sw" reads as the initials of serve:watch.
+    expect(filterPickerItems(items, "sw").map((i) => i.name)).toEqual(["serve:watch"]);
+  });
 });

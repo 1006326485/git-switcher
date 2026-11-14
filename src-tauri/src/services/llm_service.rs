@@ -56,10 +56,7 @@ fn is_excluded_path(path: &str) -> bool {
         return true;
     }
     let lower = path.to_lowercase();
-    if EXCLUDED_EXTENSIONS.iter().any(|&ext| lower.ends_with(ext)) {
-        return true;
-    }
-    false
+    EXCLUDED_EXTENSIONS.iter().any(|&ext| lower.ends_with(ext))
 }
 
 // ── Diff Extraction ──────────────────────────────────────────────────────
@@ -205,7 +202,7 @@ impl LlmService {
         }
 
         let diff_text = Self::format_diff_for_llm(diff);
-        let prompt = Self::build_review_prompt(&diff_text);
+        let prompt = Self::build_review_prompt(&config.review_prompt, &diff_text);
 
         let response = Self::call_llm_api(config, &prompt).await?;
         let findings = Self::parse_findings(&response);
@@ -461,9 +458,10 @@ impl LlmService {
         parts.join("\n")
     }
 
-    fn build_review_prompt(diff_text: &str) -> String {
-        format!(
-            r#"You are an expert code reviewer. Analyze the following git diff and provide a code review in clean, readable Markdown.
+    /// The instructions a review uses when the user has not written their own.
+    /// The Settings editor shows and resets to this exact text, so the result
+    /// of "reset to default" and "never touched" is identical.
+    pub const DEFAULT_REVIEW_PROMPT: &'static str = r#"You are an expert code reviewer. Analyze the following git diff and provide a code review in clean, readable Markdown.
 
 ## Output Format
 
@@ -503,12 +501,127 @@ One paragraph overall assessment of this diff.
 - Suggestion is optional but recommended
 - If the code looks good, still provide the Summary section and note that no issues were found
 - Only include findings actually present in the diff
-- Keep descriptions concise and actionable
+- Keep descriptions concise and actionable"#;
 
-## Diff to Review
+    /// Marker that places the diff at the point the instructions ask for it.
+    const DIFF_PLACEHOLDER: &'static str = "{{diff}}";
 
-{diff_text}"#
-        )
+    /// Builds the prompt a review sends: the reviewer instructions (the
+    /// configured one, or [`Self::DEFAULT_REVIEW_PROMPT`] when empty) followed
+    /// by the diff.
+    ///
+    /// The diff is appended both for the default prompt and for a custom one
+    /// that has no placeholder, because a prompt without the diff would ask
+    /// the model to review nothing. The result must keep the `## Findings`
+    /// section and the `### [Severity] Title` lines: those are what
+    /// `parse_findings` turns into the structured findings list, so a custom
+    /// prompt that drops them still gets a readable markdown summary, just
+    /// without parsed findings.
+    fn build_review_prompt(instructions: &str, diff_text: &str) -> String {
+        let instructions = instructions.trim();
+        let instructions = if instructions.is_empty() {
+            Self::DEFAULT_REVIEW_PROMPT
+        } else {
+            instructions
+        };
+        if instructions.contains(Self::DIFF_PLACEHOLDER) {
+            instructions.replace(Self::DIFF_PLACEHOLDER, diff_text)
+        } else {
+            format!("{instructions}\n\n## Diff to Review\n\n{diff_text}")
+        }
+    }
+
+    // ── Model Discovery ────────────────────────────────────────────────
+
+    /// Lists the model ids the configured OpenAI-compatible endpoint offers.
+    ///
+    /// Most compatible servers implement `GET {base}/models` (`{"data":[{"id":…}]}`),
+    /// which is why the base URL is derived from the endpoint: the chat
+    /// endpoint ends in `/chat/completions` (or `/completions`, or a versioned
+    /// base like a proxy's `/v1`), and the models list lives on that same
+    /// base. The API key is sent as a bearer token because gateways such as
+    /// OpenRouter publish their catalogue only to authenticated callers; a
+    /// server that does not need it ignores the header.
+    pub async fn list_models(config: &LlmConfig) -> Result<Vec<String>, AppError> {
+        let url = Self::build_models_url(&config.endpoint)?;
+        let client = Self::get_client()?;
+
+        let mut request = client.get(&url);
+        if !config.api_key.is_empty() {
+            request = request.header("Authorization", format!("Bearer {}", config.api_key));
+        }
+        let response = request.send().await.map_err(Self::map_reqwest_error)?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(AppError::Llm(format!(
+                "LLM model list error ({}): {}",
+                status,
+                Self::truncate_error_body(&body)
+            )));
+        }
+
+        let json: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| AppError::Llm(format!("Failed to parse LLM model list: {}", e)))?;
+
+        Ok(Self::parse_model_ids(&json))
+    }
+
+    /// Derives the models-list URL from a chat endpoint.
+    ///
+    /// - `https://host/v1/chat/completions` → `https://host/v1/models`
+    /// - `https://host/v1` (a base-URL style endpoint) → `https://host/v1/models`
+    /// - `https://host/v1/models` → unchanged (already the list URL)
+    fn build_models_url(endpoint: &str) -> Result<String, AppError> {
+        if !endpoint.starts_with("https://") && !endpoint.starts_with("http://") {
+            return Err(AppError::Llm(
+                "LLM endpoint must start with http:// or https://".to_string(),
+            ));
+        }
+        let trimmed = endpoint.trim().trim_end_matches('/');
+        if trimmed.ends_with("/models") {
+            return Ok(trimmed.to_string());
+        }
+        let base = ["/chat/completions", "/completions"]
+            .iter()
+            .find_map(|suffix| trimmed.strip_suffix(suffix))
+            .unwrap_or(trimmed);
+        Ok(format!("{}/models", base.trim_end_matches('/')))
+    }
+
+    /// Model ids out of an OpenAI-compatible `{"data":[{"id":"…"}]}` payload,
+    /// or Ollama's native `{"models":[{"name"/"model":"…"}]}` payload.
+    /// Duplicates are dropped and the list is sorted so the picker is stable.
+    fn parse_model_ids(json: &serde_json::Value) -> Vec<String> {
+        let Some(items) = json["data"]
+            .as_array()
+            .or_else(|| json["models"].as_array())
+        else {
+            return Vec::new();
+        };
+        let mut ids: Vec<String> = items
+            .iter()
+            .filter_map(|item| {
+                item["id"]
+                    .as_str()
+                    .or_else(|| item["name"].as_str())
+                    .or_else(|| item["model"].as_str())
+            })
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(str::to_string)
+            .collect();
+        ids.sort_by_key(|id| id.to_lowercase());
+        ids.dedup();
+        ids
+    }
+
+    /// Error bodies can be an HTML page from a proxy; keep the message short.
+    fn truncate_error_body(body: &str) -> String {
+        truncate_str(body.trim(), 500).to_string()
     }
 
     fn get_client() -> Result<&'static reqwest::Client, AppError> {
@@ -585,7 +698,7 @@ One paragraph overall assessment of this diff.
         }
 
         let diff_text = Self::format_diff_for_llm(diff);
-        let prompt = Self::build_review_prompt(&diff_text);
+        let prompt = Self::build_review_prompt(&config.review_prompt, &diff_text);
 
         let response =
             Self::call_llm_api_streaming(config, &prompt, app, config.max_tokens.clamp(256, 4096))
@@ -718,7 +831,115 @@ One paragraph overall assessment of this diff.
 
 #[cfg(test)]
 mod tests {
-    use super::{truncate_diff_text, truncate_str};
+    use super::{truncate_diff_text, truncate_str, LlmService};
+
+    const DIFF: &str = "```diff\n+let x = 1;\n```";
+
+    #[test]
+    fn empty_prompt_sends_the_built_in_prompt_with_the_diff() {
+        for stored in ["", "   \n\t "] {
+            let prompt = LlmService::build_review_prompt(stored, DIFF);
+            assert!(prompt.starts_with(LlmService::DEFAULT_REVIEW_PROMPT));
+            assert!(prompt.contains("## Diff to Review"));
+            assert!(prompt.ends_with(DIFF));
+        }
+    }
+
+    #[test]
+    fn custom_prompt_replaces_the_instructions_and_still_gets_the_diff() {
+        let prompt = LlmService::build_review_prompt("Review only for security bugs.", DIFF);
+        assert!(prompt.starts_with("Review only for security bugs."));
+        assert!(!prompt.contains("You are an expert code reviewer."));
+        assert!(prompt.ends_with(&format!("## Diff to Review\n\n{DIFF}")));
+    }
+
+    #[test]
+    fn diff_placeholder_marks_where_the_diff_goes() {
+        let prompt = LlmService::build_review_prompt(
+            "Header\n\n## Diff to Review\n\n{{diff}}\n\nFooter",
+            DIFF,
+        );
+        assert_eq!(
+            prompt,
+            format!("Header\n\n## Diff to Review\n\n{DIFF}\n\nFooter")
+        );
+        // Used once: the diff is not appended a second time.
+        assert_eq!(prompt.matches("let x = 1;").count(), 1);
+    }
+
+    #[test]
+    fn built_in_prompt_keeps_the_findings_format_the_parser_reads() {
+        // parse_findings only fills the structured list from this shape; the
+        // editable default must not drift away from it.
+        assert!(LlmService::DEFAULT_REVIEW_PROMPT.contains("\n## Findings\n"));
+        assert!(LlmService::DEFAULT_REVIEW_PROMPT.contains("### 🔴 [Critical]"));
+        assert!(LlmService::DEFAULT_REVIEW_PROMPT.contains("- **File:**"));
+    }
+
+    #[test]
+    fn models_url_is_derived_from_the_chat_endpoint() {
+        let url = |endpoint: &str| LlmService::build_models_url(endpoint).unwrap();
+        assert_eq!(
+            url("https://api.openai.com/v1/chat/completions"),
+            "https://api.openai.com/v1/models"
+        );
+        assert_eq!(
+            url("https://api.openai.com/v1/chat/completions/"),
+            "https://api.openai.com/v1/models"
+        );
+        assert_eq!(
+            url("https://api.openai.com/v1"),
+            "https://api.openai.com/v1/models"
+        );
+        assert_eq!(
+            url("https://openrouter.ai/api/v1"),
+            "https://openrouter.ai/api/v1/models"
+        );
+        assert_eq!(
+            url("http://localhost:11434/v1/chat/completions"),
+            "http://localhost:11434/v1/models"
+        );
+        assert_eq!(
+            url("http://localhost:8080/v1/models"),
+            "http://localhost:8080/v1/models"
+        );
+        assert!(LlmService::build_models_url("api.openai.com/v1").is_err());
+    }
+
+    #[test]
+    fn model_ids_are_read_from_openai_and_ollama_payloads() {
+        let openai = serde_json::json!({
+            "object": "list",
+            "data": [
+                { "id": "gpt-4o-mini", "object": "model" },
+                { "id": "gpt-4o" },
+                { "id": "gpt-4o-mini" },
+                { "id": "  " },
+                { "object": "model" }
+            ]
+        });
+        // Sorted, de-duplicated, blanks dropped.
+        assert_eq!(
+            LlmService::parse_model_ids(&openai),
+            vec!["gpt-4o".to_string(), "gpt-4o-mini".to_string()]
+        );
+
+        let claude = serde_json::json!({ "data": [{ "id": "claude-3-5-sonnet-latest" }] });
+        assert_eq!(
+            LlmService::parse_model_ids(&claude),
+            vec!["claude-3-5-sonnet-latest"]
+        );
+
+        let ollama = serde_json::json!({
+            "models": [{ "name": "llama3:latest" }, { "model": "qwen2.5:7b" }]
+        });
+        assert_eq!(
+            LlmService::parse_model_ids(&ollama),
+            vec!["llama3:latest".to_string(), "qwen2.5:7b".to_string()]
+        );
+
+        assert!(LlmService::parse_model_ids(&serde_json::json!({ "error": "nope" })).is_empty());
+    }
 
     /// Regression: `String::truncate(4000)` panicked on a non UTF-8 boundary;
     /// Chinese diffs hit this easily. The truncation path must stay UTF-8 safe.

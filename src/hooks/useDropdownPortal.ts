@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react";
 import { isShortcutCapturing } from "../lib/shortcutCapture";
 
 interface UseDropdownPortalOptions {
@@ -6,11 +6,74 @@ interface UseDropdownPortalOptions {
   align?: "left" | "right";
 }
 
+interface PortalPosition {
+  top: number;
+  left: number;
+  width: number;
+  /** True when the popover is flipped above the trigger (for tests/hooks). */
+  placeAbove: boolean;
+}
+
+/**
+ * Measure the popover's anchor box (its trigger's border box, fixed
+ * coordinates). Shared with the viewport-clamping positioner below.
+ */
+export function measurePortalAnchor(el: HTMLElement | null) {
+  if (!el) return null;
+  const rect = el.getBoundingClientRect();
+  return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right, width: rect.width };
+}
+
+/**
+ * Fixed-position coordinates for a portal popover anchored to `anchor`.
+ *
+ * A menu flips above its trigger only when the room below cannot hold a main
+ * menu (`menuMinHeight`), preferring the side with more space; a short list
+ * (a command submenu) always opens on the side that holds it whole. Both
+ * axes are clamped to an EDGE margin so a popover near the window edge never
+ * renders half off-screen. This is pure so the "never overlaps its trigger,
+ * never leaves the viewport" contract is testable without a DOM.
+ */
+export function computePortalPosition(
+  anchor: { top: number; bottom: number; left: number; right: number; width: number },
+  opts: { minWidth: number; align: "left" | "right"; estimatedHeight: number; menuMinHeight: number },
+  viewport: { width: number; height: number } = {
+    width: typeof window === "undefined" ? 0 : window.innerWidth,
+    height: typeof window === "undefined" ? 0 : window.innerHeight,
+  }
+): PortalPosition {
+  const GAP = 4;
+  const EDGE = 8;
+  const width = Math.max(anchor.width, opts.minWidth);
+  const spaceBelow = viewport.height - anchor.bottom - GAP - EDGE;
+  const spaceAbove = anchor.top - GAP - EDGE;
+  const placeAbove =
+    opts.estimatedHeight > spaceBelow
+      ? opts.estimatedHeight <= spaceAbove || spaceAbove > spaceBelow
+      : opts.estimatedHeight > opts.menuMinHeight && spaceAbove >= opts.estimatedHeight;
+  const top = placeAbove ? anchor.top - GAP : anchor.bottom + GAP;
+  const rawLeft = opts.align === "right" ? anchor.right - width : anchor.left;
+  const maxLeft = Math.max(EDGE, viewport.width - width - EDGE);
+  return {
+    top,
+    left: Math.min(Math.max(EDGE, rawLeft), maxLeft),
+    width,
+    placeAbove,
+  };
+}
+
 export function useDropdownPortal({ minWidth = 200, align = "left" }: UseDropdownPortalOptions = {}) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [activeIndex, setActiveIndex] = useState(-1);
-  const [pos, setPos] = useState({ top: 0, left: 0, width: minWidth });
+  // Fixed-position coordinates, measured BEFORE the portal exists (see the
+  // useLayoutEffect below), so the first painted frame is already anchored
+  // under the trigger. `placed` gates rendering on that measurement.
+  const [coords, setCoords] = useState<PortalPosition | null>(null);
+  const [portalHeight, setPortalHeight] = useState(0);
+  // Height the next open should plan for: the measured one when known, else
+  // an estimate so a low trigger flips above on its very first frame.
+  const plannedHeightRef = useRef(0);
 
   const triggerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -21,43 +84,97 @@ export function useDropdownPortal({ minWidth = 200, align = "left" }: UseDropdow
     setOpen(false);
     setSearch("");
     setActiveIndex(-1);
+    setCoords(null);
   }, []);
 
   const toggle = useCallback(() => setOpen((v) => !v), []);
 
-  // Position + focus when open
-  useEffect(() => {
+  // Measure + position in the layout phase of the commit that flips `open`:
+  // the coordinates are computed from the trigger's real box before the
+  // browser paints, so the portal's first visible frame is already at its
+  // final spot (no one-frame flash at the top-left corner).
+  useLayoutEffect(() => {
     if (!open) return;
-    const updatePos = () => {
-      if (triggerRef.current) {
-        const rect = triggerRef.current.getBoundingClientRect();
-        const width = Math.max(rect.width, minWidth);
-        const left = align === "right" ? rect.right - width : rect.left;
-        setPos({ top: rect.bottom + 4, left, width });
-      }
-    };
-    updatePos();
-    const focusTimer = setTimeout(() => inputRef.current?.focus(), 0);
-    window.addEventListener("scroll", updatePos, true);
-    window.addEventListener("resize", updatePos);
-    return () => {
-      clearTimeout(focusTimer);
-      window.removeEventListener("scroll", updatePos, true);
-      window.removeEventListener("resize", updatePos);
-    };
+    setCoords(null);
+    const anchor = measurePortalAnchor(triggerRef.current);
+    if (!anchor) return;
+    setCoords(
+      computePortalPosition(anchor, {
+        minWidth,
+        align,
+        estimatedHeight: plannedHeightRef.current,
+        menuMinHeight: 220,
+      })
+    );
   }, [open, minWidth, align]);
 
-  // Click outside to close
+  // Position updates (scroll/resize, and the portal's own measured height)
+  // only run while the portal is mounted; see the layout effect in the
+  // options hook below.
+  const reposition = useCallback(() => {
+    const anchor = measurePortalAnchor(triggerRef.current);
+    if (!anchor) return;
+    setCoords((prev) => {
+      const next = computePortalPosition(anchor, {
+        minWidth,
+        align,
+        estimatedHeight: plannedHeightRef.current,
+        menuMinHeight: 220,
+      });
+      return prev && prev.top === next.top && prev.left === next.left && prev.width === next.width && prev.placeAbove === next.placeAbove
+        ? prev
+        : next;
+    });
+  }, [minWidth, align]);
+
+  useLayoutEffect(() => {
+    const el = portalRef.current;
+    if (!open || !el) return;
+    const height = el.offsetHeight;
+    if (height > 0) {
+      setPortalHeight(height);
+      plannedHeightRef.current = height;
+    }
+    reposition();
+    // Deliberately keyed on the portal's first layout and the query only:
+    // a late flip after the real height becomes known (the very first open
+    // has no measurement yet) is rare and lands before anything is painted.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, search, reposition]);
+
+  // Focus once the portal is placed, and track viewport changes while open.
+  useEffect(() => {
+    if (!open || !coords) return;
+    const focusTimer = setTimeout(() => inputRef.current?.focus(), 0);
+    window.addEventListener("scroll", reposition, true);
+    window.addEventListener("resize", reposition);
+    return () => {
+      clearTimeout(focusTimer);
+      window.removeEventListener("scroll", reposition, true);
+      window.removeEventListener("resize", reposition);
+    };
+  }, [open, coords, reposition]);
+
+  // Click outside to close. The mousedown closes the menu and is consumed:
+  // the following click must not also answer whatever sits under the
+  // pointer. Without that, a right-click on another dropdown's own trigger
+  // would close one listbox and open the other from a single gesture.
   useEffect(() => {
     if (!open) return;
     function handleClickOutside(e: MouseEvent) {
-      const target = e.target as Node;
+      const target = e.target instanceof Node ? e.target : null;
       if (
-        triggerRef.current && !triggerRef.current.contains(target) &&
-        portalRef.current && !portalRef.current.contains(target)
+        // A trigger opts out of the outside-dismiss when another open
+        // dropdown already owned this press (it stops propagation).
+        e.defaultPrevented ||
+        !target ||
+        triggerRef.current?.contains(target) ||
+        portalRef.current?.contains(target)
       ) {
-        close();
+        return;
       }
+      e.preventDefault();
+      close();
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
@@ -81,11 +198,6 @@ export function useDropdownPortal({ minWidth = 200, align = "left" }: UseDropdow
     document.addEventListener("keydown", handleEscape, true);
     return () => document.removeEventListener("keydown", handleEscape, true);
   }, [open, close]);
-
-  // Reset active index when search changes (only while open)
-  useEffect(() => {
-    if (open) setActiveIndex(-1);
-  }, [search, open]);
 
   // Scroll active item into view
   useEffect(() => {
@@ -132,7 +244,10 @@ export function useDropdownPortal({ minWidth = 200, align = "left" }: UseDropdow
     setSearch,
     activeIndex,
     setActiveIndex,
-    pos,
+    /** Fixed-position coordinates; null until the first open is measured. */
+    pos: coords,
+    /** Height of the open portal (0 before the first measurement). */
+    portalHeight,
     triggerRef,
     inputRef,
     listRef,

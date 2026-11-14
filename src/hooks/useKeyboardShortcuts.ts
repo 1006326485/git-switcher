@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import {
   bindingUsesModifier,
   matchesBinding,
@@ -42,6 +42,15 @@ export interface KeyboardShortcutOptions {
    * bare keys, not the navigate actions themselves.
    */
   bareKeysDisabled?: boolean;
+  /**
+   * FR2: when the terminal context owns focus, every binding here belongs to
+   * it — the terminal handlers resolve their own chords and an app action
+   * must never fire alongside or instead of them. In particular CmdOrCtrl+N
+   * is both "add project" (app) and "new terminal tab" (terminal); without
+   * this gate an addProject that did not match its own clean chord fell
+   * through to whatever window handler sat under it.
+   */
+  terminalContextOwnsFocus?: boolean;
 }
 
 export function useKeyboardShortcuts(
@@ -53,6 +62,13 @@ export function useKeyboardShortcuts(
   const bindingsKey = JSON.stringify(bindings ?? null);
   const globalKey = globalHotkey ?? "";
   const bareKeysDisabled = options?.bareKeysDisabled ?? false;
+  // Read through a ref: the focus check is per keystroke, so it must not
+  // re-subscribe the whole handler every time focus moves.
+  const terminalContextRef = useRef(options?.terminalContextOwnsFocus ?? false);
+
+  useEffect(() => {
+    terminalContextRef.current = options?.terminalContextOwnsFocus ?? false;
+  }, [options?.terminalContextOwnsFocus]);
 
   useEffect(() => {
     const overrides: Partial<Record<ActionId, string>> =
@@ -61,15 +77,20 @@ export function useKeyboardShortcuts(
     // this handler is the SINGLE OWNER of refreshAll (registry note), so a
     // rebind here cannot leave a second hardcoded handler behind.
     const merged = resolveInAppShortcuts(overrides);
+    const isMac = detectMac();
 
     const handler = (e: KeyboardEvent) => {
       if (isShortcutCapturing()) return;
       // Escape handled by dialogs in App.tsx
       if (e.key === "Escape") return;
+      // The terminal context owns every key while focus is inside it: the
+      // workspace's capture-phase handler has already had its say, and
+      // anything left is the shell's (or nobody's), not an app action.
+      if (terminalContextRef.current) return;
 
       // The global hotkey is owned by the backend; do not let in-app bindings
       // double-fire on the same chord.
-      if (globalKey && matchesGlobalHotkey(e, globalKey, detectMac())) return;
+      if (globalKey && matchesGlobalHotkey(e, globalKey, isMac)) return;
 
       const match = (actionId: ActionId, run: () => void): boolean => {
         const binding = merged[actionId];
@@ -84,7 +105,7 @@ export function useKeyboardShortcuts(
         ) {
           return false;
         }
-        if (binding && matchesBinding(e, binding)) {
+        if (binding && matchesBinding(e, binding, isMac)) {
           // A chord only counts while nothing else is still down: `Ctrl` `z`
           // `~` is not `Ctrl+~`, but `Ctrl` `z` `z↑` `~` still is.
           //

@@ -10,8 +10,12 @@ import { syncLanguageFromSettings } from "./hooks/useLanguage";
 import "./styles/globals.css";
 import { ErrorBoundary } from "./components/ui/ErrorBoundary";
 import { installContextMenuGuard } from "./lib/contextMenuGuard";
+import { installSpellingPolicy } from "./lib/spellingPolicy";
 
 installContextMenuGuard();
+// Both windows type the same kinds of values (branch names, paths, commands),
+// so the spelling default is installed at the shared entry point.
+installSpellingPolicy();
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Root element not found");

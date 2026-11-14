@@ -2,6 +2,7 @@ import { useCallback, memo, useState, lazy, Suspense, Fragment } from "react";
 import { useTranslation } from "react-i18next";
 import * as api from "../lib/tauri";
 import { parseError, type GitFileEntry } from "../lib/types";
+import { filterByFuzzy, parseFuzzyQuery } from "../lib/fuzzyMatch";
 import { DropdownMenu, MenuItem, IconButton, Modal } from "./ui/primitives";
 import { ContextMenu, MenuSeparator } from "./ui/ContextMenu";
 import { ColorPicker } from "./ColorPicker";
@@ -355,8 +356,7 @@ export const ProjectContextMenu = memo(function ProjectContextMenu({
                   className="w-full px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-transparent text-sm"
                 />
                 <div className="max-h-72 overflow-auto rounded-lg border border-gray-100 dark:border-gray-700 divide-y divide-gray-50 dark:divide-gray-800">
-                  {repoFiles
-                    .filter((f) => f.path.toLowerCase().includes(fileQuery.toLowerCase()))
+                  {filterByFuzzy(repoFiles, parseFuzzyQuery(fileQuery), (f) => [f.path])
                     .slice(0, 200)
                     .map((f) => (
                       <button

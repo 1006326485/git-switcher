@@ -1,8 +1,9 @@
-import { useMemo, useCallback, useState, memo } from "react";
+import { useMemo, useCallback, useRef, useState, memo, type MouseEvent as ReactMouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import type { BranchInfo } from "../lib/types";
 import { useDropdownPortal } from "../hooks/useDropdownPortal";
+import { filterByFuzzy, parseFuzzyQuery } from "../lib/fuzzyMatch";
 import { popoverAnimation } from "./ui/primitives";
 
 interface BranchDropdownProps {
@@ -28,14 +29,12 @@ export const BranchDropdown = memo(function BranchDropdown({
 
   const {
     open, search, setSearch, activeIndex, setActiveIndex,
-    pos, triggerRef, inputRef, listRef, portalRef,
+    pos, portalHeight, triggerRef, inputRef, listRef, portalRef,
     close, toggle,
   } = useDropdownPortal({ minWidth: 280 });
 
   const flatItems = useMemo(() => {
-    const filtered = branches.filter((b) =>
-      b.name.toLowerCase().includes(search.toLowerCase())
-    );
+    const filtered = filterByFuzzy(branches, parseFuzzyQuery(search), (b) => [b.name]);
     const local = filtered.filter((b) => !b.is_remote && !b.is_tag);
     const remote = filtered.filter((b) => b.is_remote);
     const tags = filtered.filter((b) => b.is_tag);
@@ -62,6 +61,51 @@ export const BranchDropdown = memo(function BranchDropdown({
     }, []),
     [flatItems]
   );
+
+  // A branch Enter cannot pick: the checked-out one (unless allowed).
+  const isBlocked = useCallback(
+    (item: { type: "header" | "branch"; branch?: BranchInfo } | undefined): boolean =>
+      !item || item.type !== "branch" || (!allowCurrent && !!item.branch?.is_current),
+    [allowCurrent]
+  );
+
+  // Requirement: whatever the search query, the highlight is the FIRST match.
+  // Every keystroke (typing, clearing, reformatting) drops the highlight back
+  // to the first row of the NEW result set — the previous index refers to a
+  // different list, and Enter after typing must run the top match, not
+  // whatever now sits at the old position. A first match that cannot be
+  // picked (the checked-out branch) is skipped for the first one that can.
+  const topMatch = useMemo(() => {
+    const first = selectableIndices.find((i) => !isBlocked(flatItems[i]));
+    return first ?? selectableIndices[0] ?? -1;
+  }, [selectableIndices, flatItems, isBlocked]);
+
+  const prevSearch = useRef(search);
+  if (prevSearch.current !== search) {
+    prevSearch.current = search;
+    if (activeIndex !== topMatch) setActiveIndex(topMatch);
+  } else if (
+    open &&
+    activeIndex !== topMatch &&
+    topMatch >= 0 &&
+    (activeIndex < 0 || isBlocked(flatItems[activeIndex]))
+  ) {
+    // Results arrived or changed under the query (async branch list, or a
+    // list that was empty when the menu opened): the highlight must still be
+    // a branch that can be picked.
+    setActiveIndex(topMatch);
+  }
+
+  // A fresh open starts on the first match too, so arrows and Enter work
+  // straight away (before this, the highlight only appeared after the first
+  // keystroke). Only the open transition reseeds; the user's own moves are
+  // left alone, and an empty list keeps "nothing yet" pending until rows
+  // arrive (the disabled-row branch above settles it then).
+  const prevOpen = useRef(open);
+  if (open && !prevOpen.current && topMatch >= 0) {
+    setActiveIndex(topMatch);
+  }
+  prevOpen.current = open;
 
   const selectBranch = useCallback(
     (branch: BranchInfo) => {
@@ -109,9 +153,15 @@ export const BranchDropdown = memo(function BranchDropdown({
         }
         case "Enter": {
           e.preventDefault();
-          if (activeIndex >= 0 && flatItems[activeIndex]?.branch) {
-            selectBranch(flatItems[activeIndex].branch!);
-          }
+          // Never a no-op on a blocked row: the checked-out branch cannot be
+          // switched to, so Enter runs the first branch that can.
+          const target =
+            activeIndex >= 0 && !isBlocked(flatItems[activeIndex])
+              ? flatItems[activeIndex]?.branch
+              : topMatch >= 0
+              ? flatItems[topMatch]?.branch
+              : undefined;
+          if (target) selectBranch(target);
           break;
         }
         case "Escape":
@@ -120,12 +170,18 @@ export const BranchDropdown = memo(function BranchDropdown({
           break;
       }
     },
-    [activeIndex, flatItems, selectableIndices, selectBranch, close, setActiveIndex]
+    [activeIndex, flatItems, selectableIndices, selectBranch, close, setActiveIndex, isBlocked, topMatch]
   );
 
-  const handleToggle = useCallback(() => {
-    if (!loading) toggle();
-  }, [loading, toggle]);
+  const handleToggle = useCallback(
+    (e?: ReactMouseEvent) => {
+      // Another select's open menu already consumed this press (see
+      // useDropdownPortal): only close that one, never swap it for this.
+      if (e?.defaultPrevented) return;
+      if (!loading) toggle();
+    },
+    [loading, toggle]
+  );
 
   return (
     <div ref={triggerRef} className="relative">
@@ -134,6 +190,7 @@ export const BranchDropdown = memo(function BranchDropdown({
           aria-label={t("branchMenu.branchAriaCompact", { branch: currentBranch })}
           aria-haspopup="listbox"
           aria-expanded={open}
+          onMouseDown={(e) => e.stopPropagation()}
           onClick={handleToggle}
           disabled={loading}
           className="font-mono text-xs text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md px-2 py-0.5 transition-colors truncate max-w-40 disabled:opacity-50"
@@ -145,6 +202,7 @@ export const BranchDropdown = memo(function BranchDropdown({
           aria-label={t("branchMenu.branchAria", { branch: currentBranch })}
           aria-haspopup="listbox"
           aria-expanded={open}
+          onMouseDown={(e) => e.stopPropagation()}
           onClick={handleToggle}
           disabled={loading}
           className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-sm w-full max-w-70 disabled:opacity-50"
@@ -163,11 +221,19 @@ export const BranchDropdown = memo(function BranchDropdown({
         </button>
       )}
 
-      {open && createPortal(
+      {open && pos && createPortal(
         <div
           ref={portalRef}
-          style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width, zIndex: 9999 }}
-          className={`origin-top-left max-h-80 bg-(--surface-1) border border-(--border-color) rounded-xl shadow-lg overflow-hidden ${popoverAnimation}`}
+          onContextMenu={(e) => e.preventDefault()}
+          style={{
+            position: "fixed",
+            top: pos.top,
+            left: pos.left,
+            width: pos.width,
+            zIndex: 9999,
+            ...(pos.placeAbove ? { transform: `translateY(-${portalHeight}px)` } : null),
+          }}
+          className={`origin-bottom-left max-h-80 bg-(--surface-1) border border-(--border-color) rounded-xl shadow-lg overflow-hidden ${popoverAnimation}`}
         >
           <div className="p-2 border-b border-gray-200 dark:border-gray-700">
             <input
@@ -207,16 +273,20 @@ export const BranchDropdown = memo(function BranchDropdown({
                 const isActive = i === activeIndex;
                 const isDisabled = b.is_current && !allowCurrent;
 
+                // A div with button semantics, not a <button>: the row hosts
+                // its own Copy control, and interactive content cannot nest
+                // inside a native button.
                 return (
-                  <button
+                  <div
                     key={b.name}
                     data-index={i}
                     role="option"
+                    tabIndex={-1}
                     aria-selected={isActive}
                     aria-disabled={isDisabled}
                     onClick={() => selectBranch(b)}
                     onMouseEnter={() => setActiveIndex(i)}
-                    className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 group transition-colors ${
+                    className={`press w-full text-left px-3 py-2 text-sm flex items-center gap-2 group cursor-pointer transition-colors ${
                       isDisabled
                         ? "cursor-default opacity-60"
                         : isActive
@@ -241,13 +311,14 @@ export const BranchDropdown = memo(function BranchDropdown({
                       {b.name}
                     </span>
                     <button
+                      type="button"
                       onClick={(e) => { e.stopPropagation(); copyBranchName(b.name); }}
                       className="opacity-0 group-hover:opacity-100 px-1 py-0.5 rounded text-[10px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition-all shrink-0"
                       title={t("branchMenu.copyTitle")}
                     >
                       {copiedBranch === b.name ? "✓" : t("branchMenu.copyLabel")}
                     </button>
-                  </button>
+                  </div>
                 );
               })
             )}

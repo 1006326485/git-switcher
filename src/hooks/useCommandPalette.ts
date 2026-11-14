@@ -7,6 +7,7 @@ import * as api from "../lib/tauri";
 import { buildRunEntries, type RunEntry } from "../lib/runCommands";
 import { isShortcutCapturing } from "../lib/shortcutCapture";
 import { isDirtyChord, installHeldKeyTracking } from "../lib/heldKeys";
+import { matchesFuzzy, parseFuzzyQuery, type FuzzyQuery } from "../lib/fuzzyMatch";
 
 export interface ProjectMatch {
   detail: ProjectDetail;
@@ -62,14 +63,10 @@ function getProjectStatusColor(p: ProjectDetail): "green" | "yellow" | "red" {
   return "green";
 }
 
-function matchProject(p: ProjectDetail, query: string): boolean {
-  const q = query.toLowerCase();
+function matchProject(p: ProjectDetail, query: FuzzyQuery): boolean {
   const { project, current_branch } = p;
-  return (
-    project.name.toLowerCase().includes(q) ||
-    (project.alias || "").toLowerCase().includes(q) ||
-    project.path.toLowerCase().includes(q) ||
-    current_branch.toLowerCase().includes(q)
+  return [project.name, project.alias || "", project.path, current_branch].some((field) =>
+    matchesFuzzy(field, query)
   );
 }
 
@@ -413,13 +410,13 @@ export function useCommandPalette(
   );
 
   const matchedProjects: ProjectMatch[] = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return [];
+    const fuzzyQuery = parseFuzzyQuery(query);
+    if (fuzzyQuery.terms.length === 0) return [];
 
-    const quickTag = QUICK_TAGS.find((t) => t.tag === q);
+    const quickTag = QUICK_TAGS.find((t) => t.tag === fuzzyQuery.text);
     const matched = quickTag
       ? filterByQuickTag(projects, quickTag.tag)
-      : projects.filter((p) => matchProject(p, q));
+      : projects.filter((p) => matchProject(p, fuzzyQuery));
 
     return matched.map((detail) => ({
       detail,

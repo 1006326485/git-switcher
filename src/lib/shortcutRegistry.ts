@@ -37,8 +37,9 @@ export type ShortcutPlatform = "mac" | "windows" | "linux";
  *    window-level one).
  * 3. terminal — terminal-owned keys only, handled by TerminalWorkspace's
  *    capture-phase window listener, which runs before all bubble-phase
- *    handlers and stops propagation for the keys it owns (new tab, close
- *    tab, switch group/tab, jump by index/project, focus input, clear).
+ *    handlers and stops propagation for the keys it owns (new-project
+ *    dropdown, new terminal in the current project, close tab, switch
+ *    group/tab, jump by index/project, focus input, clear).
  *    "Terminal context" means keyboard focus is inside the workspace's
  *    own DOM (its window-root element): in the standalone window that is
  *    everything, in the main window it is only the terminal panel, so an
@@ -193,7 +194,7 @@ export const SHORTCUT_REGISTRY: readonly ShortcutDefinition[] = [
     overridesOsOrBrowser: false,
     settingsField: "in_app_add_project",
     inAppActionId: "addProject",
-    note: "Terminal context overrides this when a terminal workspace is open (terminalNewTab, capture phase).",
+    note: "Terminal context overrides this while focus is inside the terminal workspace (terminalNewTabInProject, capture phase): the panel gets a new terminal tab instead.",
   },
   {
     id: "refreshAll",
@@ -326,14 +327,14 @@ export const SHORTCUT_REGISTRY: readonly ShortcutDefinition[] = [
   {
     id: "toggleTerminal",
     descriptionKey: "shortcuts.inApp.toggleTerminal",
-    defaultBinding: "Control+~",
+    defaultBinding: "CmdOrCtrl+`",
     context: "app",
     group: "inApp",
     rebindable: true,
-    overridesOsOrBrowser: false,
+    overridesOsOrBrowser: true,
     settingsField: "in_app_toggle_terminal",
     inAppActionId: "toggleTerminal",
-    note: "In-app panel only. useKeyboardShortcuts suppresses this binding when the event equals the backend global hotkey, so the two never double-fire.",
+    note: "In-app panel only: Cmd+` on macOS, Ctrl+` elsewhere, and no Shift, which keeps it distinct from the global hotkey (CmdOrCtrl+Shift+`). useKeyboardShortcuts suppresses this binding when the event equals the backend global hotkey, so the two never double-fire.",
   },
 
   // ── List navigation (non-rebindable in Phase 1) ───────────────────────
@@ -524,14 +525,26 @@ export const SHORTCUT_REGISTRY: readonly ShortcutDefinition[] = [
   {
     id: "terminalNewTab",
     descriptionKey: "shortcuts.terminal.newTab",
-    defaultBinding: "CmdOrCtrl+N",
+    defaultBinding: "CmdOrCtrl+Shift+N",
     context: "terminal",
     group: "terminal",
     rebindable: true,
     overridesOsOrBrowser: false,
     settingsField: "in_app_terminal_new_tab",
     inAppActionId: "terminalNewTab",
-    note: "Capture-phase handler, wins over app addProject when focus is inside the terminal. CmdOrCtrl resolves platform-aware (Cmd on macOS, Ctrl elsewhere), so Ctrl+N/Ctrl+W no longer leak to the shell on macOS and now work on Windows/Linux.",
+    note: "Opens the New-project dropdown (the button to the right of the terminal workspace's Projects header). Works as soon as the built-in panel or the standalone window is open, without focus having to be inside it. CmdOrCtrl resolves platform-aware (Cmd on macOS, Ctrl elsewhere).",
+  },
+  {
+    id: "terminalNewTabInProject",
+    descriptionKey: "shortcuts.terminal.newProject",
+    defaultBinding: "CmdOrCtrl+N",
+    context: "terminal",
+    group: "terminal",
+    rebindable: true,
+    overridesOsOrBrowser: false,
+    settingsField: "in_app_terminal_new_tab_in_project",
+    inAppActionId: "terminalNewTabInProject",
+    note: "Adds one more terminal tab in the project whose terminals are on screen (the tab bar's +), with no picker. Active while the panel or the standalone window is open, even before anything inside it is clicked; while the panel is up it takes precedence over app addProject. The same chord as addProject is legal because the contexts never overlap.",
   },
   {
     id: "terminalCloseTab",
@@ -543,7 +556,7 @@ export const SHORTCUT_REGISTRY: readonly ShortcutDefinition[] = [
     overridesOsOrBrowser: false,
     settingsField: "in_app_terminal_close_tab",
     inAppActionId: "terminalCloseTab",
-    note: "Capture-phase handler. With no tabs it propagates, so dialog-close (or the native menu) handles it.",
+    note: "Capture-phase handler. Closes the active tab, including the last one, which leaves the panel/window open on its empty state. With no tab left it propagates, so dialog-close (or the native menu) handles it.",
   },
   {
     id: "terminalFocusInput",

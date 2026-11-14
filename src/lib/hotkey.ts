@@ -106,27 +106,35 @@ function parseBindingForConflict(binding: string): NormalizedBinding | null {
   return { needCmdOrCtrl, needMeta, needCtrl, needAlt, needShift, key, isBackquote };
 }
 
-function ctrlMatches(p: NormalizedBinding, q: NormalizedBinding): boolean {
-  if (p.needCmdOrCtrl) {
-    if (!(q.needCmdOrCtrl || q.needCtrl || q.needMeta)) return false;
-    if (p.needCtrl && !(q.needCtrl || q.needMeta)) return false;
-    return true;
-  }
-  if (q.needCmdOrCtrl) {
-    if (!(p.needCmdOrCtrl || p.needCtrl || p.needMeta)) return false;
-    if (q.needCtrl && !(p.needCtrl || p.needMeta)) return false;
-    return true;
-  }
-  return p.needCtrl === q.needCtrl && p.needMeta === q.needMeta;
+/**
+ * Resolves CmdOrCtrl the way the key matchers do (see matchesBinding in
+ * inAppShortcuts.ts): Cmd on macOS, Ctrl everywhere else. A binding that
+ * spells both CmdOrCtrl and Control demands both keys.
+ */
+function resolvedMods(p: NormalizedBinding, isMac: boolean): { ctrl: boolean; meta: boolean } {
+  return {
+    ctrl: p.needCtrl || (p.needCmdOrCtrl && !isMac),
+    meta: p.needMeta || (p.needCmdOrCtrl && isMac),
+  };
 }
 
-export function bindingsConflict(a: string, b: string): boolean {
+function ctrlMatches(p: NormalizedBinding, q: NormalizedBinding, isMac: boolean): boolean {
+  // CmdOrCtrl is platform-resolved here, exactly like isSameChord and the
+  // key matchers. Comparing it loosely reported Control+~ (⌃~ on macOS) as
+  // clashing with CmdOrCtrl+Shift+` (⌘⇧`) — two chords that can never fire
+  // each other — which blocked saving Control+~ on macOS.
+  const pm = resolvedMods(p, isMac);
+  const qm = resolvedMods(q, isMac);
+  return pm.ctrl === qm.ctrl && pm.meta === qm.meta;
+}
+
+export function bindingsConflict(a: string, b: string, isMac = detectMac()): boolean {
   if (!a || !b) return false;
   if (normalizeBinding(a) === normalizeBinding(b)) return true;
   const pa = parseBindingForConflict(a);
   const pb = parseBindingForConflict(b);
   if (!pa || !pb) return false;
-  if (!ctrlMatches(pa, pb)) return false;
+  if (!ctrlMatches(pa, pb, isMac)) return false;
   const keyA = pa.isBackquote ? "~" : pa.key.toLowerCase();
   const keyB = pb.isBackquote ? "~" : pb.key.toLowerCase();
   if (keyA !== keyB) return false;

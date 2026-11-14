@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import TerminalWorkspace from "./TerminalWorkspace";
 import * as api from "../lib/tauri";
@@ -9,10 +9,12 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 vi.mock("../lib/tauri", () => ({
   terminalList: vi.fn(() => Promise.resolve([])),
-  terminalOpen: vi.fn(),
-  terminalWrite: vi.fn(),
-  terminalResize: vi.fn(),
-  terminalClose: vi.fn(),
+  terminalOpen: vi.fn(() =>
+    Promise.resolve({ id: "t-new", cwd: "/tmp/demo", title: "zsh", projectTitle: "demo", projectKey: "/tmp/demo", exited: false })
+  ),
+  terminalWrite: vi.fn(() => Promise.resolve()),
+  terminalResize: vi.fn(() => Promise.resolve()),
+  terminalClose: vi.fn(() => Promise.resolve()),
   listRunPresets: vi.fn(() => Promise.resolve([])),
   listCustomCommands: vi.fn(() => Promise.resolve([])),
   listProjectScripts: vi.fn(() => Promise.resolve([])),
@@ -39,7 +41,9 @@ vi.mock("../lib/tauri", () => ({
       },
     ])
   ),
+  openInFinder: vi.fn(),
   openInTerminal: vi.fn(),
+  switchBranch: vi.fn(() => Promise.resolve({})),
   createRunPreset: vi.fn(),
   deleteRunPreset: vi.fn(),
   getSettings: vi.fn(() =>
@@ -58,6 +62,43 @@ function workspaceRoot(): Element {
   const root = document.querySelector(".window-root");
   if (!root) throw new Error("workspace root not rendered");
   return root;
+}
+
+/**
+ * Every mount in these tests loads settings more than once (useTheme plus
+ * the workspace's own binding load), so a one-shot override would be
+ * consumed by the wrong caller. Services with getSettings are queued.
+ */
+function queueSettings(bindings: Record<string, string>) {
+  const value = {
+    theme: "light",
+    terminal_hotkey: "CmdOrCtrl+Shift+`",
+    terminal_hide_on_blur: false,
+    ...bindings,
+  } as never;
+  vi.mocked(api.getSettings).mockResolvedValue(value);
+}
+
+function renderWorkspace() {
+  render(<TerminalWorkspace open initial={null} workspaceLaunch={null} onClose={() => {}} />);
+}
+
+/** One live tab: the New-terminal "+" lives in the tab bar (needs a tab). */
+const demoSessions = [
+  {
+    id: "t1",
+    cwd: "/tmp/demo",
+    title: "zsh",
+    projectTitle: "demo",
+    projectKey: "/tmp/demo",
+    command: undefined,
+    exited: false,
+  },
+];
+
+/** How many tabs the workspace has asked the backend to open. */
+function openCalls(): number {
+  return vi.mocked(api.terminalOpen).mock.calls.length;
 }
 
 describe("TerminalWorkspace hotkeys", () => {
@@ -83,61 +124,96 @@ describe("TerminalWorkspace hotkeys", () => {
     }));
   });
 
-  it("Ctrl+N opens the New project dropdown", async () => {
-    render(
-      <TerminalWorkspace open initial={null} workspaceLaunch={null} onClose={() => {}} />
-    );
-    await waitFor(() => expect(screen.getByText("No terminals open")).toBeInTheDocument());
+  it("Ctrl+Shift+N opens the sidebar's New project picker", async () => {
+    vi.mocked(api.terminalList).mockResolvedValue(demoSessions);
+    renderWorkspace();
+    await screen.findByText("zsh");
+    await waitFor(() => expect(api.listProjects).toHaveBeenCalled());
+
+    fireEvent.keyDown(workspaceRoot(), { key: "N", code: "KeyN", ctrlKey: true, shiftKey: true });
+
+    const menu = await screen.findByRole("listbox");
+    // Home is still the first row of the picker.
+    expect(within(menu).getAllByRole("option")[0]).toHaveTextContent("Home — default shell");
+    // Opening the menu creates nothing by itself.
+    expect(api.terminalOpen).not.toHaveBeenCalled();
+  });
+
+  it("Ctrl+N adds one more tab in the current project, without a menu", async () => {
+    vi.mocked(api.terminalList).mockResolvedValue([
+      {
+        id: "t1",
+        cwd: "/tmp/demo",
+        title: "zsh",
+        projectTitle: "demo",
+        projectKey: "/tmp/demo",
+        command: undefined,
+        exited: false,
+      },
+    ]);
+    renderWorkspace();
+    await screen.findByText("zsh");
+    await waitFor(() => expect(api.listProjects).toHaveBeenCalled());
 
     fireEvent.keyDown(workspaceRoot(), { key: "n", code: "KeyN", ctrlKey: true });
 
-    expect(await screen.findByRole("listbox")).toBeInTheDocument();
-    // "demo" also renders in the blank-slate project row — scope to the dropdown.
-    expect(await screen.findByRole("listbox")).toHaveTextContent("demo");
-  });
-
-  it("ignores terminal chords when focus is outside the workspace", async () => {
-    render(
-      <TerminalWorkspace open initial={null} workspaceLaunch={null} onClose={() => {}} />
+    // Same action as the tab bar's "+": a new tab in the project on screen.
+    await waitFor(() =>
+      expect(api.terminalOpen).toHaveBeenCalledWith(
+        "/tmp/demo",
+        80,
+        24,
+        expect.objectContaining({ projectTitle: "demo" })
+      )
     );
-    await waitFor(() => expect(screen.getByText("No terminals open")).toBeInTheDocument());
-
-    // Focus in the main window (outside the panel): the chord belongs to
-    // the app, not the terminal, so no dropdown opens.
-    fireEvent.keyDown(document.body, { key: "n", code: "KeyN", ctrlKey: true });
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
-
-    // Same chord with focus inside the workspace: terminal owns it.
-    fireEvent.keyDown(workspaceRoot(), { key: "n", code: "KeyN", ctrlKey: true });
-    expect(await screen.findByRole("listbox")).toBeInTheDocument();
   });
 
-  it("uses a rebound new-tab binding from settings", async () => {
-    // Queued twice: useTheme loads settings on mount too, and consumes
-    // the first one-shot value before the workspace's own load effect.
-    const rebound = {
-      theme: "light",
-      terminal_hotkey: "CmdOrCtrl+Shift+`",
-      terminal_hide_on_blur: false,
-      in_app_terminal_new_tab: "CmdOrCtrl+Shift+N",
-    } as never;
-    vi.mocked(api.getSettings).mockResolvedValueOnce(rebound);
-    vi.mocked(api.getSettings).mockResolvedValueOnce(rebound);
-    render(
-      <TerminalWorkspace open initial={null} workspaceLaunch={null} onClose={() => {}} />
-    );
+  it("acts on both new-terminal chords when focus is outside the workspace", async () => {
+    vi.mocked(api.terminalList).mockResolvedValue(demoSessions);
+    renderWorkspace();
+    await screen.findByText("zsh");
+    const before = openCalls();
+
+    // Right after a summon focus sits outside the panel; the chords must
+    // still answer before anything inside it is clicked.
+    fireEvent.keyDown(document.body, { key: "N", code: "KeyN", ctrlKey: true, shiftKey: true });
+    expect(await screen.findByRole("listbox")).toBeInTheDocument();
+    // The picker itself creates nothing.
+    expect(openCalls()).toBe(before);
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("listbox")).not.toBeInTheDocument());
+
+    // CmdOrCtrl+N is the tab-bar "+" instead: one more tab in the project.
+    fireEvent.keyDown(document.body, { key: "n", code: "KeyN", ctrlKey: true });
+    await waitFor(() => expect(openCalls()).toBe(before + 1));
+  });
+
+  it("uses rebound new-terminal bindings from settings", async () => {
+    queueSettings({
+      in_app_terminal_new_tab: "CmdOrCtrl+T",
+      in_app_terminal_new_tab_in_project: "CmdOrCtrl+Alt+N",
+    });
+    renderWorkspace();
     await waitFor(() => expect(screen.getByText("No terminals open")).toBeInTheDocument());
     // Wait for the async settings load to land before pressing keys, or
     // the still-default bindings would answer first.
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
     await act(async () => {});
 
-    // The old default no longer opens anything…
-    fireEvent.keyDown(workspaceRoot(), { key: "n", code: "KeyN", ctrlKey: true });
+    // The old chord no longer opens the New picker…
+    fireEvent.keyDown(workspaceRoot(), { key: "N", code: "KeyN", ctrlKey: true, shiftKey: true });
+    await new Promise((r) => setTimeout(r, 0));
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
-    // …while the rebound chord does.
-    fireEvent.keyDown(workspaceRoot(), { key: "n", code: "KeyN", ctrlKey: true, shiftKey: true });
+    // …while the rebound one does.
+    fireEvent.keyDown(workspaceRoot(), { key: "t", code: "KeyT", ctrlKey: true });
     expect(await screen.findByRole("listbox")).toBeInTheDocument();
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("listbox")).not.toBeInTheDocument());
+
+    // The rebound "new terminal in current project" chord opens a tab.
+    fireEvent.keyDown(workspaceRoot(), { key: "n", code: "KeyN", ctrlKey: true, altKey: true });
+    await waitFor(() => expect(api.terminalOpen).toHaveBeenCalled());
   });
 
   it("Ctrl+W closes the active terminal tab", async () => {
@@ -152,9 +228,7 @@ describe("TerminalWorkspace hotkeys", () => {
         exited: false,
       },
     ]);
-    render(
-      <TerminalWorkspace open initial={null} workspaceLaunch={null} onClose={() => {}} />
-    );
+    renderWorkspace();
     await screen.findByText("zsh");
 
     fireEvent.keyDown(workspaceRoot(), { key: "w", code: "KeyW", ctrlKey: true });

@@ -46,6 +46,28 @@ impl SettingsStore {
             AppSettings::default()
         };
 
+        // One-time legacy upgrades (see migrate_legacy_toggle_terminal and
+        // migrate_legacy_review_prompt). Written back immediately so they are
+        // no longer indistinguishable from a value the user later edits — that
+        // is what made Control+~ impossible to save.
+        let mut settings = settings;
+        let mut migrated = false;
+        if crate::models::settings::migrate_legacy_toggle_terminal(&mut settings) {
+            log::info!("Migrated legacy in_app_toggle_terminal default to CmdOrCtrl+`");
+            migrated = true;
+        }
+        if crate::models::settings::migrate_legacy_review_prompt(&mut settings) {
+            log::info!("Cleared the legacy copy of the built-in LLM review prompt");
+            migrated = true;
+        }
+        if migrated {
+            if let Ok(content) = serde_json::to_string_pretty(&settings) {
+                if let Err(e) = fs::write(&path, content) {
+                    log::warn!("Failed to persist migrated settings.json: {}", e);
+                }
+            }
+        }
+
         Self {
             path,
             settings: Mutex::new(settings),

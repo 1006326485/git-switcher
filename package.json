@@ -11,8 +11,9 @@
     "test:watch": "vitest",
     "version:check": "node scripts/check-versions.mjs",
     "i18n:check": "node scripts/check-i18n.mjs",
+    "llm:prompt-check": "node scripts/check-llm-prompt.mjs",
     "check:rust": "cargo fmt --manifest-path src-tauri/Cargo.toml --check && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml",
-    "build": "npm run version:check && npm run i18n:check && npm run typecheck && vite build",
+    "build": "npm run version:check && npm run i18n:check && npm run llm:prompt-check && npm run typecheck && vite build",
     "check": "npm test && npm run build && npm run check:rust",
     "preview": "vite preview",
     "tauri": "tauri"
