@@ -231,6 +231,9 @@ describe("TerminalWorkspace quick run", () => {
     }));
     vi.mocked(api.listProjects).mockResolvedValue([makeDetail("/tmp/demo")]);
     vi.mocked(api.terminalList).mockResolvedValue(demoSessions);
+    // clearAllMocks keeps previous implementations; start each quick-run test
+    // from a known empty command list unless the test says otherwise.
+    vi.mocked(api.listProjectScripts).mockResolvedValue([]);
   });
 
   it("keeps the ▶ reachable while the list loads, then hides it when there is nothing to run", async () => {
@@ -250,13 +253,16 @@ describe("TerminalWorkspace quick run", () => {
 
     // The list resolves empty: nothing to run, so the trigger goes away.
     resolveScripts([]);
-    await waitFor(() =>
-      expect(screen.queryByRole("button", { name: "Quick run in demo" })).not.toBeInTheDocument(),
+    await waitFor(
+      () =>
+        expect(
+          screen.queryByRole("button", { name: "Quick run in demo" })
+        ).not.toBeInTheDocument(),
       { timeout: 1500 }
     );
   });
 
-  it("stays available while the list loads and opens as a dropdown of commands", async () => {
+  it("stays available while the list loads and opens as a searchable listbox", async () => {
     let resolveScripts: (v: { name: string; command: string }[]) => void = () => {};
     const pending = new Promise<{ name: string; command: string }[]>((resolve) => {
       resolveScripts = resolve;
@@ -271,10 +277,14 @@ describe("TerminalWorkspace quick run", () => {
     expect(button).toBeEnabled();
 
     fireEvent.click(button);
+    const listbox = await screen.findByRole("listbox");
+    // The search field is part of the picker itself, from the very first
+    // open and even for a short list.
+    expect(within(listbox.parentElement!).getByRole("textbox")).toBeInTheDocument();
     expect(await screen.findByText("Loading commands…")).toBeInTheDocument();
 
     resolveScripts([{ name: "dev", command: "npm run dev" }]);
-    const item = await screen.findByRole("menuitem", { name: /dev/ });
+    const item = await screen.findByRole("option", { name: /dev/ });
     expect(item).toHaveTextContent("npm run dev");
 
     fireEvent.click(item);
@@ -288,7 +298,120 @@ describe("TerminalWorkspace quick run", () => {
     );
   });
 
-  it("Escape closes the quick-run menu without running anything", async () => {
+  it("filters by name or command and Enter runs the first match", async () => {
+    vi.mocked(api.listProjectScripts).mockResolvedValue([
+      { name: "dev", command: "npm run dev" },
+      { name: "build", command: "npm run build" },
+      { name: "test", command: "npm test" },
+    ]);
+    renderWorkspace();
+    await screen.findByText("zsh");
+    fireEvent.mouseEnter(sidebarEntry("/tmp/demo"));
+    await waitFor(() => expect(api.listProjectScripts).toHaveBeenCalledWith("/tmp/demo"));
+    const button = screen.getByRole("button", { name: "Quick run in demo" });
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button);
+
+    const search = await screen.findByRole("textbox", { name: "Search commands" });
+    // The acronym matches build's name (and its command), not dev/test.
+    fireEvent.change(search, { target: { value: "bld" } });
+    await waitFor(() =>
+      expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
+        expect.stringContaining("build"),
+      ])
+    );
+
+    // Typing a command fragment filters by the command line as well.
+    fireEvent.change(search, { target: { value: "npm test" } });
+    await waitFor(() =>
+      expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
+        expect.stringContaining("test"),
+      ])
+    );
+
+    // And Enter runs the highlighted (first) match, close the picker.
+    fireEvent.keyDown(search, { key: "Enter" });
+    await waitFor(() =>
+      expect(api.terminalOpen).toHaveBeenCalledWith(
+        "/tmp/demo",
+        80,
+        24,
+        expect.objectContaining({ title: "test", command: "npm test" })
+      )
+    );
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
+
+  it("highlights the first command on open so Enter runs it without typing", async () => {
+    vi.mocked(api.listProjectScripts).mockResolvedValue([
+      { name: "dev", command: "npm run dev" },
+      { name: "build", command: "npm run build" },
+    ]);
+    renderWorkspace();
+    await screen.findByText("zsh");
+    fireEvent.mouseEnter(sidebarEntry("/tmp/demo"));
+    await waitFor(() => expect(api.listProjectScripts).toHaveBeenCalledWith("/tmp/demo"));
+    const button = screen.getByRole("button", { name: "Quick run in demo" });
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button);
+
+    const search = await screen.findByRole("textbox", { name: "Search commands" });
+    fireEvent.keyDown(search, { key: "Enter" });
+    await waitFor(() =>
+      expect(api.terminalOpen).toHaveBeenCalledWith(
+        "/tmp/demo",
+        80,
+        24,
+        expect.objectContaining({ title: "dev" })
+      )
+    );
+  });
+
+  it("moves the highlight with the arrow keys before Enter runs it", async () => {
+    vi.mocked(api.listProjectScripts).mockResolvedValue([
+      { name: "dev", command: "npm run dev" },
+      { name: "build", command: "npm run build" },
+    ]);
+    renderWorkspace();
+    await screen.findByText("zsh");
+    fireEvent.mouseEnter(sidebarEntry("/tmp/demo"));
+    await waitFor(() => expect(api.listProjectScripts).toHaveBeenCalledWith("/tmp/demo"));
+    const button = screen.getByRole("button", { name: "Quick run in demo" });
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button);
+
+    const search = await screen.findByRole("textbox", { name: "Search commands" });
+    fireEvent.keyDown(search, { key: "ArrowDown" });
+    fireEvent.keyDown(search, { key: "Enter" });
+    await waitFor(() =>
+      expect(api.terminalOpen).toHaveBeenCalledWith(
+        "/tmp/demo",
+        80,
+        24,
+        expect.objectContaining({ title: "build" })
+      )
+    );
+  });
+
+  it("says when the search matches no command", async () => {
+    vi.mocked(api.listProjectScripts).mockResolvedValue([
+      { name: "dev", command: "npm run dev" },
+      { name: "build", command: "npm run build" },
+    ]);
+    renderWorkspace();
+    await screen.findByText("zsh");
+    fireEvent.mouseEnter(sidebarEntry("/tmp/demo"));
+    await waitFor(() => expect(api.listProjectScripts).toHaveBeenCalledWith("/tmp/demo"));
+    const button = screen.getByRole("button", { name: "Quick run in demo" });
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button);
+
+    const search = await screen.findByRole("textbox", { name: "Search commands" });
+    fireEvent.change(search, { target: { value: "zzzz" } });
+    expect(await screen.findByText("No matching commands")).toBeInTheDocument();
+  });
+
+  it("Escape closes the quick-run list without running anything", async () => {
     vi.mocked(api.listProjectScripts).mockResolvedValue([
       { name: "dev", command: "npm run dev" },
       { name: "build", command: "npm run build" },
@@ -302,9 +425,13 @@ describe("TerminalWorkspace quick run", () => {
     await waitFor(() => expect(button).toBeEnabled());
     fireEvent.click(button);
 
-    expect(await screen.findByRole("menuitem", { name: /build/ })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: /build/ })).toBeInTheDocument();
     fireEvent.keyDown(document, { key: "Escape" });
-    await waitFor(() => expect(screen.queryByRole("menuitem", { name: /build/ })).not.toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.queryByRole("option", { name: /build/ })).not.toBeInTheDocument()
+    );
+    // The trigger gets focus back, like the app's other dropdowns.
+    await waitFor(() => expect(button).toHaveFocus());
     expect(api.terminalOpen).not.toHaveBeenCalled();
   });
 
@@ -314,7 +441,9 @@ describe("TerminalWorkspace quick run", () => {
     fireEvent.mouseEnter(sidebarEntry("/tmp/demo"));
     await waitFor(() => expect(api.listProjectScripts).toHaveBeenCalled());
     await waitFor(() =>
-      expect(screen.queryByRole("button", { name: "Quick run in demo" })).toBeInTheDocument()
+      expect(
+        screen.queryByRole("button", { name: "Quick run in demo" })
+      ).not.toBeInTheDocument()
     );
   });
 });

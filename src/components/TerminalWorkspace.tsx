@@ -31,6 +31,7 @@ import { Modal, DropdownMenu, MenuItem, KbdBadge } from "./ui/primitives";
 import { SwitchBranchControl } from "./SwitchBranchControl";
 import { buildPickerItems, type PickerItem } from "../lib/scriptPicker";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { CommandMenu } from "./TerminalCommandMenu";
 import { SelectDropdown } from "./ui/SelectDropdown";
 import { formatHotkey } from "../lib/hotkey";
 import { CloseIcon, PlusIcon, TerminalIcon } from "./ui/icons";
@@ -1112,45 +1113,25 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
                   </span>
                   {/* Quick-run ▶: fixed 20px slot, visibility-toggled so the
                       count pill never shifts when it appears (preview .run).
-                      Hidden once loaded and confirmed empty — no shortcuts,
-                      no button. Stays visible while loading (items undefined)
-                      so hover-preload can still resolve. */}
-                  {!(items !== undefined && items.length === 0) && (
-                  <span className="shrink-0 w-5 h-5 inline-flex items-center justify-center invisible group-hover:visible group-focus-within:visible focus-within:visible">
-                    <DropdownMenu
-                      align="left"
-                      trigger={
-                        <button
-                          type="button"
-                          onClick={() => preloadQuickItems(cwd)}
-                          aria-label={t("terminal.quickRunAria", { title })}
-                          title={t("terminal.quickRun")}
-                          className="press w-5 h-5 inline-flex items-center justify-center rounded text-gray-400 hover:text-emerald-500 hover:bg-gray-200 dark:hover:bg-gray-700 transition-all active:scale-90 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-                        >
-                          <svg aria-hidden="true" width="9" height="9" viewBox="0 0 16 16" fill="currentColor">
-                            <path d="M4 2.5v11l9-5.5-9-5.5Z" />
-                          </svg>
-                        </button>
-                      }
-                    >
-                    {items === undefined && (
-                      <div className="px-3 py-2 text-xs text-gray-400">{t("terminal.quickRunLoading")}</div>
-                    )}
-                    {items !== undefined && items.length === 0 && (
-                      <div className="px-3 py-2 text-xs text-gray-400">{t("terminal.quickRunEmpty")}</div>
-                    )}
-                    {items !== undefined &&
-                      items.map((item) => (
-                        <MenuItem
-                          key={`${item.kind}:${item.name}:${item.command}`}
-                          label={item.name}
-                          description={item.command}
-                          onClick={() => handleQuickRun(cwd, title, item)}
-                        />
-                      ))}
-                  </DropdownMenu>
-                  </span>
-                  )}
+                      Opens the same searchable listbox the rest of the app
+                      uses. Hidden once loaded and confirmed empty — no
+                      shortcuts, no button. Stays visible while loading (items
+                      undefined) so hover-preload can still resolve. */}
+                  <CommandMenu
+                    ariaLabel={t("terminal.quickRunAria", { title })}
+                    title={t("terminal.quickRun")}
+                    items={items ?? []}
+                    loading={items === undefined}
+                    onLoad={() => preloadQuickItems(cwd)}
+                    onSelect={(item) => handleQuickRun(cwd, title, item)}
+                    loadingLabel={t("terminal.quickRunLoading")}
+                    emptyLabel={t("terminal.quickRunEmpty")}
+                    noMatchLabel={t("terminal.quickRunNoMatch")}
+                    hidden={items !== undefined && items.length === 0}
+                    hoverOnly
+                    className="shrink-0 w-5 h-5 inline-flex items-center justify-center"
+                    triggerClassName="press w-5 h-5 inline-flex items-center justify-center rounded text-gray-400 hover:text-emerald-500 hover:bg-gray-200 dark:hover:bg-gray-700 transition-all active:scale-90"
+                  />
                   <span className={`text-[10px] tabular-nums shrink-0 min-w-6 px-[7px] py-px rounded-full text-center ${
                     isActive
                       ? "bg-[var(--accent)] text-white"

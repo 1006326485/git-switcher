@@ -4,7 +4,6 @@ import {
   useEffect,
   useMemo,
   useRef,
-  type ChangeEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
@@ -56,17 +55,17 @@ interface CommandMenuProps {
 
 /**
  * The quick-run dropdown: a command picker anchored under its trigger, built
- * on the SAME dropdown model as SelectDropdown (useDropdownPortal — measured
- * before paint, first item highlighted before the first keystroke,
- * arrows/Enter/Escape wherever focus is, an outside press consumed instead
- * of leaking). Unlike SelectDropdown it accepts free-text once open: the
- * header row carries a search field that filters by name AND command, so a
- * long script list stays usable from the keyboard.
+ * on the SAME dropdown model as SelectDropdown/BranchDropdown (useDropdownPortal
+ * — measured before paint, first item highlighted before the first keystroke,
+ * arrows/Enter/Escape wherever focus is, an outside press consumed instead of
+ * leaking). Once open it always carries a search field, and typing filters by
+ * name AND command with the app's shared fuzzy matcher, so a long script list
+ * stays usable entirely from the keyboard.
  *
- * Key ownership while open: single-line keys (letters, digits, arrows,
- * Backspace) are routed to the search field no matter where focus is — the
- * dropdown suite is not focusable, which is exactly why it cannot rely on
- * the field having focus. The trigger's own hotkey still toggles it closed.
+ * The search field takes focus on open (like every other dropdown search in
+ * the app): single-line keys then go to the field natively, while arrows and
+ * Enter are owned at the document level so they keep working even if focus
+ * leaves the field. The trigger's own hotkey still toggles it closed.
  */
 export const CommandMenu = memo(function CommandMenu({
   ariaLabel,
@@ -109,10 +108,7 @@ export const CommandMenu = memo(function CommandMenu({
   prevEmpty.current = empty;
 
   const filtered = useMemo(() => filterPickerItems(items, search), [items, search]);
-  const isSearching = search.length > 0;
   const selectable = !loading && filtered.length > 0;
-
-  const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   // Seed the highlight in the same commit that opens (or that changes the
   // query): the first frame already shows the item Enter would run. Any
@@ -135,15 +131,6 @@ export const CommandMenu = memo(function CommandMenu({
       setActiveIndex(Math.max(0, filtered.length - 1));
     }
   }
-
-  // Load the command list as soon as the trigger appears (the caller's
-  // preload is idempotent): a menu opened by a click then already has its
-  // items, and an empty list can disable the trigger without a hover.
-  const onLoadRef = useRef(onLoad);
-  onLoadRef.current = onLoad;
-  useEffect(() => {
-    onLoadRef.current();
-  }, []);
 
   const openMenu = useCallback(() => {
     setOpen(true);
@@ -171,86 +158,20 @@ export const CommandMenu = memo(function CommandMenu({
     if (!disabled) openMenu();
   }, [openSignal, disabled, openMenu]);
 
-  // Scroll the highlighted row into view.
-  useEffect(() => {
-    if (!open || activeIndex < 0) return;
-    itemRefs.current[activeIndex]?.scrollIntoView?.({ block: "nearest" });
-  }, [open, activeIndex]);
-
-  // Own the keys wherever focus is. Single-line keys go to the search field
-  // (the dropdown never takes focus itself, so typing would otherwise land
-  // in the shell); the rest drive the list. A menu with nothing to run still
-  // closes on Escape instead of leaking it to the workspace handlers.
+  // Arrows and Enter are owned wherever focus is while the menu is open.
+  // Typing is NOT intercepted: the search field has focus (useDropdownPortal
+  // focuses it once placed), so the field edits natively like every other
+  // dropdown search. Escape is owned by the portal hook for the same reason.
   useEffect(() => {
     if (!open) return;
-    const isTypeable = (e: KeyboardEvent) =>
-      !e.metaKey &&
-      !e.ctrlKey &&
-      !e.altKey &&
-      (e.key.length === 1 || e.key === "Backspace" || e.key === "Delete");
     const handler = (e: KeyboardEvent) => {
       if (e.isComposing) return;
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        close();
-        triggerRef.current
-          ?.querySelector<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')
-          ?.focus();
-        return;
-      }
-      // The quick-run hotkey toggles the open menu closed, wherever focus is.
-      const typingInField = e.target === inputRef.current;
-      if (typingInField && (e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "Home" || e.key === "End")) {
-        return;
-      }
-      if (isTypeable(e)) {
-        if (typingInField) return;
-        const input = inputRef.current;
-        if (!input) return;
-        e.preventDefault();
-        e.stopPropagation();
-        const el = input;
-        const start = el.selectionStart ?? el.value.length;
-        const end = el.selectionEnd ?? el.value.length;
-        // Edit at the caret exactly like the focused field would.
-        const next =
-          e.key === "Backspace"
-            ? start === end
-              ? el.value.slice(0, Math.max(0, start - 1)) + el.value.slice(end)
-              : el.value.slice(0, start) + el.value.slice(end)
-            : e.key === "Delete"
-            ? start === end
-              ? el.value.slice(0, start) + el.value.slice(start + 1)
-              : el.value.slice(0, start) + el.value.slice(end)
-            : el.value.slice(0, start) + e.key + el.value.slice(end);
-        const caret = e.key === "Backspace" && start === end ? Math.max(0, start - 1) : start + 1;
-        setSearch(next);
-        requestAnimationFrame(() => {
-          el.focus();
-          el.setSelectionRange(caret, caret);
-        });
-        return;
-      }
-      if (e.key === " " || e.key === "ArrowDown" || e.key === "ArrowUp") {
-        // Space is a search character unless the field itself has focus (it
-        // owns it natively there).
-        if (e.key === " " && !typingInField) {
-          e.preventDefault();
-          setSearch((s) => s + " ");
-          requestAnimationFrame(() => inputRef.current?.focus());
-          return;
-        }
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         if (!selectable) return;
         e.preventDefault();
         e.stopPropagation();
-        if (e.key === " ") return;
-        setActiveIndex((prev) => {
-          const delta = e.key === "ArrowDown" ? 1 : -1;
-          const next = (Math.max(prev, 0) + delta + filtered.length) % filtered.length;
-          itemRefs.current[next]?.focus();
-          return next;
-        });
+        const delta = e.key === "ArrowDown" ? 1 : -1;
+        setActiveIndex((prev) => (Math.max(prev, 0) + delta + filtered.length) % filtered.length);
         return;
       }
       if (e.key === "Enter") {
@@ -264,36 +185,19 @@ export const CommandMenu = memo(function CommandMenu({
     };
     document.addEventListener("keydown", handler, true);
     return () => document.removeEventListener("keydown", handler, true);
-  }, [open, selectable, filtered, activeIndex, close, onSelect, setActiveIndex, setSearch, triggerRef, inputRef]);
-
-  // Focus the highlighted row after the first paint (positioning effects own
-  // the open frame; the search field takes the caret instead when the list
-  // is long enough to warrant one).
-  const showSearch = items.length > 5 || isSearching;
-  useEffect(() => {
-    if (!open) return;
-    const target = () => {
-      if (showSearch) inputRef.current?.focus();
-      else itemRefs.current[0]?.focus();
-    };
-    const raf = requestAnimationFrame(target);
-    return () => cancelAnimationFrame(raf);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
-  const handleSearchChange = useCallback(
-    (e: ChangeEvent<HTMLInputElement>) => {
-      setSearch(e.target.value);
-    },
-    [setSearch]
-  );
+  }, [open, selectable, filtered, activeIndex, close, onSelect, setActiveIndex]);
 
   const triggerDisabled = disabled || (!loading && items.length === 0);
+
+  // Nothing to run: remove the trigger from the layout entirely (not just
+  // visually), so it cannot be hovered, focused, or announced by a screen
+  // reader. Callers only pass this once the list is known to be empty.
+  if (hidden) return null;
 
   return (
     <div
       ref={triggerRef}
-      className={`${className ?? ""}${hidden ? " hidden" : ""}${hoverOnly && !open ? " invisible group-hover:visible group-focus-within:visible" : ""}`}
+      className={`${className ?? ""}${hoverOnly && !open ? " invisible group-hover:visible group-focus-within:visible" : ""}`}
       onMouseEnter={onLoad}
     >
       <button
@@ -331,29 +235,25 @@ export const CommandMenu = memo(function CommandMenu({
             zIndex: 9999,
             ...(pos.placeAbove ? { transform: `translateY(-${portalHeight}px)` } : null),
           }}
-          className={`origin-bottom-left bg-(--surface-1) border border-(--border-color) rounded-xl shadow-lg overflow-hidden ${popoverAnimation}`}
+          className={`origin-bottom-left max-h-80 bg-(--surface-1) border border-(--border-color) rounded-xl shadow-lg overflow-hidden ${popoverAnimation}`}
         >
-          {/* The field shows whenever there is something to search OR a query
-              is active: this component owns the typing itself (see the key
-              handler below), so the field must exist for the very first
-              character even on a short list. */}
-          {(items.length > 5 || open) && (
-            <div className="p-2 border-b border-(--border-color)">
-              <input
-                ref={inputRef}
-                type="text"
-                value={search}
-                onChange={handleSearchChange}
-                placeholder={t("terminal.quickRunSearchPlaceholder")}
-                aria-label={t("terminal.quickRunSearchAria")}
-                autoCapitalize="off"
-                autoCorrect="off"
-                autoComplete="off"
-                spellCheck={false}
-                className="w-full px-2 py-1.5 text-sm rounded border border-(--border-color) bg-[var(--surface-2)] text-gray-800 dark:text-gray-200 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-              />
-            </div>
-          )}
+          {/* Always present while open: quick-run is a searchable picker like
+              every other dropdown, even for a short command list. */}
+          <div className="p-2 border-b border-(--border-color)">
+            <input
+              ref={inputRef}
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t("terminal.quickRunSearchPlaceholder")}
+              aria-label={t("terminal.quickRunSearchAria")}
+              autoCapitalize="off"
+              autoCorrect="off"
+              autoComplete="off"
+              spellCheck={false}
+              className="w-full px-2 py-1.5 text-sm rounded border border-(--border-color) bg-[var(--surface-2)] text-gray-800 dark:text-gray-200 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+            />
+          </div>
           <div
             ref={listRef}
             role="listbox"
@@ -375,9 +275,7 @@ export const CommandMenu = memo(function CommandMenu({
                   type="button"
                   role="option"
                   aria-selected={i === activeIndex}
-                  ref={(el) => {
-                    itemRefs.current[i] = el;
-                  }}
+                  tabIndex={-1}
                   onMouseEnter={() => setActiveIndex(i)}
                   onClick={() => {
                     close();
