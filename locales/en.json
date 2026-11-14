@@ -98,8 +98,8 @@
       "autoFetchOnLaunchAria": "Enable auto-fetch on launch",
       "terminalHotkey": "Terminal Hotkey",
       "terminalHotkeyAria": "Terminal hotkey",
-      "terminalHotkeyHint": "Global shortcut that summons the standalone terminal window. Examples: CmdOrCtrl+Shift+`, Alt+Space.",
-      "inAppTerminalHint": "In-app shortcut that toggles the built-in terminal panel (configurable in the Shortcuts panel). The global shortcut also toggles the panel while the main window is focused.",
+      "terminalHotkeyHint": "Global shortcut for the standalone terminal window: it summons or hides that window, and while the main window is focused it toggles the built-in terminal panel instead. Default CmdOrCtrl+Shift+`, e.g. ⌘⇧` on macOS. The in-app panel toggle (⌘` on macOS, Ctrl+` elsewhere) and this global shortcut are configured separately.",
+      "inAppTerminalHint": "The in-app shortcut above toggles the built-in terminal panel while the main window is focused; the global terminal hotkey (Settings › General) is configured separately. Both rows show the currently recorded keys.",
       "hideTerminalOnBlur": "Hide Terminal on Blur",
       "hideTerminalOnBlurDesc": "Dismiss the summoned terminal window when it loses focus",
       "hideTerminalOnBlurAria": "Hide terminal on blur",
@@ -165,6 +165,22 @@
       "model": "Model",
       "modelAria": "Model",
       "modelHint": "e.g. gpt-4o, gpt-4o-mini, claude-3-sonnet, llama3",
+      "modelSelectAria": "Model list",
+      "modelPlaceholder": "Fetch the model list",
+      "fetchModels": "Fetch models",
+      "fetchingModels": "Fetching…",
+      "modelsLoaded": "{{count}} models available",
+      "modelsError": "Could not load the model list: {{error}}",
+      "modelsFrom": "Models are read from {{url}}",
+      "prompt": "Review prompt",
+      "promptAria": "Review prompt",
+      "promptHint": "Instructions sent to the model. Leave {{placeholder}} out and the diff is appended at the end.",
+      "promptExpand": "Edit full prompt",
+      "promptReset": "Reset to default",
+      "promptDefault": "Default",
+      "promptCustom": "Customized",
+      "promptModalAria": "Review prompt editor",
+      "promptModalSubtitle": "Sent to the model with every review. Use {{placeholder}} to place the diff.",
       "temperature": "Temperature",
       "temperatureAria": "Temperature",
       "maxTokens": "Max Tokens",
@@ -403,7 +419,7 @@
       "inApp": "In-App"
     },
     "global": {
-      "terminal": "Toggle the built-in terminal when the main window is focused, or summon/hide the standalone terminal window otherwise (configurable in Settings)"
+      "terminal": "Summon / hide the standalone terminal window; while the main window is focused it toggles the built-in terminal panel instead (configurable in Settings)"
     },
     "general": {
       "addProject": "Add project",
@@ -440,14 +456,15 @@
       "jumpIndex": "Jump to terminal by index",
       "jumpProject": "Jump to terminal in current project",
       "closeTab": "Close terminal tab",
-      "newTab": "New terminal in selected project",
-      "closeTabKey": "Close current terminal tab",
+      "newTab": "Open the New project picker of the terminal",
+      "closeTabKey": "Close current terminal tab (keeps the panel open)",
       "switchGroupPrev": "Switch to previous project group in terminal",
       "switchGroupNext": "Switch to next project group in terminal",
       "switchTabPrev": "Switch to previous terminal tab",
       "switchTabNext": "Switch to next terminal tab",
       "focusInput": "Focus terminal input",
-      "clearScreen": "Clear terminal scrollback"
+      "clearScreen": "Clear terminal scrollback",
+      "newProject": "New terminal tab in the current project"
     },
     "inApp": {
       "addProject": "Add project",
@@ -461,7 +478,7 @@
       "navigateDown": "Move selection down",
       "navigateUp": "Move selection up",
       "selectFocused": "Expand focused project",
-      "toggleTerminal": "Toggle built-in terminal",
+      "toggleTerminal": "Toggle built-in terminal panel (in the main window)",
       "openSettings": "Open Settings"
     },
     "editor": {
@@ -569,6 +586,9 @@
     "quickRunAria": "Quick run in {{title}}",
     "quickRunLoading": "Loading commands…",
     "quickRunEmpty": "No quick commands yet",
+    "quickRunSearchPlaceholder": "Search commands…",
+    "quickRunSearchAria": "Search commands",
+    "quickRunNoMatch": "No matching commands",
     "switchTabs": "Switch tabs — ⌥1…9 to jump, middle-click to close",
     "switchGroupBadge": "⌘↑↓",
     "openInFinder": "Open in Finder",
@@ -578,7 +598,10 @@
     "canvasCopy": "Copy",
     "canvasPaste": "Paste",
     "canvasSelectAll": "Select All",
-    "canvasClear": "Clear"
+    "canvasClear": "Clear",
+    "switchBranchTitle": "Switch to {{branch}}?",
+    "switchBranchDirty": "This project has <strong>{{total}}</strong> uncommitted changes. Switching to <strong>{{branch}}</strong> may discard them. Continue?",
+    "switchBranchConfirm": "Switch branch"
   },
   "row": {
     "op": {
@@ -937,7 +960,8 @@
     "copyName": "Copy name",
     "deleteRemote": "Delete remote",
     "switchedTo": "Switched to {{name}}",
-    "copiedName": "Copied {{name}}"
+    "copiedName": "Copied {{name}}",
+    "unknown": "no branch"
   },
   "branchToast": {
     "created": "Created branch \"{{name}}\"",
@@ -1695,7 +1719,8 @@
     "ai": {
       "reviewNotEnabled": "AI review is not enabled. Go to Settings to configure LLM.",
       "noDiff": "No differences found between branches.",
-      "notEnabled": "AI is not enabled. Go to Settings to configure LLM."
+      "notEnabled": "AI is not enabled. Go to Settings to configure LLM.",
+      "noModels": "The endpoint {{endpoint}} returned no models. Check the base URL and API key."
     },
     "hint": {
       "credentials": "check the credentials for this remote in Settings, or use an SSH key",

@@ -97,6 +97,42 @@ pub async fn generate_commit_msg(
     LlmService::generate_commit_message(&path, &config).await
 }
 
+/// Model ids offered by the configured (or, while editing, unsaved) endpoint,
+/// for the settings model picker.
+///
+/// Takes the connection settings as arguments instead of reading them from the
+/// store so the picker works before the user has saved a new endpoint and key.
+/// A saved key in the OS keychain is used when the argument is empty.
+#[tauri::command]
+pub async fn list_llm_models(
+    endpoint: String,
+    api_key: Option<String>,
+    store: State<'_, SettingsStore>,
+) -> Result<Vec<String>, AppError> {
+    let config = LlmConfig {
+        endpoint,
+        api_key: api_key.unwrap_or_default(),
+        ..Default::default()
+    };
+    let config = if config.api_key.is_empty() {
+        LlmConfig {
+            api_key: store.get_llm_config_with_key()?.api_key,
+            ..config
+        }
+    } else {
+        config
+    };
+
+    let models = LlmService::list_models(&config).await?;
+    if models.is_empty() {
+        return Err(AppError::Llm(crate::i18n::tl(
+            "backend.ai.noModels",
+            &[("endpoint", &config.endpoint)],
+        )));
+    }
+    Ok(models)
+}
+
 #[tauri::command]
 pub async fn ai_review_streaming(
     path: String,

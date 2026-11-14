@@ -1,5 +1,6 @@
-import { act, render, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { invoke } from "@tauri-apps/api/core";
 import App from "./App";
 import { clearHeldKeys } from "./lib/heldKeys";
 
@@ -165,7 +166,9 @@ describe("App Cmd+W precedence", () => {
   it("(a) terminal panel with no tabs falls through and closes the panel", async () => {
     await renderApp();
 
-    // Open the panel via its Control+~ binding (no sessions mocked, so no tabs).
+    // Open the panel via its in-app toggle, CmdOrCtrl+` — Ctrl+` with NO Shift
+    // on a non-mac platform (the global hotkey is the Shift-held variant and
+    // belongs to the backend). No sessions are mocked, so the panel has no tabs.
     let toggle: KeyboardEvent | undefined;
     await act(async () => {
       press("ControlLeft", "Control", { ctrlKey: true });
@@ -199,6 +202,182 @@ describe("App Cmd+W precedence", () => {
     await act(async () => {
       release("KeyW", "w");
       release("MetaLeft", "Meta");
+    });
+  });
+});
+
+describe("App Cmd+N precedence (FR2 terminal context)", () => {
+  const addDialogTitle = () =>
+    Array.from(document.querySelectorAll("h2")).some((h) => /Add Project/i.test(h.textContent ?? ""));
+
+  /**
+   * Focus something INSIDE the terminal workspace. The panel (TerminalPanel)
+   * is a portal into document.body, so it is not nestable inside
+   * `[data-terminal-context]`: find the workspace's own .window-root there.
+   */
+  function workspaceRoot(): HTMLElement {
+    const panels = Array.from(document.querySelectorAll("body > div > div")).filter(
+      (el) => el.querySelector(".window-root")
+    );
+    const el = panels[panels.length - 1]?.querySelector(".window-root");
+    if (!(el instanceof HTMLElement)) throw new Error("terminal workspace not mounted");
+    return el;
+  }
+
+  async function focusWorkspace() {
+    const target = workspaceRoot().querySelector("button") ?? workspaceRoot();
+    await act(async () => {
+      (target as HTMLElement).focus();
+    });
+  }
+
+  it("opens Add Project when focus is in the app (no terminal context)", async () => {
+    await renderApp();
+    await act(async () => {
+      press("ControlLeft", "Control", { ctrlKey: true });
+      press("KeyN", "n", { ctrlKey: true });
+    });
+    await waitFor(() => expect(addDialogTitle()).toBe(true));
+    await act(async () => {
+      release("KeyN", "n");
+      release("ControlLeft", "Control");
+    });
+  });
+
+  // The regression this pins: CmdOrCtrl+N pressed INSIDE the terminal panel
+  // (e.g. the shell's Ctrl+N history key) used to reach App's addProject
+  // handler and summon the Add Project dialog behind the panel.
+  it("keeps Cmd+N inside the terminal context away from Add Project", async () => {
+    await renderApp();
+
+    // Open the terminal panel with the in-app toggle (CmdOrCtrl+` → Ctrl+`,
+    // unshifted). No sessions are mocked, so the panel starts blank.
+    let toggle: KeyboardEvent | undefined;
+    await act(async () => {
+      toggle = press("Backquote", "`", { ctrlKey: true });
+    });
+    expect(toggle?.defaultPrevented).toBe(true);
+    await act(async () => {
+      release("Backquote", "`");
+    });
+    await waitFor(() => expect(workspaceRoot()).toBeTruthy());
+
+    await focusWorkspace();
+    expect(document.activeElement?.closest(".window-root")).not.toBeNull();
+    let ev: KeyboardEvent | undefined;
+    await act(async () => {
+      ev = press("KeyN", "n", { ctrlKey: true });
+    });
+    await act(async () => {
+      release("KeyN", "n");
+      release("ControlLeft", "Control");
+    });
+
+    expect(addDialogTitle()).toBe(false);
+    // The chord never reached App's addProject: the terminal context owns
+    // it (the workspace has nothing to open for it, so it is not swallowed
+    // either — the browser default on that platform decides).
+    expect(ev).toBeDefined();
+  });
+
+  it("restores the app meaning of Cmd+N once focus leaves the terminal", async () => {
+    await renderApp();
+    // In-app toggle: Ctrl+` (CmdOrCtrl+`), unshifted — the default binding.
+    let toggle: KeyboardEvent | undefined;
+    await act(async () => {
+      toggle = press("Backquote", "`", { ctrlKey: true });
+    });
+    expect(toggle?.defaultPrevented).toBe(true);
+    await act(async () => {
+      release("Backquote", "`");
+    });
+    await waitFor(() => expect(workspaceRoot()).toBeTruthy());
+    await focusWorkspace();
+    // The root is React's workspace element; its panel wrapper carries
+    // "hidden" while closed (TerminalPanel).
+    const workspace = workspaceRoot();
+    // TerminalPanel's wrapper: the fixed overlay that is `hidden` while the
+    // panel is closed.
+    const panelWrapper = workspace.closest(".fixed.inset-0");
+    expect(panelWrapper).not.toBeNull();
+
+    // Close the panel (pointer path; every chord attempt would itself be
+    // owned by the terminal context we are trying to leave).
+    const closeButton = workspace.querySelector('[aria-label="Close"]');
+    expect(closeButton).not.toBeNull();
+    await act(async () => {
+      fireEvent.click(closeButton as Element);
+    });
+    await waitFor(() => expect(panelWrapper?.className).toContain("hidden"));
+
+    await act(async () => {
+      (document.body as HTMLElement).tabIndex = -1;
+      (document.body as HTMLElement).focus();
+    });
+    expect(document.activeElement?.closest(".window-root")).toBeNull();
+
+    await act(async () => {
+      press("KeyN", "n", { ctrlKey: true });
+    });
+    await waitFor(() => expect(addDialogTitle()).toBe(true));
+  });
+
+  // The reported bug: after summoning the built-in panel, nothing inside it
+  // had been clicked yet, so focus still sat on the trigger. Both chords had
+  // to be clicked into the panel before they worked.
+  async function summonPanel() {
+    await renderApp();
+    // In-app toggle: CmdOrCtrl+` — Ctrl+` without Shift on this platform.
+    let toggle: KeyboardEvent | undefined;
+    await act(async () => {
+      toggle = press("Backquote", "`", { ctrlKey: true });
+    });
+    expect(toggle?.defaultPrevented).toBe(true);
+    // Releasing the summon chord matters: a key still held would make the
+    // next chord "dirty" and it would be refused (heldKeys contract).
+    await act(async () => {
+      release("Backquote", "`");
+      release("ControlLeft", "Control");
+    });
+    await waitFor(() => expect(workspaceRoot()).toBeTruthy());
+    expect(document.activeElement?.closest(".window-root")).toBeFalsy();
+  }
+
+  it("adds a terminal tab on Cmd+N right after the panel is summoned", async () => {
+    await summonPanel();
+
+    await act(async () => {
+      press("ControlLeft", "Control", { ctrlKey: true });
+      press("KeyN", "n", { ctrlKey: true });
+    });
+    await act(async () => {
+      release("KeyN", "n");
+      release("ControlLeft", "Control");
+    });
+
+    // Cmd+N is "one more tab in the current project" (the tab bar's "+"),
+    // not the project picker, and it must not fall through to Add Project.
+    await waitFor(() =>
+      expect(
+        vi.mocked(invoke).mock.calls.some(([cmd]) => cmd === "terminal_open")
+      ).toBe(true)
+    );
+    expect(addDialogTitle()).toBe(false);
+    expect(document.querySelector('[role="listbox"]')).toBeNull();
+  });
+
+  it("opens the New-project picker on Cmd+Shift+N right after the panel is summoned", async () => {
+    await summonPanel();
+
+    await act(async () => {
+      press("ControlLeft", "Control", { ctrlKey: true });
+      press("KeyN", "N", { ctrlKey: true, shiftKey: true });
+    });
+
+    await waitFor(() => expect(document.querySelector('[role="listbox"]')).toBeTruthy());
+    await act(async () => {
+      release("KeyN", "N");
+      release("ControlLeft", "Control");
     });
   });
 });

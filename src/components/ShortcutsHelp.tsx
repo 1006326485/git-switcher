@@ -26,6 +26,7 @@ import {
   normalizeBinding,
 } from "../lib/hotkey";
 import { getSettings, updateSettingsPartial } from "../lib/tauri";
+import { matchesFuzzy, parseFuzzyQuery } from "../lib/fuzzyMatch";
 import type { AppSettings } from "../lib/types";
 
 type ShortcutDescriptionKey =
@@ -59,6 +60,7 @@ type ShortcutDescriptionKey =
   | "shortcuts.terminal.jumpIndex"
   | "shortcuts.terminal.jumpProject"
   | "shortcuts.terminal.newTab"
+  | "shortcuts.terminal.newProject"
   | "shortcuts.terminal.closeTab"
   | "shortcuts.terminal.closeTabKey"
   | "shortcuts.terminal.focusInput"
@@ -163,7 +165,7 @@ function settingsToOverrides(s: AppSettings): Partial<Record<ActionId, string>> 
 
 export const ShortcutsHelp = memo(function ShortcutsHelp({ open, onClose }: ShortcutsHelpProps) {
   const { t } = useTranslation();
-  const [query, setQuery] = useState("");
+  const [queryText, setQuery] = useState("");
   const [bindings, setBindings] = useState<Record<ActionId, string>>(DEFAULT_IN_APP_SHORTCUTS);
   const [globalHotkey, setGlobalHotkey] = useState("");
   const [editing, setEditing] = useState<ActionId | null>(null);
@@ -200,34 +202,34 @@ export const ShortcutsHelp = memo(function ShortcutsHelp({ open, onClose }: Shor
   }, [open ]);
 
   const filtered = useMemo(() => {
+    const query = parseFuzzyQuery(queryText);
     const categories = buildReferenceCategories(globalHotkey, detectMac());
-    const q = query.trim().toLowerCase();
-    if (!q) return categories;
+    if (query.terms.length === 0) return categories;
     return categories
       .map((cat) => ({
         ...cat,
-        rows: cat.rows.filter(
-          (row) =>
-            labelFor(row.def.descriptionKey).toLowerCase().includes(q) ||
-            row.parts.some((k) => k.toLowerCase().includes(q)) ||
-            row.def.defaultBinding.toLowerCase().includes(q)
-        ),
+        rows: cat.rows.filter((row) => {
+          const fields = [
+            labelFor(row.def.descriptionKey),
+            ...row.parts,
+            row.def.defaultBinding,
+          ];
+          return fields.some((field) => matchesFuzzy(field, query));
+        }),
       }))
       .filter((cat) => cat.rows.length > 0);
-  }, [query, globalHotkey, labelFor]);
+  }, [queryText, globalHotkey, labelFor]);
 
   const filteredInApp = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return IN_APP_ROWS;
+    const query = parseFuzzyQuery(queryText);
+    if (query.terms.length === 0) return IN_APP_ROWS;
     return IN_APP_ROWS.filter((row) => {
       const binding = bindings[row.actionId] ?? DEFAULT_IN_APP_SHORTCUTS[row.actionId];
-      return (
-        labelFor(row.descriptionKey).toLowerCase().includes(q) ||
-        row.actionId.toLowerCase().includes(q) ||
-        binding.toLowerCase().includes(q)
+      return [labelFor(row.descriptionKey), row.actionId, binding].some((field) =>
+        matchesFuzzy(field, query)
       );
     });
-  }, [query, bindings, labelFor]);
+  }, [queryText, bindings, labelFor]);
 
   const inAppGroupTitle = useMemo(() => {
     const v = t("shortcuts.group.inApp" as never) as unknown as string;
@@ -247,7 +249,7 @@ export const ShortcutsHelp = memo(function ShortcutsHelp({ open, onClose }: Shor
   // of them can never share a chord; terminal actions live in
   // TerminalWorkspace's capture-phase handler, so the same chord in both
   // spaces is legal by design (context priority decides) — CmdOrCtrl+N is
-  // both addProject and terminalNewTab, and that must stay saveable.
+  // both addProject and terminalNewTabInProject, and that must stay saveable.
   const spaceOf = useCallback((actionId: ActionId): "terminal" | "app" => {
     const row = IN_APP_ROWS.find((r) => r.actionId === actionId);
     return row?.def.context === "terminal" ? "terminal" : "app";
@@ -261,15 +263,24 @@ export const ShortcutsHelp = memo(function ShortcutsHelp({ open, onClose }: Shor
         return labelFor("shortcuts.general.cancel");
       }
       const space = spaceOf(actionId);
+      const isMac = detectMac();
       const row = IN_APP_ROWS.find(
         (r) =>
           r.actionId !== actionId &&
           spaceOf(r.actionId) === space &&
-          bindingsConflict(candidate, bindings[r.actionId] ?? DEFAULT_IN_APP_SHORTCUTS[r.actionId])
+          bindingsConflict(
+            candidate,
+            bindings[r.actionId] ?? DEFAULT_IN_APP_SHORTCUTS[r.actionId],
+            isMac
+          )
       );
       if (row) return labelFor(row.descriptionKey);
       if (globalHotkey) {
-        if (actionId === "toggleTerminal" ? isSameChord(candidate, globalHotkey, detectMac()) : bindingsConflict(candidate, globalHotkey))
+        if (
+          actionId === "toggleTerminal"
+            ? isSameChord(candidate, globalHotkey, isMac)
+            : bindingsConflict(candidate, globalHotkey, isMac)
+        )
           return globalHotkey;
       }
       return null;
@@ -346,7 +357,7 @@ export const ShortcutsHelp = memo(function ShortcutsHelp({ open, onClose }: Shor
         <div className="mb-2">
           <input
             type="search"
-            value={query}
+            value={queryText}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={t("shortcuts.searchPlaceholder")}
             autoFocus
@@ -474,6 +485,14 @@ export const ShortcutsHelp = memo(function ShortcutsHelp({ open, onClose }: Shor
 
         <p className="mt-2 text-[11px] text-gray-400 dark:text-gray-500 text-center">
           {t("shortcuts.footer")}
+          {/* The one cross-row distinction worth stating: the terminal panel
+              toggle is an in-app binding, while the global summon hotkey is a
+              separate setting (Settings › General) that also flips the panel
+              while the main window is focused. No chord is spelled out here —
+              both rows above already show the current recorded values, so any
+              literal would go stale the moment either one is re-recorded. */}
+          <br />
+          {labelFor("settings.general.inAppTerminalHint")}
         </p>
       </div>
     </Modal>

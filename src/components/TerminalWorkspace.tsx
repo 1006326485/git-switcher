@@ -25,11 +25,14 @@ import {
   type TerminalSessionState,
   type TerminalTabsState,
 } from "../lib/terminalTabs";
+import { matchesFuzzy, parseFuzzyQuery } from "../lib/fuzzyMatch";
 import { useTranslation } from "react-i18next";
 import { Modal, DropdownMenu, MenuItem, KbdBadge } from "./ui/primitives";
+import { SwitchBranchControl } from "./SwitchBranchControl";
 import { buildPickerItems, type PickerItem } from "../lib/scriptPicker";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { SelectDropdown } from "./ui/SelectDropdown";
+import { formatHotkey } from "../lib/hotkey";
 import { CloseIcon, PlusIcon, TerminalIcon } from "./ui/icons";
 import { ContextMenu, MenuSeparator } from "./ui/ContextMenu";
 import { useContextMenu } from "../hooks/useContextMenu";
@@ -452,18 +455,32 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
   const keys = projectKeys(state);
   const activeGroup = activeProject != null ? sessionsOfProject(state, activeProject) : [];
   const activeGroupTitle = activeGroup[0]?.projectTitle || fallbackTitle;
+  const isMac = useMemo(() => detectMac(), []);
+  // Badge of the tab bar's "+": the effective (possibly rebound) new-tab
+  // binding, formatted the way the shortcut help formats it.
+  const newTabDisplay = useMemo(
+    () => formatHotkey(resolveInAppShortcuts(termBindings).terminalNewTab, isMac),
+    [termBindings, isMac]
+  );
+  // The branch control acts on the project whose terminals are shown (the
+  // selected sidebar group), not on whichever session last had focus.
+  const activeGroupCwd = activeGroup[0]?.cwd || "";
+  const activeGroupDetail = useMemo(
+    () => projects.find((p) => p.project.path === activeGroupCwd) ?? null,
+    [projects, activeGroupCwd]
+  );
 
   useEffect(() => {
     setTerminalDark(dark);
   }, [dark, setTerminalDark]);
 
   const visibleKeys = useMemo(() => {
-    const q = projectFilter.trim().toLowerCase();
-    if (!q) return keys;
+    const query = parseFuzzyQuery(projectFilter);
+    if (query.terms.length === 0) return keys;
     return keys.filter((key) => {
       const group = sessionsOfProject(state, key);
       const title = group[0]?.projectTitle || fallbackTitle;
-      return title.toLowerCase().includes(q) || (group[0]?.cwd || "").toLowerCase().includes(q);
+      return matchesFuzzy(title, query) || matchesFuzzy(group[0]?.cwd || "", query);
     });
   }, [keys, projectFilter, state]);
 
@@ -488,6 +505,18 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
     },
     [handleNewTerminal]
   );
+
+  // Every "new terminal" entry point (the tab bar's "+", the new-tab chord)
+  // opens one more tab in the project whose terminals are on screen. With no
+  // tab at all it falls back to Home, matching the New menu's first entry, so
+  // the action never dead-ends.
+  const newTerminalInActiveProject = useCallback(() => {
+    if (activeGroup[0]) {
+      void handleNewTerminal(activeGroup[0].cwd, activeGroupTitle);
+      return;
+    }
+    void handleNewTerminal("", fallbackTitle);
+  }, [activeGroup, activeGroupTitle, fallbackTitle, handleNewTerminal]);
 
   // Slide the indicator to the active tab after paint, and keep it in view.
   // Placed after activeGroup is declared (used only for the dep count).
@@ -555,19 +584,40 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
     focusTerminal(activeId);
   }, [open, activeId, fitTerminal, focusTerminal]);
 
+  // Closing a tab — including the last one — leaves the panel/window up: the
+  // close chord is about tabs, and the panel keeps its own empty state. The
+  // next close chord with no tab left falls through to the host (panel close
+  // / window hide).
+  const closeTab = useCallback(
+    (id: string) => {
+      void closeTerminal(id);
+    },
+    [closeTerminal]
+  );
+
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
       if (isShortcutCapturing()) return;
-      // FR2 (Phase 2 narrowing): this handler owns the keystroke only
-      // when focus is inside the workspace's own DOM. In the standalone
-      // window that is everything; in the main window an open panel no
-      // longer steals app shortcuts while the user works in the project
-      // list, and a dialog above the panel wins outright.
+      // FR2 (Phase 2 narrowing): this handler owns a keystroke only when
+      // focus is inside the workspace's own DOM. In the standalone window
+      // that is everything; in the main window an open panel no longer
+      // steals app shortcuts while the user works in the project list, and
+      // a dialog above the panel wins outright. The close chord and both
+      // new-terminal chords are exempt from the target check: they must work
+      // right after a summon, before anything inside has been clicked.
       const root = workspaceRootRef.current;
-      if (!root || !(e.target instanceof Node) || !root.contains(e.target)) return;
+      const inside = !!root && e.target instanceof Node && root.contains(e.target);
+      // The chords that ignore the event target do so because a summon leaves
+      // focus on the trigger or on the body. A dialog above the panel takes
+      // focus itself and owns the keyboard, so those chords must stand down
+      // and let it answer (e.g. Add Project's Cmd+N).
+      const active = document.activeElement;
+      const focusIsIdle =
+        !active || active === document.body || active === document.documentElement;
+      const focusInWorkspace = !!root && active instanceof Node && root.contains(active);
+      const focusExempt = inside || focusIsIdle || focusInWorkspace;
       const merged = resolveInAppShortcuts(termBindings);
-      const isMac = detectMac();
       // A chord that still has another key held must not fire. Swallow it
       // only for the keys this handler owns, so a simultaneous Cmd+C/Cmd+A
       // keeps its native meaning, and a rebound binding's keys are owned
@@ -583,6 +633,7 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
           "terminalJumpIndex",
           "terminalJumpProject",
           "terminalNewTab",
+          "terminalNewTabInProject",
           "terminalCloseTab",
           "terminalFocusInput",
           "terminalClearScreen",
@@ -596,25 +647,43 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
         }
         return;
       }
+      // CmdOrCtrl+N adds one more tab in the project on screen (the tab
+      // bar's "+"), and CmdOrCtrl+Shift+N opens the sidebar's New-project
+      // button to the right of the "Projects" header. Both answer once the
+      // workspace is awake, whether focus is inside it or still sits on the
+      // element that summoned it: after a summon nothing inside has been
+      // clicked yet. CmdOrCtrl+N is also app addProject, so outside the
+      // workspace it must not reach the app handler while the panel is up.
+      if (focusExempt) {
+        if (matchesGlobalHotkey(e, merged.terminalNewTabInProject, isMac)) {
+          e.preventDefault();
+          e.stopPropagation();
+          newTerminalInActiveProject();
+          return;
+        }
+        if (matchesGlobalHotkey(e, merged.terminalNewTab, isMac)) {
+          e.preventDefault();
+          e.stopPropagation();
+          setNewMenuSignal((s) => s + 1);
+          return;
+        }
+        // Close is about tabs, not focus: a summoned panel closes its tab
+        // even though nothing inside it has been clicked. With no tab left
+        // the chord propagates (dialog-close / panel close / window hide).
+        if (matchesGlobalHotkey(e, merged.terminalCloseTab, isMac)) {
+          if (activeId == null) return;
+          e.preventDefault();
+          e.stopPropagation();
+          closeTab(activeId);
+          return;
+        }
+      }
+      if (!inside) return;
       // Bindings resolve platform-aware (Cmd on macOS, Ctrl elsewhere):
       // Ctrl+key now reaches the shell on macOS instead of being claimed
       // here, and the terminal shortcuts work on Windows/Linux, where the
       // old metaKey-only check never fired. Shift variants are distinct
-      // chords (FR8), so Cmd+Shift+N is no longer a new tab.
-      if (matchesGlobalHotkey(e, merged.terminalNewTab, isMac)) {
-        e.preventDefault();
-        e.stopPropagation();
-        setNewMenuSignal((s) => s + 1);
-        return;
-      }
-      if (matchesGlobalHotkey(e, merged.terminalCloseTab, isMac)) {
-        // No tabs: let it propagate (dialog-close or native hide).
-        if (activeId == null) return;
-        e.preventDefault();
-        e.stopPropagation();
-        void closeTerminal(activeId);
-        return;
-      }
+      // chords (FR8), so Cmd+Shift+N is its own binding.
       if (matchesGlobalHotkey(e, merged.terminalSwitchGroupPrev, isMac)) {
         e.preventDefault();
         selectAdjacentProject(-1);
@@ -674,7 +743,7 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [open, activeId, closeTerminal, selectAdjacentProject, selectTerminalByIndex, selectAdjacentTerminal, termBindings, focusTerminal, clearScreen]);
+  }, [open, activeId, closeTab, selectAdjacentProject, selectTerminalByIndex, selectAdjacentTerminal, termBindings, focusTerminal, clearScreen, newTerminalInActiveProject]);
 
   const loadPresets = useCallback(() => {
     api
@@ -819,9 +888,9 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
     const current = menuSession;
     if (!current) return;
     for (const s of activeGroup) {
-      if (s.id !== current.id) void closeTerminal(s.id);
+      if (s.id !== current.id) closeTab(s.id);
     }
-  }, [menuSession, activeGroup, closeTerminal]);
+  }, [menuSession, activeGroup, closeTab]);
 
   const handleCanvasContextMenu = useCallback(
     (e: ReactMouseEvent) => {
@@ -869,9 +938,57 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
     if (activeId) clearScreen(activeId);
   }, [activeId, clearScreen]);
 
+  // Switch the branch of the project whose terminals are shown. The backend
+  // re-reads the repository after the checkout and returns that detail;
+  // the project list is then re-read so the branch control's own state (and
+  // the next switch) sees the new branches and status.
+  const handleSwitchBranch = useCallback(
+    async (path: string, branch: string) => {
+      setError(null);
+      try {
+        const detail = await api.switchBranch(path, branch);
+        setProjects((prev) => {
+          const next = prev.map((p) => (p.project.path === path ? detail : p));
+          return next.some((p) => p.project.path === path) ? next : [...prev, detail];
+        });
+        try {
+          const fresh = await api.listProjects();
+          setProjects((prev) =>
+            prev.map((p) => fresh.find((f) => f.project.path === p.project.path) ?? p)
+          );
+        } catch {
+          // The switched detail above is enough; the next open re-reads.
+        }
+      } catch (e) {
+        setError(t("projects.switchFailed", { error: parseError(e) }));
+        throw e;
+      }
+    },
+    [t]
+  );
+
+  // The branch control is the ONE new thing in this UI: mounted in the title
+  // band, or (headerless host, which draws its own title) directly above the
+  // sidebar list. Every other control keeps the position it has always had.
+  const branchControl = activeGroupCwd ? (
+    <SwitchBranchControl
+      detail={activeGroupDetail}
+      variant="header"
+      onSwitch={handleSwitchBranch}
+    />
+  ) : null;
+
   return (
     <>
-    <div ref={workspaceRootRef} className="window-root flex h-full min-h-0 flex-col overflow-hidden">
+    <div
+      ref={workspaceRootRef}
+      // Marks the terminal context for App: while focus is inside, the app
+      // shortcuts stand down (CmdOrCtrl+N here is the terminal's business).
+      // Focus is not required — tests and screenshots may not move it — so
+      // App also checks containment when the event originates here.
+      data-terminal-context="true"
+      className="window-root flex h-full min-h-0 flex-col overflow-hidden"
+    >
       {/* Header — edge-to-edge title band with only a bottom hairline.
           Not rendered when the host window draws the title itself (the
           summoned window puts it in the overlay bar next to the traffic
@@ -890,6 +1007,7 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
           <TerminalIcon size={16} />
           <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 shrink-0">{t("terminal.title")}</h2>
           {headerExtra}
+          {branchControl}
         </div>
         <div className="flex items-center gap-2">
           {/* The summoned window renders native traffic lights in its own
@@ -916,6 +1034,12 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
       <div className="flex flex-1 min-h-0 gap-[var(--panel-gap)] p-[var(--panel-gap)]">
         {/* Project sidebar */}
         <div className="app-panel w-52 shrink-0 flex flex-col overflow-hidden">
+          {/* Headerless host (the summoned window draws its own title bar):
+              the branch control the title band would carry sits directly
+              above the project list, where the project in view is chosen. */}
+          {hideHeader && branchControl && (
+            <div className="px-3 pt-2.5 pb-1 shrink-0 min-w-0">{branchControl}</div>
+          )}
           <div className="px-3 pt-3 pb-1.5 flex items-center gap-1.5">
             <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
               {t("terminal.projects")}
@@ -1123,7 +1247,7 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
                   if (e.button === 1) e.preventDefault();
                 }}
                 onAuxClick={(e) => {
-                  if (e.button === 1) void closeTerminal(s.id);
+                  if (e.button === 1) closeTab(s.id);
                 }}
                 title={t("terminal.middleClickClose", { path: s.cwd || s.title })}
                 className={`group relative z-[1] flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs shrink-0 min-w-0 max-w-[12rem] cursor-pointer transition-all duration-200 hover:-translate-y-px active:scale-[0.98] ${
@@ -1164,7 +1288,7 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
                 )}
                 <button
                   type="button"
-                  onClick={() => void closeTerminal(s.id)}
+                  onClick={() => closeTab(s.id)}
                   aria-label={t("terminal.closeAria", { title: s.title })}
                   className="p-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-400 transition-colors shrink-0"
                 >
@@ -1172,12 +1296,14 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
                 </button>
               </div>
             ))}
+            {/* One more tab in the project whose terminals are shown; the
+                tooltip names the chord that does the same thing. */}
             {activeGroup.length > 0 && (
               <button
                 type="button"
-                onClick={() => void handleNewTerminal(activeGroup[0].cwd, activeGroupTitle)}
+                onClick={newTerminalInActiveProject}
                 disabled={opening}
-                title={t("terminal.newTerminal")}
+                title={`${t("terminal.newTerminal")} — ${newTabDisplay}`}
                 aria-label={t("terminal.newTerminal")}
                 className="p-1 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors shrink-0 disabled:opacity-50"
               >
@@ -1281,7 +1407,7 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
             disabled={!menuSession.command}
             onClick={() => void restartTerminal(menuSession.id)}
           />
-          <MenuItem label={t("common.close")} onClick={() => void closeTerminal(menuSession.id)} />
+          <MenuItem label={t("common.close")} onClick={() => closeTab(menuSession.id)} />
           <MenuSeparator />
           <MenuItem
             label={t("terminal.closeOthers")}

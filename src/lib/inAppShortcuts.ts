@@ -25,6 +25,7 @@ export type ActionId =
   | "terminalJumpIndex"
   | "terminalJumpProject"
   | "terminalNewTab"
+  | "terminalNewTabInProject"
   | "terminalCloseTab"
   | "terminalFocusInput"
   | "terminalClearScreen";
@@ -34,6 +35,7 @@ import {
   getSettingsFieldMap,
   inAppDefinitions,
 } from "./shortcutRegistry";
+import { detectMac } from "./hotkey";
 
 // The 12 rebindable defaults now live in the canonical registry
 // (src/lib/shortcutRegistry.ts) and are re-exported here so existing
@@ -90,27 +92,16 @@ export function bindingUsesModifier(binding: string): boolean {
   return p.needCmdOrCtrl || p.needMeta || p.needCtrl || p.needAlt || p.needShift;
 }
 
-export function matchesBinding(e: KeyboardEvent, binding: string): boolean {
+export function matchesBinding(e: KeyboardEvent, binding: string, isMac = detectMac()): boolean {
   const p = parseBinding(binding);
   if (!p) return false;
-  if (p.isBackquote) {
-    if (e.code !== "Backquote") return false;
-    if (p.needCmdOrCtrl) {
-      if (!(e.metaKey || e.ctrlKey)) return false;
-    } else if (p.needCtrl && p.needMeta) {
-      if (!e.ctrlKey || !e.metaKey) return false;
-    } else if (p.needCtrl) {
-      if (!e.ctrlKey || e.metaKey) return false;
-    } else if (p.needMeta) {
-      if (!e.metaKey || e.ctrlKey) return false;
-    } else if (e.metaKey || e.ctrlKey) {
-      return false;
-    }
-    if (e.altKey !== p.needAlt) return false;
-    return true;
-  }
+  // CmdOrCtrl is platform-resolved like every other matcher in this file:
+  // Cmd only on macOS, Ctrl only elsewhere. Accepting either key would leave
+  // the other one unreserved — on macOS Ctrl+key belongs to the shell.
   if (p.needCmdOrCtrl) {
-    if (!(e.metaKey || e.ctrlKey)) return false;
+    if (isMac) {
+      if (!e.metaKey || e.ctrlKey) return false;
+    } else if (!e.ctrlKey || e.metaKey) return false;
   } else if (p.needCtrl || p.needMeta) {
     if (p.needCtrl !== e.ctrlKey) return false;
     if (p.needMeta !== e.metaKey) return false;
@@ -119,6 +110,7 @@ export function matchesBinding(e: KeyboardEvent, binding: string): boolean {
   }
   if (e.altKey !== p.needAlt) return false;
   if (e.shiftKey !== p.needShift) return false;
+  if (p.isBackquote) return e.code === "Backquote";
   return e.key.toLowerCase() === p.key.toLowerCase();
 }
 

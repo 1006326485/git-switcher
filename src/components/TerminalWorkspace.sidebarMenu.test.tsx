@@ -133,7 +133,7 @@ describe("TerminalWorkspace sidebar project context menu", () => {
 
   it("disables Close All Terminals when the project has no sessions", async () => {
     renderWorkspace();
-    await screen.findByText("other");
+    await screen.findAllByText("other");
 
     fireEvent.click(sidebarEntry("/tmp/demo"));
     await screen.findByText("zsh-one");
@@ -156,7 +156,7 @@ describe("TerminalWorkspace sidebar project context menu", () => {
 
   it("still switches the active project on left-click", async () => {
     renderWorkspace();
-    await screen.findByText("other");
+    await screen.findAllByText("other");
 
     fireEvent.click(sidebarEntry("/tmp/other"));
     await waitFor(() =>

@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import TerminalWorkspace from "./TerminalWorkspace";
+import * as api from "../lib/tauri";
 
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(() => Promise.resolve(() => {})),
@@ -15,10 +16,12 @@ vi.mock("../lib/hotkey", async (importOriginal) => {
 
 vi.mock("../lib/tauri", () => ({
   terminalList: vi.fn(() => Promise.resolve([])),
-  terminalOpen: vi.fn(),
-  terminalWrite: vi.fn(),
-  terminalResize: vi.fn(),
-  terminalClose: vi.fn(),
+  terminalOpen: vi.fn(() =>
+    Promise.resolve({ id: "t-mac", cwd: "/tmp/demo", title: "zsh", projectTitle: "demo", projectKey: "/tmp/demo", exited: false })
+  ),
+  terminalWrite: vi.fn(() => Promise.resolve()),
+  terminalResize: vi.fn(() => Promise.resolve()),
+  terminalClose: vi.fn(() => Promise.resolve()),
   listRunPresets: vi.fn(() => Promise.resolve([])),
   listCustomCommands: vi.fn(() => Promise.resolve([])),
   listProjectScripts: vi.fn(() => Promise.resolve([])),
@@ -76,20 +79,56 @@ describe("TerminalWorkspace hotkeys (macOS)", () => {
     }));
   });
 
-  it("Cmd+N opens the New project dropdown, Ctrl+N does not", async () => {
+  it("Cmd+Shift+N opens the New picker; Ctrl+Shift+N and Ctrl+N do not", async () => {
+    vi.mocked(api.terminalList).mockResolvedValue([
+      { id: "t1", cwd: "/tmp/demo", title: "zsh", projectTitle: "demo", projectKey: "/tmp/demo", exited: false },
+    ]);
     render(
       <TerminalWorkspace open initial={null} workspaceLaunch={null} onClose={() => {}} />
     );
-    await waitFor(() => expect(screen.getByText("No terminals open")).toBeInTheDocument());
+    await screen.findByText("zsh");
     const root = document.querySelector(".window-root");
     expect(root).not.toBeNull();
 
-    // Ctrl+N must keep reaching the shell on macOS: no dropdown.
+    // Ctrl+Shift+N must keep reaching the shell on macOS: no menu.
+    fireEvent.keyDown(root!, { key: "N", code: "KeyN", ctrlKey: true, shiftKey: true });
+    // Ctrl+N likewise (it is the shell's next-history key on macOS).
     fireEvent.keyDown(root!, { key: "n", code: "KeyN", ctrlKey: true });
+    await new Promise((r) => setTimeout(r, 0));
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(api.terminalOpen).not.toHaveBeenCalled();
 
-    // Cmd+N is the terminal's new-tab chord on macOS.
-    fireEvent.keyDown(root!, { key: "n", code: "KeyN", metaKey: true });
+    // Cmd+Shift+N is the terminal's new-tab chord on macOS: it opens the
+    // sidebar's New project picker.
+    fireEvent.keyDown(root!, { key: "N", code: "KeyN", metaKey: true, shiftKey: true });
     expect(await screen.findByRole("listbox")).toBeInTheDocument();
+  });
+
+  it("Cmd+N adds a tab in the current project once the workspace is awake", async () => {
+    vi.mocked(api.terminalResize).mockResolvedValue(undefined as never);
+    vi.mocked(api.terminalList).mockResolvedValue([
+      { id: "t1", cwd: "/tmp/demo", title: "zsh", projectTitle: "demo", projectKey: "/tmp/demo", exited: false },
+    ]);
+    render(
+      <TerminalWorkspace open initial={null} workspaceLaunch={null} onClose={() => {}} />
+    );
+    await screen.findByText("zsh");
+    await waitFor(() => expect(api.listProjects).toHaveBeenCalled());
+    const root = document.querySelector(".window-root");
+    expect(root).not.toBeNull();
+
+    // Dispatched on the window body, as right after a summon: focus has not
+    // been moved into the panel yet.
+    fireEvent.keyDown(document.body, { key: "n", code: "KeyN", metaKey: true });
+
+    await waitFor(() =>
+      expect(api.terminalOpen).toHaveBeenCalledWith(
+        "/tmp/demo",
+        80,
+        24,
+        expect.objectContaining({ projectTitle: "demo" })
+      )
+    );
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 });

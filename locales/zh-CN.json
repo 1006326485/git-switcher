@@ -98,8 +98,8 @@
       "autoFetchOnLaunchAria": "启用启动时自动拉取",
       "terminalHotkey": "终端快捷键",
       "terminalHotkeyAria": "终端快捷键",
-      "terminalHotkeyHint": "唤起独立终端窗口的全局快捷键，例如：CmdOrCtrl+Shift+`、Alt+Space。",
-      "inAppTerminalHint": "切换内嵌终端面板的应用内快捷键（可在快捷键面板中配置）。主窗口聚焦时，全局快捷键同样会翻转该面板。",
+      "terminalHotkeyHint": "独立终端窗口的全局快捷键：唤起或隐藏该窗口；主窗口聚焦时会改为切换内嵌终端面板。默认 CmdOrCtrl+Shift+`（macOS 上为 ⌘⇧`）。应用内面板开关（macOS 为 ⌘`，其他平台为 Ctrl+`）与此全局快捷键分别配置。",
+      "inAppTerminalHint": "上方的应用内快捷键仅在主窗口聚焦时切换内嵌终端面板；全局终端快捷键（设置 › 通用）单独配置。两行均显示当前已录入的按键。",
       "hideTerminalOnBlur": "失焦时隐藏终端",
       "hideTerminalOnBlurDesc": "终端窗口失去焦点时自动隐藏",
       "hideTerminalOnBlurAria": "失焦时隐藏终端",
@@ -165,6 +165,22 @@
       "model": "模型",
       "modelAria": "模型",
       "modelHint": "例如 gpt-4o、gpt-4o-mini、claude-3-sonnet、llama3",
+      "modelSelectAria": "模型列表",
+      "modelPlaceholder": "获取模型列表",
+      "fetchModels": "获取模型",
+      "fetchingModels": "获取中…",
+      "modelsLoaded": "共 {{count}} 个可用模型",
+      "modelsError": "无法获取模型列表：{{error}}",
+      "modelsFrom": "模型列表读取自 {{url}}",
+      "prompt": "评审提示词",
+      "promptAria": "评审提示词",
+      "promptHint": "发送给模型的评审指令。不写 {{placeholder}} 时代码差异会自动追加到末尾。",
+      "promptExpand": "编辑完整提示词",
+      "promptReset": "恢复默认",
+      "promptDefault": "默认",
+      "promptCustom": "已自定义",
+      "promptModalAria": "评审提示词编辑器",
+      "promptModalSubtitle": "每次评审都会随请求发送给模型。用 {{placeholder}} 指定代码差异的位置。",
       "temperature": "温度",
       "temperatureAria": "温度",
       "maxTokens": "最大 Token 数",
@@ -403,7 +419,7 @@
       "inApp": "应用内"
     },
     "global": {
-      "terminal": "主窗口聚焦时切换内置终端，否则召唤/隐藏独立终端窗口（可在设置中配置）"
+      "terminal": "唤起或隐藏独立终端窗口；主窗口聚焦时改为切换内置终端面板（可在设置中配置）"
     },
     "general": {
       "addProject": "添加项目",
@@ -440,14 +456,15 @@
       "jumpIndex": "按序号跳转终端",
       "jumpProject": "跳转到当前项目的终端",
       "closeTab": "关闭终端标签页",
-      "newTab": "在所选项目中新建终端",
-      "closeTabKey": "关闭当前终端标签页",
+      "newTab": "打开终端的「新建项目」下拉",
+      "closeTabKey": "关闭当前终端标签页（保留面板）",
       "switchGroupPrev": "切换到上一个终端项目分组",
       "switchGroupNext": "切换到下一个终端项目分组",
       "switchTabPrev": "切换到上一个终端标签页",
       "switchTabNext": "切换到下一个终端标签页",
       "focusInput": "聚焦终端输入",
-      "clearScreen": "清除终端滚动内容"
+      "clearScreen": "清除终端滚动内容",
+      "newProject": "在当前项目新建终端标签页"
     },
     "inApp": {
       "addProject": "新增项目",
@@ -461,7 +478,7 @@
       "navigateDown": "下移",
       "navigateUp": "上移",
       "selectFocused": "展开选中",
-      "toggleTerminal": "切换内嵌终端",
+      "toggleTerminal": "切换内嵌终端面板（主窗口内）",
       "openSettings": "打开设置"
     },
     "editor": {
@@ -569,6 +586,9 @@
     "quickRunAria": "在 {{title}} 中快速运行",
     "quickRunLoading": "正在加载命令…",
     "quickRunEmpty": "暂无快捷命令",
+    "quickRunSearchPlaceholder": "搜索命令…",
+    "quickRunSearchAria": "搜索命令",
+    "quickRunNoMatch": "没有匹配的命令",
     "switchTabs": "切换标签页 — 使用 ⌥1…9 跳转，中键单击关闭",
     "switchGroupBadge": "⌘↑↓",
     "openInFinder": "在访达中打开",
@@ -578,7 +598,10 @@
     "canvasCopy": "复制",
     "canvasPaste": "粘贴",
     "canvasSelectAll": "全选",
-    "canvasClear": "清屏"
+    "canvasClear": "清屏",
+    "switchBranchTitle": "切换到 {{branch}}？",
+    "switchBranchDirty": "该项目有 <strong>{{total}}</strong> 项未提交的变更。切换到 <strong>{{branch}}</strong> 可能会丢弃这些变更。要继续吗？",
+    "switchBranchConfirm": "切换分支"
   },
   "row": {
     "op": {
@@ -937,7 +960,8 @@
     "copyName": "复制名称",
     "deleteRemote": "删除远程分支",
     "switchedTo": "已切换到 {{name}}",
-    "copiedName": "已复制 {{name}}"
+    "copiedName": "已复制 {{name}}",
+    "unknown": "无分支"
   },
   "branchToast": {
     "created": "已创建分支\"{{name}}\"",
@@ -1695,7 +1719,8 @@
     "ai": {
       "reviewNotEnabled": "AI 评审未启用。请前往设置中配置 LLM。",
       "noDiff": "分支之间没有发现差异。",
-      "notEnabled": "AI 未启用。请前往设置中配置 LLM。"
+      "notEnabled": "AI 未启用。请前往设置中配置 LLM。",
+      "noModels": "端点 {{endpoint}} 未返回任何模型，请检查基础 URL 与 API 密钥。"
     },
     "hint": {
       "credentials": "请在设置中检查该远程仓库的凭据，或使用 SSH 密钥",

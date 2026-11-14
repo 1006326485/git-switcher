@@ -42,15 +42,58 @@ describe("resolveInAppShortcuts", () => {
   });
 });
 
-describe("matchesBinding for Control+~", () => {
-  it("matches Ctrl+` and Ctrl+Shift+` via Backquote code", () => {
-    const binding = "Control+~";
+describe("matchesBinding for the toggleTerminal default (CmdOrCtrl+`)", () => {
+  it("matches an unshifted Cmd/Ctrl+` press via the Backquote code", () => {
+    const binding = DEFAULT_IN_APP_SHORTCUTS.toggleTerminal;
+    expect(binding).toBe("CmdOrCtrl+`");
     expect(
-      matchesBinding(keyEvent({ key: "`", code: "Backquote", ctrlKey: true }), binding)
+      matchesBinding(keyEvent({ key: "`", code: "Backquote", metaKey: true }), binding, true)
     ).toBe(true);
     expect(
-      matchesBinding(keyEvent({ key: "~", code: "Backquote", ctrlKey: true, shiftKey: true }), binding)
+      matchesBinding(keyEvent({ key: "`", code: "Backquote", ctrlKey: true }), binding, false)
     ).toBe(true);
+  });
+
+  it("accepts only the platform's modifier, never both", () => {
+    const binding = DEFAULT_IN_APP_SHORTCUTS.toggleTerminal;
+    const cmd = keyEvent({ key: "`", code: "Backquote", metaKey: true });
+    const ctrl = keyEvent({ key: "`", code: "Backquote", ctrlKey: true });
+    // macOS: Ctrl+` belongs to the shell, so it must not toggle the panel.
+    expect(matchesBinding(cmd, binding, true)).toBe(true);
+    expect(matchesBinding(ctrl, binding, true)).toBe(false);
+    // Windows/Linux: the Win key is not a Ctrl substitute either.
+    expect(matchesBinding(ctrl, binding, false)).toBe(true);
+    expect(matchesBinding(cmd, binding, false)).toBe(false);
+  });
+
+  it("does not match a Shift-held Cmd/Ctrl+` press (that is the global chord)", () => {
+    const binding = DEFAULT_IN_APP_SHORTCUTS.toggleTerminal;
+    expect(
+      matchesBinding(keyEvent({ key: "~", code: "Backquote", metaKey: true, shiftKey: true }), binding, true)
+    ).toBe(false);
+    expect(
+      matchesBinding(keyEvent({ key: "~", code: "Backquote", ctrlKey: true, shiftKey: true }), binding, false)
+    ).toBe(false);
+  });
+
+  it("keeps the in-app toggle and the global Shift chord distinguishable", () => {
+    const inApp = DEFAULT_IN_APP_SHORTCUTS.toggleTerminal;
+    const global = "CmdOrCtrl+Shift+`";
+    const unshifted = { key: "`", code: "Backquote", metaKey: true } as const;
+    const shifted = { key: "~", code: "Backquote", metaKey: true, shiftKey: true } as const;
+    expect(matchesBinding(keyEvent(unshifted), inApp, true)).toBe(true);
+    expect(matchesGlobalHotkey(keyEvent(unshifted), global, true)).toBe(false);
+    expect(matchesBinding(keyEvent(shifted), inApp, true)).toBe(false);
+    expect(matchesGlobalHotkey(keyEvent(shifted), global, true)).toBe(true);
+  });
+
+  it("requires Shift for a Shift-bound backquote binding", () => {
+    expect(
+      matchesBinding(keyEvent({ key: "~", code: "Backquote", metaKey: true, shiftKey: true }), "CmdOrCtrl+Shift+~", true)
+    ).toBe(true);
+    expect(
+      matchesBinding(keyEvent({ key: "`", code: "Backquote", metaKey: true }), "CmdOrCtrl+Shift+~", true)
+    ).toBe(false);
   });
 
   it("honours non-default backquote bindings (M1)", () => {
@@ -60,15 +103,12 @@ describe("matchesBinding for Control+~", () => {
     expect(
       matchesBinding(keyEvent({ key: "`", code: "Backquote", ctrlKey: true }), "Alt+~")
     ).toBe(false);
-    expect(
-      matchesBinding(keyEvent({ key: "~", code: "Backquote", metaKey: true, shiftKey: true }), "CmdOrCtrl+~")
-    ).toBe(true);
   });
 
-  it("rejects Cmd+~ and bare backquote", () => {
-    const binding = "Control+~";
+  it("rejects the wrong modifier and bare backquote", () => {
+    const binding = DEFAULT_IN_APP_SHORTCUTS.toggleTerminal;
     expect(
-      matchesBinding(keyEvent({ key: "~", code: "Backquote", metaKey: true, shiftKey: true }), binding)
+      matchesBinding(keyEvent({ key: "`", code: "Backquote", altKey: true }), binding)
     ).toBe(false);
     expect(matchesBinding(keyEvent({ key: "`", code: "Backquote" }), binding)).toBe(false);
   });
@@ -118,9 +158,23 @@ describe("overridesFromSettings", () => {
 });
 
 describe("matchesBinding for classic combos", () => {
-  it("treats Cmd and Ctrl as equivalent for CmdOrCtrl", () => {
-    expect(matchesBinding(keyEvent({ key: "n", metaKey: true }), "CmdOrCtrl+N")).toBe(true);
-    expect(matchesBinding(keyEvent({ key: "n", ctrlKey: true }), "CmdOrCtrl+N")).toBe(true);
-    expect(matchesBinding(keyEvent({ key: "n" }), "CmdOrCtrl+N")).toBe(false);
+  it("resolves CmdOrCtrl to Cmd on macOS and Ctrl elsewhere", () => {
+    const cmd = keyEvent({ key: "n", metaKey: true });
+    const ctrl = keyEvent({ key: "n", ctrlKey: true });
+    expect(matchesBinding(cmd, "CmdOrCtrl+N", true)).toBe(true);
+    expect(matchesBinding(ctrl, "CmdOrCtrl+N", true)).toBe(false);
+    expect(matchesBinding(ctrl, "CmdOrCtrl+N", false)).toBe(true);
+    expect(matchesBinding(cmd, "CmdOrCtrl+N", false)).toBe(false);
+    expect(matchesBinding(keyEvent({ key: "n" }), "CmdOrCtrl+N", true)).toBe(false);
+    expect(matchesBinding(keyEvent({ key: "n" }), "CmdOrCtrl+N", false)).toBe(false);
+  });
+
+  it("keeps an explicit Control binding on Ctrl only, on every platform", () => {
+    const ctrl = keyEvent({ key: "n", ctrlKey: true });
+    const cmd = keyEvent({ key: "n", metaKey: true });
+    expect(matchesBinding(ctrl, "Control+N", true)).toBe(true);
+    expect(matchesBinding(ctrl, "Control+N", false)).toBe(true);
+    expect(matchesBinding(cmd, "Control+N", true)).toBe(false);
+    expect(matchesBinding(cmd, "Control+N", false)).toBe(false);
   });
 });

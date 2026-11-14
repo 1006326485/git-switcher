@@ -7,6 +7,7 @@ import { popoverAnimation, popoverExitAnimation, scrimAnimation, scrimExitAnimat
 import { searchContent } from "../lib/tauri";
 import { isShortcutCapturing } from "../lib/shortcutCapture";
 import { isDirtyChord } from "../lib/heldKeys";
+import { filterByFuzzy, fuzzyMatchRanges, parseFuzzyQuery } from "../lib/fuzzyMatch";
 
 export interface Command {
   id: string;
@@ -47,19 +48,27 @@ const STATUS_COLORS = {
   red: "bg-red-500",
 };
 
+/**
+ * Wraps the letters of `text` that the query matched. A fuzzy query matches
+ * scattered letters ("gcfp" → "gcf-player"), so every matched range is
+ * marked, not just one contiguous substring.
+ */
 function highlightMatch(text: string, query: string): React.ReactNode {
-  if (!query) return text;
-  const idx = text.toLowerCase().indexOf(query.toLowerCase());
-  if (idx === -1) return text;
-  return (
-    <>
-      {text.slice(0, idx)}
-      <mark className="bg-amber-200 dark:bg-amber-700/60 text-inherit rounded-sm px-0.5">
-        {text.slice(idx, idx + query.length)}
+  const ranges = fuzzyMatchRanges(text, parseFuzzyQuery(query));
+  if (ranges.length === 0) return text;
+  const parts: React.ReactNode[] = [];
+  let cursor = 0;
+  ranges.forEach(([start, end], i) => {
+    if (start > cursor) parts.push(text.slice(cursor, start));
+    parts.push(
+      <mark key={i} className="bg-amber-200 dark:bg-amber-700/60 text-inherit rounded-sm px-0.5">
+        {text.slice(start, end)}
       </mark>
-      {text.slice(idx + query.length)}
-    </>
-  );
+    );
+    cursor = end;
+  });
+  if (cursor < text.length) parts.push(text.slice(cursor));
+  return <>{parts}</>;
 }
 
 function useDebounce<T>(value: T, delay: number): T {
@@ -129,12 +138,11 @@ export const CommandPalette = memo(function CommandPalette({
 
   const filteredCmds = useMemo(
     () =>
-      commands.filter(
-        (c) =>
-          c.label.toLowerCase().includes(query.toLowerCase()) ||
-          c.category.toLowerCase().includes(query.toLowerCase()) ||
-          (c.description ?? "").toLowerCase().includes(query.toLowerCase())
-      ),
+      filterByFuzzy(commands, parseFuzzyQuery(query), (c) => [
+        c.label,
+        c.category,
+        c.description ?? "",
+      ]),
     [commands, query]
   );
 

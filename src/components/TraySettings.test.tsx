@@ -23,6 +23,7 @@ const settings: AppSettings = {
     api_key: "",
     endpoint: "https://api.openai.com/v1/chat/completions",
     model: "gpt-4o-mini",
+    review_prompt: "",
     temperature: 0.3,
     max_tokens: 4096,
     key_in_keychain: false,

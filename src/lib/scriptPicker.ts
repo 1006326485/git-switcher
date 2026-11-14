@@ -1,3 +1,5 @@
+import { filterByFuzzy, parseFuzzyQuery } from "./fuzzyMatch";
+
 export interface PickerItem {
   name: string;
   command: string;
@@ -39,9 +41,5 @@ export function buildPickerItems(
 }
 
 export function filterPickerItems(items: PickerItem[], query: string): PickerItem[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return items;
-  return items.filter(
-    (s) => s.name.toLowerCase().includes(q) || s.command.toLowerCase().includes(q)
-  );
+  return filterByFuzzy(items, parseFuzzyQuery(query), (s) => [s.name, s.command]);
 }

@@ -39,7 +39,7 @@ If you work on multiple Git repositories every day — switching between project
 - **Batch Operations** — Fetch, pull, or perform any Git operation across multiple repositories simultaneously
 - **Project Groups** — Organize repositories into logical groups with custom colors
 - **Multiple View Modes** — Card, List, Compact, or Table view to match your workflow
-- **AI Code Review** — Review branch diffs with LLM integration (OpenAI-compatible API)
+- **AI Code Review** — Review branch diffs with LLM integration (OpenAI-compatible API). The review prompt is editable in Settings (with a reset to default), and the model picker fetches the endpoint's model list (`GET {base}/models`), so OpenAI, DeepSeek, OpenRouter, Azure OpenAI and local servers (Ollama, LM Studio, vLLM) all work
 - **Git Log Viewer** — Browse commit history for any project
 - **Staging & Commit** — Stage files, write commit messages, and commit without opening a terminal
 - **Import/Export** — Backup and restore your project list, or import from VS Code workspace files
@@ -53,8 +53,8 @@ If you work on multiple Git repositories every day — switching between project
 - **Inline Diff Preview** — Click any file to see changes inline without opening a modal. View file change statistics (+N/-N) at a glance
 - **Smart Batch Operations** — Pull only behind projects, push only ahead projects, or sync all repositories with intelligent conflict detection
 - **Per-Project Quick Actions** — Fetch, pull, or push individual projects with one click from the project card
-- **System Tray Integration** — App runs in the system tray with background monitoring. Automatic silent fetch to keep repositories up to date
-- **Summonable Terminal Window** — Hit `CmdOrCtrl+Shift+\`` (configurable) anywhere to summon a standalone terminal window, then dismiss it with the same hotkey; sessions keep running while hidden and summoning leaves the main window exactly where it was. Terminals are shared live across the main window and the summoned window, and new tabs can target any project via the built-in project picker. Navigate sessions with `\u2325\u2191\u2193` / `\u2325\u2190\u2192` / `\u23251`–`\u23259`. In-app, `Ctrl+~` (\u2303~) toggles the built-in terminal panel — the global shortcut flips the same panel while the main window is focused — and both bindings are configurable in the Shortcuts panel.
+- **System Tray Integration** — App runs in the system tray with background monitoring. Automatic silent fetch to keep repositories up to date. The tray uses a monochrome template glyph derived from the app icon's own geometry — dark plaque white, bright cyan ring and hand punched out transparent, see `src-tauri/src/tray_icon.rs` — so macOS tints it to match light and dark menu bars, like the built-in items
+- **Summonable Terminal Window** — Hit `CmdOrCtrl+Shift+\`` (configurable) anywhere to summon a standalone terminal window, then dismiss it with the same hotkey; sessions keep running while hidden and summoning leaves the main window exactly where it was. Terminals are shared live across the main window and the summoned window, and new tabs can target any project via the built-in project picker. Navigate sessions with `\u2325\u2191\u2193` / `\u2325\u2190\u2192` / `\u23251`–`\u23259`. Once the terminal panel or the summoned window is open, `CmdOrCtrl+N` — like the tab bar's `+` — adds a terminal tab in the project in view, and `CmdOrCtrl+Shift+N` opens the sidebar's New-project menu (the first item is highlighted, so Enter starts it); neither needs a click into the terminal first, and `CmdOrCtrl+W` closes the active tab without one either — closing the last tab leaves the panel/window up, and the next `CmdOrCtrl+W` with no tab left closes the panel or hides the window; all three are rebindable. The current project's branch is switchable from the workspace title band (the standalone window, which draws its own title, shows it above the sidebar list), so you can switch branches without leaving the terminal. In the main window the built-in panel toggles with `⌘` + backquote (no Shift) on macOS and `Ctrl+\`` elsewhere — the global hotkey remains `CmdOrCtrl+Shift+\`` (`⌘⇧`` on macOS, configurable in Settings), which summons the standalone window and still flips the panel while the main window is focused; both bindings are configurable, the panel toggle in the Shortcuts panel and the global hotkey in Settings.
 - **Quick Filter & Sort** — Filter projects by status (changed, behind, ahead, stale) with one-click chips. Sort by name, last modified, changes, or branch
 - **Project Color Labels** — Organize projects with 8 color options. Color stripes on project cards for quick visual identification
 - **Enhanced Command Palette** — Search projects by name, alias, path, or branch. Quick filters: "behind", "changes", "stale". Jump to any project instantly
@@ -106,7 +106,7 @@ If you work on multiple Git repositories every day — switching between project
 | Desktop Runtime | Tauri 2 (Rust backend) |
 | Git Engine | libgit2 (via git2 crate) |
 | Database | SQLite (via rusqlite) |
-| LLM Integration | OpenAI-compatible API (configurable endpoint) |
+| LLM Integration | OpenAI-compatible API (configurable endpoint and review prompt; model list via `GET /models`) |
 | System Tray | Tauri 2 Tray API (native) |
 | Background Service | Tokio async runtime |
 | Internationalization | react-i18next (frontend) + built-in Rust locale table shared from `locales/` |
@@ -198,7 +198,7 @@ MIT
 - **批量操作** —— 同时对多个仓库执行 fetch、pull 等 Git 操作
 - **项目分组** —— 将仓库按逻辑分组，支持自定义颜色标识
 - **多种视图模式** —— 卡片、列表、紧凑、表格四种视图，适配不同工作习惯
-- **AI 代码审查** —— 集成 LLM（兼容 OpenAI API），一键审查分支差异
+- **AI 代码审查** —— 集成 LLM（兼容 OpenAI API），一键审查分支差异；评审提示词可在设置中编辑（可恢复默认），模型选择器会从端点拉取模型列表（`GET {base}/models`），兼容 OpenAI、DeepSeek、OpenRouter、Azure OpenAI 及本地服务（Ollama、LM Studio、vLLM）
 - **Git 日志浏览** —— 查看任意项目的提交历史
 - **暂存与提交** —— 在应用内完成文件暂存、编写提交信息、执行提交
 - **导入/导出** —— 备份和恢复项目列表，支持从 VS Code 工作区文件导入
@@ -212,7 +212,8 @@ MIT
 - **内联差异预览** —— 点击文件即可内联查看变更，无需弹窗。一眼查看文件变更统计（+N/-N）
 - **智能批量操作** —— 仅拉取落后项目、仅推送领先项目，或同步所有仓库，支持智能冲突检测
 - **单项目快捷操作** —— 在项目卡片上一键 fetch、pull 或 push 单个项目
-- **系统托盘集成** —— 应用在系统托盘运行并后台监控，自动静默 fetch 保持仓库更新
+- **系统托盘集成** —— 应用在系统托盘运行并后台监控，自动静默 fetch 保持仓库更新。托盘图标由 App 图标自身的几何推导而来：深色圆角底板转为白色，亮色圆环与指针挖空为透明（见 `src-tauri/src/tray_icon.rs`），macOS 会随浅色/深色菜单栏自动着色，与系统原生图标保持一致
+- **可召唤的终端窗口** —— 在任意界面按下 `CmdOrCtrl+Shift+\``（可在设置中自定义）即可召唤独立终端窗口，再按一次收起；隐藏期间会话继续运行，召唤也不会移动主窗口。主窗口与召唤窗口实时共享终端，新建标签页时可通过内置的项目选择器指定任意项目。在主窗口内按 `⌘` + 反引号（不带 Shift，即 macOS 上的 `⌘``）或 Windows/Linux 上的 `Ctrl+\`` 可切换内嵌终端面板；全局快捷键仍为 `CmdOrCtrl+Shift+\``（macOS 上即 `⌘⇧``），用于唤起独立窗口，主窗口聚焦时也会切换同一面板。两者均可配置：面板开关在快捷键面板中修改，全局快捷键在「设置 → 通用」中修改，显示的快捷键始终与实际触发一致。
 - **快速筛选与排序** —— 按状态（已修改、落后、领先、陈旧）一键筛选项目，支持按名称、修改时间、变更数或分支排序
 - **项目颜色标签** —— 8 种颜色选项组织项目，卡片上显示彩色条纹便于快速识别
 - **增强命令面板** —— 按名称、别名、路径或分支搜索项目，快捷筛选："behind"、"changes"、"stale"，瞬间跳转到任意项目
@@ -264,7 +265,7 @@ MIT
 | 桌面运行时 | Tauri 2（Rust 后端） |
 | Git 引擎 | libgit2（通过 git2 crate） |
 | 数据库 | SQLite（通过 rusqlite） |
-| LLM 集成 | 兼容 OpenAI 的 API（可配置端点） |
+| LLM 集成 | 兼容 OpenAI 的 API（端点与评审提示词均可配置；模型列表通过 `GET /models` 拉取） |
 | 系统托盘 | Tauri 2 Tray API（原生） |
 | 后台服务 | Tokio 异步运行时 |
 | 国际化 | react-i18next（前端）+ 与前端共享 `locales/` 的 Rust 内置语言表 |

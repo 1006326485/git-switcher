@@ -1,7 +1,21 @@
 import { act, renderHook } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useKeyboardShortcuts } from "./useKeyboardShortcuts";
 import { clearHeldKeys } from "../lib/heldKeys";
+
+/**
+ * These tests press `metaKey` for `CmdOrCtrl`, i.e. they describe macOS.
+ * jsdom reports an empty `navigator.platform`, which detectMac() reads as
+ * non-mac, so the platform is pinned here rather than inferred.
+ */
+beforeEach(() => {
+  Object.defineProperty(navigator, "platform", { value: "MacIntel", configurable: true });
+});
+afterEach(() => {
+  // jsdom exposes `platform` through the prototype, so put the non-mac
+  // reading back explicitly rather than restoring a descriptor that is absent.
+  Object.defineProperty(navigator, "platform", { value: "", configurable: true });
+});
 
 /**
  * A chord must be clean: `Ctrl` `z` `~` is not `Ctrl+~`, but
@@ -52,9 +66,9 @@ describe("chord cleanliness", () => {
     setup(onToggleTerminal, vi.fn());
 
     act(() => {
-      press("ControlLeft", "Control", { ctrlKey: true });
-      press("KeyZ", "z", { ctrlKey: true });
-      press("Backquote", "`", { ctrlKey: true });
+      press("MetaLeft", "Meta", { metaKey: true });
+      press("KeyZ", "z", { metaKey: true });
+      press("Backquote", "`", { metaKey: true });
     });
 
     expect(onToggleTerminal).not.toHaveBeenCalled();
@@ -65,10 +79,10 @@ describe("chord cleanliness", () => {
     setup(onToggleTerminal, vi.fn());
 
     act(() => {
-      press("ControlLeft", "Control", { ctrlKey: true });
-      press("KeyZ", "z", { ctrlKey: true });
+      press("MetaLeft", "Meta", { metaKey: true });
+      press("KeyZ", "z", { metaKey: true });
       release("KeyZ", "z");
-      press("Backquote", "`", { ctrlKey: true });
+      press("Backquote", "`", { metaKey: true });
     });
 
     expect(onToggleTerminal).toHaveBeenCalledTimes(1);
@@ -79,8 +93,8 @@ describe("chord cleanliness", () => {
     setup(onToggleTerminal, vi.fn());
 
     act(() => {
-      press("ControlLeft", "Control", { ctrlKey: true });
-      press("Backquote", "`", { ctrlKey: true });
+      press("MetaLeft", "Meta", { metaKey: true });
+      press("Backquote", "`", { metaKey: true });
     });
 
     expect(onToggleTerminal).toHaveBeenCalledTimes(1);
@@ -91,12 +105,12 @@ describe("chord cleanliness", () => {
     setup(onToggleTerminal, vi.fn());
 
     act(() => {
-      press("ControlLeft", "Control", { ctrlKey: true });
-      press("KeyZ", "z", { ctrlKey: true });
+      press("MetaLeft", "Meta", { metaKey: true });
+      press("KeyZ", "z", { metaKey: true });
       // The keyup for `z` is swallowed by an app switch.
       window.dispatchEvent(new Event("blur"));
       clearHeldKeys();
-      press("Backquote", "`", { ctrlKey: true });
+      press("Backquote", "`", { metaKey: true });
     });
 
     expect(onToggleTerminal).toHaveBeenCalledTimes(1);
@@ -108,9 +122,9 @@ describe("chord cleanliness", () => {
 
     let dirtyChord: KeyboardEvent | undefined;
     act(() => {
-      press("ControlLeft", "Control", { ctrlKey: true });
-      press("KeyZ", "z", { ctrlKey: true });
-      dirtyChord = press("Backquote", "`", { ctrlKey: true });
+      press("MetaLeft", "Meta", { metaKey: true });
+      press("KeyZ", "z", { metaKey: true });
+      dirtyChord = press("Backquote", "`", { metaKey: true });
     });
 
     expect(onToggleTerminal).not.toHaveBeenCalled();

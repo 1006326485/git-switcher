@@ -58,13 +58,19 @@ export const TerminalWindowApp = memo(function TerminalWindowApp() {
     };
   }, []);
 
-  // Cmd+W / Ctrl+W dismisses this window like the summon hotkey does.
+  // Cmd+W / Ctrl+W dismisses this window like the summon hotkey does — but
+  // only after the terminal has had its chance: TerminalWorkspace's own
+  // capture-phase handler closes the active tab first (and marks the event
+  // handled with preventDefault). This listener runs in the bubble phase, so
+  // a Cmd+W that already closed a tab arrives here defaultPrevented and must
+  // not take the whole window down with it.
   useEffect(() => {
     // This window has its own module graph, so it needs its own held-key
     // record for the chord checks below.
     const stopHeldKeyTracking = installHeldKeyTracking();
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "w") {
+        if (e.defaultPrevented) return;
         e.preventDefault();
         if (isDirtyChord(e)) return;
         hideWindow();
@@ -78,7 +84,7 @@ export const TerminalWindowApp = memo(function TerminalWindowApp() {
   }, [hideWindow]);
 
   return (
-    <div className="app-root window-root h-screen flex flex-col overflow-hidden rounded-xl ring-1 ring-black/10 dark:ring-white/10">
+    <div data-terminal-context="true" className="app-root window-root h-screen flex flex-col overflow-hidden rounded-xl ring-1 ring-black/10 dark:ring-white/10">
       {/* The workspace header (title + hotkey hint) lives in this overlay
           title bar next to the native traffic lights (tauri.conf.json gives
           the terminal window the same Overlay style as the main window),

@@ -40,6 +40,7 @@ import { parseError, isBenignFetchFailure, createErrorAggregator } from "./lib/t
 import { setRecentCommand } from "./lib/recentCommands";
 import { isShortcutCapturing } from "./lib/shortcutCapture";
 import { isDirtyChord } from "./lib/heldKeys";
+import { filterByFuzzy, parseFuzzyQuery } from "./lib/fuzzyMatch";
 import { overridesFromSettings } from "./lib/inAppShortcuts";
 import type { DashboardFilter } from "./components/DashboardView";
 import { gitFetch, gitPull, gitPush, gitStash, getSettings, openInTerminal, openInFinder, openInVscode, onDragDropEnter, onDragDropLeave, onDragDropResult, logOperation } from "./lib/tauri";
@@ -318,14 +319,12 @@ export default function App() {
     }
 
     if (!searchQuery.trim()) return source;
-    const q = searchQuery.toLowerCase();
-    return source.filter(
-      (p) =>
-        p.project.name.toLowerCase().includes(q) ||
-        (p.project.alias || "").toLowerCase().includes(q) ||
-        p.project.path.toLowerCase().includes(q) ||
-        p.current_branch.toLowerCase().includes(q)
-    );
+    return filterByFuzzy(source, parseFuzzyQuery(searchQuery), (p) => [
+      p.project.name,
+      p.project.alias || "",
+      p.project.path,
+      p.current_branch,
+    ]);
   }, [groupProjects, activeFilter, searchQuery]);
 
   const collator = useMemo(() => new Intl.Collator(undefined, { sensitivity: "base", numeric: true }), []);
@@ -816,6 +815,30 @@ export default function App() {
     };
   }, [settingsVersion]);
 
+  // FR2: while focus is inside the terminal workspace, the terminal context
+  // owns the keyboard (its capture handler resolves CmdOrCtrl+N as "new
+  // terminal tab"); no app action may fire behind it. Focus outside the
+  // workspace — the main window's project list, a dialog — leaves the gate
+  // inactive, so CmdOrCtrl+N stays "add project" there.
+  const [terminalContextFocus, setTerminalContextFocus] = useState(false);
+  useEffect(() => {
+    const inTerminalContext = (node: EventTarget | null): boolean =>
+      node instanceof Element && !!node.closest('[data-terminal-context="true"]');
+    const onFocusIn = (e: FocusEvent) => setTerminalContextFocus(inTerminalContext(e.target));
+    document.addEventListener("focusin", onFocusIn);
+    // The workspace's own handler owns chords pressed on any of its
+    // elements, so the same containment decides here even when focus moved
+    // elsewhere (a press with no focus, a programmatic dispatch).
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (inTerminalContext(e.target)) setTerminalContextFocus(true);
+    };
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("focusin", onFocusIn);
+      document.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, []);
+
   useKeyboardShortcuts(
     {
       onAddProject: handleAddProject,
@@ -832,7 +855,7 @@ export default function App() {
     },
     inAppBindings,
     globalTerminalHotkey,
-    { bareKeysDisabled }
+    { bareKeysDisabled, terminalContextOwnsFocus: terminalContextFocus }
   );
 
   const projectActions = useMemo(

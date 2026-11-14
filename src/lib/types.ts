@@ -74,6 +74,12 @@ export interface LlmConfig {
   api_key: string;
   endpoint: string;
   model: string;
+  /**
+   * Reviewer instructions sent before the diff. An empty string means "use the
+   * built-in prompt" (`LLM_DEFAULT_REVIEW_PROMPT`), and `{{diff}}` marks where
+   * the diff goes; without the placeholder the diff is appended.
+   */
+  review_prompt: string;
   temperature: number;
   max_tokens: number;
   key_in_keychain: boolean;
@@ -126,6 +132,7 @@ export interface AppSettings {
   in_app_terminal_jump_index?: string;
   in_app_terminal_jump_project?: string;
   in_app_terminal_new_tab?: string;
+  in_app_terminal_new_tab_in_project?: string;
   in_app_terminal_close_tab?: string;
   in_app_terminal_focus_input?: string;
   in_app_terminal_clear_screen?: string;

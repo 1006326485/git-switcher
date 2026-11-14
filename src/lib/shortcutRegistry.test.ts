@@ -22,7 +22,7 @@ describe("shortcutRegistry (Phase 1)", () => {
     }
   });
 
-  it("keeps the original 12 rebindable defaults exactly as shipped (no default changes)", () => {
+  it("keeps the rebindable defaults, with the terminal toggle on the unshifted backquote", () => {
     const defaults = getInAppDefaults();
     expect(defaults).toMatchObject({
       addProject: "CmdOrCtrl+N",
@@ -36,7 +36,7 @@ describe("shortcutRegistry (Phase 1)", () => {
       navigateDown: "J",
       navigateUp: "K",
       selectFocused: "Enter",
-      toggleTerminal: "Control+~",
+      toggleTerminal: "CmdOrCtrl+`",
     });
     // inAppShortcuts re-exports the registry defaults, so the old import
     // path and the registry cannot drift apart.
@@ -59,14 +59,15 @@ describe("shortcutRegistry (Phase 1)", () => {
       terminalSwitchTabNext: "CmdOrCtrl+ArrowRight",
       terminalJumpIndex: "Alt+Digit",
       terminalJumpProject: "CmdOrCtrl+Digit",
-      terminalNewTab: "CmdOrCtrl+N",
+      terminalNewTab: "CmdOrCtrl+Shift+N",
+      terminalNewTabInProject: "CmdOrCtrl+N",
       terminalCloseTab: "CmdOrCtrl+W",
       // Unbound by default: no free universal convention (see registry notes).
       terminalFocusInput: "",
       terminalClearScreen: "",
     });
-    // 12 original + 5 views + fetch-all + Settings + 10 terminal actions.
-    expect(inAppDefinitions()).toHaveLength(29);
+    // 12 original + 5 views + fetch-all + Settings + 11 terminal actions.
+    expect(inAppDefinitions()).toHaveLength(30);
     for (const def of inAppDefinitions()) {
       expect(def.rebindable).toBe(true);
       expect(def.settingsField).toMatch(/^in_app_/);
@@ -108,6 +109,7 @@ describe("shortcutRegistry (Phase 1)", () => {
       "fetchAll",
       "globalTerminal",
       "terminalNewTab",
+      "terminalNewTabInProject",
       "terminalCloseTab",
       "terminalSwitchGroupPrev",
       "terminalSwitchGroupNext",
@@ -122,8 +124,20 @@ describe("shortcutRegistry (Phase 1)", () => {
     }
     expect(definitionById("viewCard")?.defaultBinding).toBe("CmdOrCtrl+1");
     expect(definitionById("fetchAll")?.defaultBinding).toBe("CmdOrCtrl+Shift+G");
-    // Phase 1 constraint: the global terminal hotkey is untouched.
+    // The global terminal hotkey is owned by the backend and stays untouched.
     expect(definitionById("globalTerminal")?.defaultBinding).toBe("CmdOrCtrl+Shift+`");
+  });
+
+  it("renders the terminal toggle and global rows with distinct, platform-correct parts", () => {
+    const toggle = definitionById("toggleTerminal")!;
+    const global = definitionById("globalTerminal")!;
+    expect(getDisplayParts(toggle, true)).toEqual(["⌘", "`"]);
+    expect(getDisplayParts(toggle, false)).toEqual(["Ctrl", "`"]);
+    expect(getDisplayParts(global, true)).toEqual(["⌘", "⇧", "`"]);
+    expect(getDisplayParts(global, false)).toEqual(["Ctrl", "Shift", "`"]);
+    // The in-app toggle must never render as the Shift chord.
+    expect(getDisplayParts(toggle, true)).not.toContain("⇧");
+    expect(getDisplayParts(toggle, false)).not.toContain("Shift");
   });
 
   it("gives refresh-all exactly one owner note and an OS-override flag", () => {

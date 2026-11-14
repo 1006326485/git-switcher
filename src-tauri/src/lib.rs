@@ -9,6 +9,7 @@ pub mod i18n;
 pub mod macos_menu;
 pub mod models;
 pub mod services;
+pub mod tray_icon;
 
 #[cfg(test)]
 mod test_support;
@@ -61,8 +62,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         .plugin(tauri_plugin_notification::init())
         .setup(move |app| {
             // ── Tray icon; the menu is built dynamically (see commands/tray) ──
+            // Menu-bar extras are monochrome template images, so the tray uses
+            // the app icon's mark recoloured to white (dark plaque white, cyan
+            // dial punched out) rather than the full-colour icon, and macOS
+            // tints it to match light/dark menu bars (see tray_icon).
             let tray = TrayIconBuilder::with_id(commands::TRAY_ID)
-                .icon(app.default_window_icon().unwrap().clone())
+                .icon(tray_icon::template_image(tray_icon::MENU_BAR_ICON_SIZE))
+                .icon_as_template(true)
                 .tooltip("Git Switcher")
                 .on_tray_icon_event(|tray, event| {
                     if let tauri::tray::TrayIconEvent::Click {
@@ -431,6 +437,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::list_reviews,
             commands::delete_review,
             commands::ai_review_streaming,
+            commands::list_llm_models,
             commands::generate_commit_msg,
             // Background refresh
             commands::pause_background_refresh,
