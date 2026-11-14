@@ -127,7 +127,7 @@ mod tests {
     use super::*;
 
     fn alpha(img: &tauri::image::Image<'_>) -> Vec<u8> {
-        img.rgba().chunks_exact(4).map(|p| p[3]).collect()
+        img.rgba().as_chunks::<4>().0.iter().map(|p| p[3]).collect()
     }
 
     fn ink(img: &tauri::image::Image<'_>) -> f64 {
@@ -145,7 +145,7 @@ mod tests {
     fn only_the_silhouette_is_drawn_and_it_is_white() {
         let img = template_image(32);
         assert_eq!((img.width(), img.height()), (32, 32));
-        for px in img.rgba().chunks_exact(4) {
+        for px in img.rgba().as_chunks::<4>().0 {
             if px[3] == 0 {
                 assert_eq!(&px[..3], &[0, 0, 0], "clear pixels must not be tinted");
             } else {

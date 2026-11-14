@@ -56,10 +56,7 @@ fn is_excluded_path(path: &str) -> bool {
         return true;
     }
     let lower = path.to_lowercase();
-    if EXCLUDED_EXTENSIONS.iter().any(|&ext| lower.ends_with(ext)) {
-        return true;
-    }
-    false
+    EXCLUDED_EXTENSIONS.iter().any(|&ext| lower.ends_with(ext))
 }
 
 // ── Diff Extraction ──────────────────────────────────────────────────────
