@@ -87,15 +87,16 @@ fn summon_terminal_window(app: &AppHandle, window: &WebviewWindow, visible: bool
 }
 
 /// Hides the terminal window and hands focus back to the app the summon
-/// interrupted. `focus_previous_app` waits for the reactivation to actually
-/// land first, so by the time `hide()` runs the terminal no longer holds key
-/// status (the interrupted app owns it now) and `orderOut:` removes the
-/// window without reassigning anything — no key hand-off to the main window,
-/// which is what used to flash it forward for a frame.
+/// interrupted. `focus_previous_app` waits until this app is no longer active
+/// before returning, so by the time `hide()` runs the terminal has already
+/// resigned key status and `orderOut:` removes the window without reassigning
+/// anything — no key hand-off to the main window, which is what used to flash
+/// it forward for a frame.
 pub fn dismiss_terminal_window(window: &WebviewWindow) {
     let previous = PREVIOUS_APP_PID.lock().ok().and_then(|mut pid| pid.take());
-    platform::focus_previous_app(previous);
-    let _ = window.hide();
+    platform::focus_previous_app(previous, || {
+        let _ = window.hide();
+    });
 }
 
 /// Hides the standalone terminal window if visible, without touching focus
@@ -168,7 +169,7 @@ fn main_restore_plan(order: &[isize], main: isize, raised: isize) -> Option<Rest
 #[cfg(target_os = "macos")]
 mod platform {
     use std::ptr;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use objc2::runtime::AnyObject;
     use objc2::{class, msg_send, MainThreadMarker};
@@ -196,67 +197,104 @@ mod platform {
         }
     }
 
-    /// Reactivates the app the summon interrupted, and waits until the system
-    /// has actually done it.
+    /// Reactivates the app the summon interrupted, and hides the terminal
+    /// only once this app has actually stopped being active.
     ///
-    /// Activation is asynchronous: `activateWithOptions` only posts the
-    /// request — the window server raises that app's windows a beat later.
-    /// Hiding the terminal in that gap leaves it key, so AppKit reassigns key
-    /// status to the main window and orders it forward, which is the frame of
-    /// the main window that flashes by on close. Once the switch has landed
-    /// the terminal has already resigned key and `orderOut:` has nothing to
-    /// hand off, so the close is invisible. Bounded so a refused or stalled
-    /// activation can never wedge the main thread.
-    pub fn focus_previous_app(pid: Option<i32>) {
+    /// Activation is asynchronous, and `NSWorkspace.frontmostApplication`
+    /// flips to the target app before AppKit finishes deactivating this one:
+    /// at that instant the terminal window is still key. Hiding it there
+    /// leaves AppKit reassigning key status to the main window while the app
+    /// is still active, which orders the main window forward for a frame — the
+    /// flash on close. `NSApp.isActive` is the signal that actually matters:
+    /// once it is false the terminal has resigned key, so `orderOut:` has
+    /// nothing to hand off and the close is invisible. Bounded so a refused
+    /// or stalled activation can never wedge the main thread.
+    pub fn focus_previous_app(pid: Option<i32>, hide: impl FnOnce()) {
         let Some(pid) = pid else {
+            hide();
             return;
         };
         let Some(_mtm) = MainThreadMarker::new() else {
+            hide();
             return;
         };
-        unsafe {
+        let activation_requested = unsafe {
             let app: *mut AnyObject = msg_send![
                 class!(NSRunningApplication),
                 runningApplicationWithProcessIdentifier: pid
             ];
             if app.is_null() {
-                return;
+                false
+            } else {
+                let activated: bool =
+                    msg_send![app, activateWithOptions: ACTIVATE_IGNORING_OTHER_APPS];
+                activated
             }
-            let activated: bool = msg_send![app, activateWithOptions: ACTIVATE_IGNORING_OTHER_APPS];
-            if !activated {
-                return;
-            }
+        };
+        if !activation_requested {
+            hide();
+            return;
         }
-        wait_until_frontmost(pid);
+        let deactivated =
+            hide_after_deactivation(app_is_active, pump_once, hide, ACTIVATION_TIMEOUT);
+        if !deactivated {
+            log::warn!(
+                "[debug] focus_previous_app: timed out after {:?} waiting for pid {} to deactivate this app",
+                ACTIVATION_TIMEOUT,
+                pid
+            );
+        }
     }
 
-    /// Pumps the main run loop until `pid` is frontmost or the deadline hits.
-    /// Pumping (rather than sleeping) matters: AppKit may defer the actual
-    /// activation onto a run loop turn, so nothing lands while we just wait.
-    fn wait_until_frontmost(pid: i32) {
-        let deadline = std::time::Instant::now() + ACTIVATION_TIMEOUT;
-        loop {
-            if frontmost_other_app() == Some(pid) {
-                return;
+    /// Runs `hide` only after `is_active` has reported that this app is no
+    /// longer active. `pump` advances the run loop between probes. On timeout
+    /// `hide` still runs: the user asked to dismiss, so the window must not
+    /// stay up.
+    fn hide_after_deactivation(
+        mut is_active: impl FnMut() -> bool,
+        mut pump: impl FnMut(),
+        hide: impl FnOnce(),
+        timeout: Duration,
+    ) -> bool {
+        let deadline = Instant::now() + timeout;
+        while is_active() {
+            if Instant::now() >= deadline {
+                hide();
+                return false;
             }
-            if std::time::Instant::now() >= deadline {
-                log::warn!(
-                    "[debug] wait_until_frontmost: timed out after {:?} waiting for pid {}",
-                    ACTIVATION_TIMEOUT,
-                    pid
-                );
-                return;
+            pump();
+        }
+        hide();
+        true
+    }
+
+    /// Whether this app is still the active (frontmost) application. More
+    /// precise than comparing `NSWorkspace.frontmostApplication`: the
+    /// workspace property can name another app while this one is still active
+    /// and still holds a key window.
+    fn app_is_active() -> bool {
+        unsafe {
+            let app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
+            if app.is_null() {
+                return false;
             }
-            unsafe {
-                let run_loop: *mut AnyObject = msg_send![class!(NSRunLoop), currentRunLoop];
-                let mode: *mut AnyObject = msg_send![
-                    class!(NSString),
-                    stringWithUTF8String: c"NSDefaultRunLoopMode".as_ptr()
-                ];
-                let limit: *mut AnyObject =
-                    msg_send![class!(NSDate), dateWithTimeIntervalSinceNow: 0.008f64];
-                let _: bool = msg_send![run_loop, runMode: mode, beforeDate: limit];
-            }
+            msg_send![app, isActive]
+        }
+    }
+
+    /// Pumps the main run loop once. Pumping (rather than sleeping) matters:
+    /// AppKit performs the deactivation on a run loop turn, so nothing lands
+    /// while we just wait.
+    fn pump_once() {
+        unsafe {
+            let run_loop: *mut AnyObject = msg_send![class!(NSRunLoop), currentRunLoop];
+            let mode: *mut AnyObject = msg_send![
+                class!(NSString),
+                stringWithUTF8String: c"NSDefaultRunLoopMode".as_ptr()
+            ];
+            let limit: *mut AnyObject =
+                msg_send![class!(NSDate), dateWithTimeIntervalSinceNow: 0.008f64];
+            let _: bool = msg_send![run_loop, runMode: mode, beforeDate: limit];
         }
     }
 
@@ -323,6 +361,60 @@ mod platform {
                 .collect()
         }
     }
+
+    #[cfg(test)]
+    mod tests {
+        use std::cell::Cell;
+        use std::time::Duration;
+
+        use super::hide_after_deactivation;
+
+        #[test]
+        fn hide_waits_for_the_app_to_deactivate() {
+            // `NSWorkspace.frontmostApplication` can name the previous app
+            // while this one is still active and still holds the terminal as
+            // key. The hide must wait for NSApp.isActive to go false, not for
+            // that earlier workspace signal.
+            let workspace_says_other_foremost = Cell::new(false);
+            let app_active = Cell::new(true);
+            let pumps = Cell::new(0);
+            let active_when_hidden = Cell::new(None);
+
+            let deactivated = hide_after_deactivation(
+                || app_active.get(),
+                || {
+                    pumps.set(pumps.get() + 1);
+                    if pumps.get() == 1 {
+                        workspace_says_other_foremost.set(true);
+                    }
+                    if pumps.get() == 3 {
+                        app_active.set(false);
+                    }
+                },
+                || active_when_hidden.set(Some(app_active.get())),
+                Duration::from_millis(200),
+            );
+
+            assert!(workspace_says_other_foremost.get());
+            assert!(deactivated);
+            assert_eq!(
+                active_when_hidden.get(),
+                Some(false),
+                "the terminal must not hide while the app is still active"
+            );
+        }
+
+        #[test]
+        fn hide_still_runs_when_deactivation_times_out() {
+            // A refused activation must not leave the terminal on screen.
+            let mut hidden = false;
+            let deactivated =
+                hide_after_deactivation(|| true, || {}, || hidden = true, Duration::from_millis(1));
+
+            assert!(!deactivated);
+            assert!(hidden, "the dismiss request must still hide the window");
+        }
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -344,7 +436,9 @@ mod platform {
         None
     }
 
-    pub fn focus_previous_app(_pid: Option<i32>) {}
+    pub fn focus_previous_app(_pid: Option<i32>, hide: impl FnOnce()) {
+        hide();
+    }
 }
 
 #[cfg(test)]
