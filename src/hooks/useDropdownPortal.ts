@@ -159,14 +159,17 @@ export function useDropdownPortal({ minWidth = 200, align = "left" }: UseDropdow
   // the following click must not also answer whatever sits under the
   // pointer. Without that, a right-click on another dropdown's own trigger
   // would close one listbox and open the other from a single gesture.
+  //
+  // Dismissal keys off WHERE the press landed, never off whether some other
+  // handler already cancelled its default: surfaces that take focus on
+  // mousedown routinely call preventDefault() (xterm does on every click in
+  // the terminal), and that must not leave the open menu behind when focus
+  // moves on.
   useEffect(() => {
     if (!open) return;
     function handleClickOutside(e: MouseEvent) {
       const target = e.target instanceof Node ? e.target : null;
       if (
-        // A trigger opts out of the outside-dismiss when another open
-        // dropdown already owned this press (it stops propagation).
-        e.defaultPrevented ||
         !target ||
         triggerRef.current?.contains(target) ||
         portalRef.current?.contains(target)

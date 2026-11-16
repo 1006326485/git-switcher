@@ -513,3 +513,75 @@ describe("TerminalWorkspace branch switching", () => {
     await waitFor(() => expect(api.switchBranch).toHaveBeenCalledWith("/tmp/demo", "dev"));
   });
 });
+
+/**
+ * Requirement: an open sidebar dropdown must hide when focus moves away from
+ * it into the terminal. xterm cancels the default action of every mousedown
+ * on its element to keep the browser from selecting text and stealing focus,
+ * so the dismissal must key off WHERE the press landed, not off whether some
+ * other handler already called preventDefault().
+ */
+describe("TerminalWorkspace dropdowns dismiss when the terminal takes focus", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    class ObserverStub {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    window.ResizeObserver = ObserverStub as unknown as typeof ResizeObserver;
+    window.IntersectionObserver = ObserverStub as unknown as typeof IntersectionObserver;
+    Element.prototype.scrollIntoView = vi.fn();
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+    vi.mocked(api.listProjects).mockResolvedValue([makeDetail("/tmp/demo", "main")]);
+    vi.mocked(api.terminalList).mockResolvedValue(demoSessions);
+  });
+
+  /** A real press inside the live terminal canvas (xterm owns this element). */
+  function pressTerminal() {
+    const canvas = document.querySelector('[data-testid="terminal-canvas-t1"]');
+    if (!(canvas instanceof HTMLElement)) throw new Error("terminal canvas not mounted");
+    const target = canvas.querySelector(".xterm") ?? canvas;
+    const press = new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 });
+    target.dispatchEvent(press);
+    // Guards the premise of these tests: xterm must still be cancelling the
+    // press. If it stops, the press no longer exercises the regression.
+    expect(press.defaultPrevented).toBe(true);
+  }
+
+  it("closes the branch list", async () => {
+    renderWorkspace();
+    await screen.findByText("zsh");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Branch: main. Click to switch." }));
+    expect(await screen.findByRole("listbox", { name: "Branches" })).toBeInTheDocument();
+
+    pressTerminal();
+
+    await waitFor(() =>
+      expect(screen.queryByRole("listbox", { name: "Branches" })).not.toBeInTheDocument()
+    );
+    expect(api.switchBranch).not.toHaveBeenCalled();
+  });
+
+  it("closes the New-project picker", async () => {
+    renderWorkspace();
+    await screen.findByText("zsh");
+
+    fireEvent.click(screen.getByRole("button", { name: "New terminal in project" }));
+    expect(await screen.findByRole("listbox")).toBeInTheDocument();
+
+    pressTerminal();
+
+    await waitFor(() => expect(screen.queryByRole("listbox")).not.toBeInTheDocument());
+  });
+});
