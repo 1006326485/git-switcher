@@ -168,6 +168,44 @@ async function pressGlobalHotkeyChord() {
   });
 }
 
+/**
+ * Simulates what opening a real terminal does: focus moves into the panel,
+ * onto xterm's helper textarea. Every chord pressed afterwards targets that
+ * textarea (a TEXTAREA inside the terminal context), which is the exact state
+ * that used to drop the toggle chord.
+ *
+ * Focus is flushed through act: a real panel focuses the terminal long before
+ * the user presses a chord, so App's focus tracking has landed by then.
+ */
+async function focusInsideTerminal(): Promise<HTMLTextAreaElement> {
+  const root = document.querySelector('[data-terminal-context="true"]');
+  if (!(root instanceof HTMLElement)) throw new Error("terminal workspace not mounted");
+  const helper = document.createElement("textarea");
+  helper.setAttribute("aria-label", "xterm-helper-textarea");
+  root.appendChild(helper);
+  await act(async () => {
+    helper.focus();
+  });
+  return helper;
+}
+
+function pressOn(
+  target: EventTarget,
+  code: string,
+  key: string,
+  modifiers: KeyboardEventInit = {}
+): KeyboardEvent {
+  const event = new KeyboardEvent("keydown", {
+    code,
+    key,
+    bubbles: true,
+    cancelable: true,
+    ...modifiers,
+  });
+  target.dispatchEvent(event);
+  return event;
+}
+
 async function pressCustomCtrlT() {
   await act(async () => {
     press("ControlLeft", "Control", { ctrlKey: true });
@@ -262,6 +300,103 @@ describe("App in-app terminal toggle on macOS", () => {
 
     await pressToggleCmd();
     await expectPanelClosed();
+  });
+});
+
+describe("App in-app terminal toggle: focus inside the terminal", () => {
+  // Opening the panel hands focus to the terminal (xterm's helper textarea is
+  // a TEXTAREA inside [data-terminal-context]). The toggle is a panel-level
+  // chord, so it must still close the panel from there — and closing it must
+  // hand the keyboard back, or the next press could never reopen it.
+  it("closes the panel when the chord is pressed inside the terminal", async () => {
+    await renderApp();
+    await pressToggleCtrl();
+    await expectPanelOpen();
+
+    const helper = await focusInsideTerminal();
+    expect(document.activeElement).toBe(helper);
+
+    const close = await act(async () => {
+      press("ControlLeft", "Control", { ctrlKey: true });
+      return pressOn(helper, "Backquote", "`", { ctrlKey: true });
+    });
+    await act(async () => {
+      release("Backquote", "`");
+      release("ControlLeft", "Control");
+    });
+
+    expect(close?.defaultPrevented).toBe(true);
+    await expectPanelClosed();
+  });
+
+  it("reopens after the panel was closed from inside the terminal", async () => {
+    await renderApp();
+    await pressToggleCtrl();
+    await expectPanelOpen();
+    const helper = await focusInsideTerminal();
+
+    await act(async () => {
+      press("ControlLeft", "Control", { ctrlKey: true });
+      pressOn(helper, "Backquote", "`", { ctrlKey: true });
+    });
+    await act(async () => {
+      release("Backquote", "`");
+      release("ControlLeft", "Control");
+    });
+    await expectPanelClosed();
+
+    // The hidden workspace must not keep owning the keyboard: otherwise the
+    // terminal-context gate (and the text-field guard) swallow every later
+    // app chord.
+    expect(document.activeElement).toBe(document.body);
+
+    await pressToggleCtrl();
+    await expectPanelOpen();
+  });
+
+  it("reopens after closing with the panel's Close button from inside the terminal", async () => {
+    await renderApp();
+    await pressToggleCtrl();
+    await expectPanelOpen();
+    await focusInsideTerminal();
+
+    const closeButton = document.querySelector(
+      '[data-terminal-context="true"] button[aria-label="Close"]'
+    );
+    if (!(closeButton instanceof HTMLElement)) throw new Error("terminal close button not found");
+    await act(async () => {
+      closeButton.click();
+    });
+    await expectPanelClosed();
+    expect(document.activeElement).toBe(document.body);
+
+    await pressToggleCtrl();
+    await expectPanelOpen();
+  });
+
+  it("closes from inside the terminal with a re-recorded binding", async () => {
+    // The report that led here was a binding recorded in the Shortcuts panel,
+    // so the inside-the-terminal path must resolve the stored binding too.
+    await renderApp({ in_app_toggle_terminal: "Control+T" });
+    await expectPanelClosed();
+
+    await pressCustomCtrlT();
+    await expectPanelOpen();
+    const helper = await focusInsideTerminal();
+
+    await act(async () => {
+      press("ControlLeft", "Control", { ctrlKey: true });
+      pressOn(helper, "KeyT", "t", { ctrlKey: true });
+    });
+    await act(async () => {
+      release("KeyT", "t");
+      release("ControlLeft", "Control");
+    });
+    await expectPanelClosed();
+    expect(document.activeElement).toBe(document.body);
+
+    await pressCustomCtrlT();
+    await expectPanelOpen();
   });
 });
 

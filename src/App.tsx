@@ -839,6 +839,20 @@ export default function App() {
     };
   }, []);
 
+  // Closing the panel hands the keyboard back to the app. The terminal panel
+  // stays mounted (just hidden), so xterm's helper textarea would otherwise
+  // keep focus inside a closed panel: the terminal-context gate above would
+  // keep dropping app shortcuts, and the very chord that reopens the panel
+  // would never reach the app level again.
+  useEffect(() => {
+    if (terminalPanelOpen) return;
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active.closest('[data-terminal-context="true"]')) {
+      active.blur();
+    }
+    setTerminalContextFocus(false);
+  }, [terminalPanelOpen]);
+
   useKeyboardShortcuts(
     {
       onAddProject: handleAddProject,

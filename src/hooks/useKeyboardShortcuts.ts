@@ -8,10 +8,12 @@ import {
 } from "../lib/inAppShortcuts";
 // Context priority (FR2, see shortcutRegistry.ts CONTEXT_PRIORITY): this
 // handler owns the app/list levels. Recorder capture (1) is checked first,
-// the backend global hotkey (7) is suppressed below so it never double-fires,
-// and dialog (2) / terminal (3) / palette (4) contexts own their keys in
-// their own handlers (App.tsx, TerminalWorkspace's capture-phase listener,
-// CommandPalette) before this handler can act on them.
+// the backend global hotkey (7) is suppressed before any in-app match so it
+// never double-fires, and dialog (2) / terminal (3) / palette (4) contexts
+// own their keys in their own handlers (App.tsx, TerminalWorkspace's
+// capture-phase listener, CommandPalette) before this handler can act on
+// them. The terminal gate keeps the panel toggle: a toggle that opened the
+// panel could otherwise never close it once focus moved into xterm.
 import { hasOtherKeyHeld, installHeldKeyTracking } from "../lib/heldKeys";
 import { detectMac } from "../lib/hotkey";
 import { isShortcutCapturing } from "../lib/shortcutCapture";
@@ -83,13 +85,11 @@ export function useKeyboardShortcuts(
       if (isShortcutCapturing()) return;
       // Escape handled by dialogs in App.tsx
       if (e.key === "Escape") return;
-      // The terminal context owns every key while focus is inside it: the
-      // workspace's capture-phase handler has already had its say, and
-      // anything left is the shell's (or nobody's), not an app action.
-      if (terminalContextRef.current) return;
 
       // The global hotkey is owned by the backend; do not let in-app bindings
-      // double-fire on the same chord.
+      // double-fire on the same chord. Checked before the terminal context
+      // gate so the terminal can never re-claim a chord the backend owns
+      // (e.g. a panel toggle recorded on the global binding).
       if (globalKey && matchesGlobalHotkey(e, globalKey, isMac)) return;
 
       const match = (actionId: ActionId, run: () => void): boolean => {
@@ -118,6 +118,19 @@ export function useKeyboardShortcuts(
         }
         return false;
       };
+
+      // The terminal context owns every key while focus is inside it: the
+      // workspace's capture-phase handler has already had its say, and
+      // anything left is the shell's (or nobody's), not an app action.
+      // The panel toggle is the one exception: it is a panel-level chord, not
+      // a terminal action, so it must close the panel even though the
+      // terminal it just opened holds focus (xterm's helper textarea — which
+      // the text-field guard below would drop as well). App clears the
+      // context when the panel closes, so the next press reopens it.
+      if (terminalContextRef.current) {
+        if (match("toggleTerminal", () => handlers.onToggleTerminal?.())) return;
+        return;
+      }
 
       // Checked before the text-field guard below: the palette is meant to be
       // summoned while typing (this is the only binding allowed to do so).
