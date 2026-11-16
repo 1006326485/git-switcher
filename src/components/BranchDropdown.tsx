@@ -183,11 +183,15 @@ export const BranchDropdown = memo(function BranchDropdown({
     [loading, toggle]
   );
 
+  // Both triggers keep their box (max-w-40 / max-w-70) unchanged; the
+  // complete branch name lives in the tooltip and in the open list, whose
+  // rows wrap (up to three lines) rather than clip the distinguishing tail.
   return (
     <div ref={triggerRef} className="relative">
       {variant === "compact" ? (
         <button
           aria-label={t("branchMenu.branchAriaCompact", { branch: currentBranch })}
+          title={currentBranch}
           aria-haspopup="listbox"
           aria-expanded={open}
           onMouseDown={(e) => e.stopPropagation()}
@@ -200,6 +204,7 @@ export const BranchDropdown = memo(function BranchDropdown({
       ) : (
         <button
           aria-label={t("branchMenu.branchAria", { branch: currentBranch })}
+          title={currentBranch}
           aria-haspopup="listbox"
           aria-expanded={open}
           onMouseDown={(e) => e.stopPropagation()}
@@ -301,12 +306,17 @@ export const BranchDropdown = memo(function BranchDropdown({
                     {b.is_current && (
                       <span className="text-blue-500">&#x2713;</span>
                     )}
+                    {/* Keep the fixed panel width but let long names wrap:
+                        the tail is what tells two similar branches apart.
+                        Three lines cover realistic ref names; anything
+                        longer stays reachable via the tooltip and Copy. */}
                     <span
-                      className={`font-mono truncate flex-1 ${
+                      className={`font-mono flex-1 min-w-0 break-words line-clamp-3 ${
                         b.is_remote || b.is_tag
                           ? "text-gray-500 dark:text-gray-400"
                           : ""
                       }`}
+                      title={b.name}
                     >
                       {b.name}
                     </span>

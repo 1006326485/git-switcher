@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BranchInfo } from "../lib/types";
 import { BranchDropdown } from "./BranchDropdown";
@@ -39,6 +39,51 @@ describe("BranchDropdown ref grouping", () => {
 
     expect(screen.queryByText("Tags")).toBeNull();
     expect(screen.getByRole("option", { name: /origin\/main/ })).toBeDefined();
+  });
+});
+
+describe("BranchDropdown long branch names", () => {
+  // Regression: the compact terminal pill clamps at max-w-40 and the popover
+  // keeps the trigger's width (min 280px), so a long branch used to lose its
+  // tail — exactly the part that distinguishes similar branches. The width is
+  // fixed by design, so the full name must be reachable without widening:
+  // a tooltip on the trigger and a wrapping row in the picker.
+  const longName = "feature/PS-1234-a-very-long-branch-name-for-authentication";
+  const longBranches: BranchInfo[] = [
+    { name: "main", is_current: false, is_remote: false, is_merged: false, is_tag: false },
+    { name: longName, is_current: true, is_remote: false, is_merged: false, is_tag: false },
+  ];
+
+  it.each(["compact", "default"] as const)(
+    "keeps the complete name on the %s trigger's tooltip",
+    (variant) => {
+      render(
+        <BranchDropdown
+          currentBranch={longName}
+          branches={longBranches}
+          onSwitch={vi.fn()}
+          variant={variant}
+        />
+      );
+      expect(screen.getByRole("button", { name: /branch:/i })).toHaveAttribute(
+        "title",
+        longName
+      );
+    }
+  );
+
+  it("shows the complete name in the picker, wrapping instead of clipping the tail", () => {
+    render(
+      <BranchDropdown currentBranch={longName} branches={longBranches} onSwitch={vi.fn()} />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /branch:/i }));
+
+    const option = screen.getByRole("option", { name: new RegExp("PS-1234") });
+    const label = within(option).getByText(longName);
+    expect(label).toHaveAttribute("title", longName);
+    // The row must be allowed to wrap: `truncate` would force one nowrap line.
+    expect(label.className).toContain("line-clamp-3");
+    expect(label.className).not.toContain("truncate");
   });
 });
 
