@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { listen } from "@tauri-apps/api/event";
 import type { AppSettings, Theme } from "../lib/types";
 import { getSettings, updateSettingsPartial } from "../lib/tauri";
 
@@ -9,6 +10,14 @@ export const THEME_CHANGE_EVENT = "git-switcher:theme-change";
 
 export function broadcastThemeChange(t: Theme) {
   window.dispatchEvent(new CustomEvent<Theme>(THEME_CHANGE_EVENT, { detail: t }));
+}
+
+/** Whether the OS is currently in dark appearance. */
+function systemPrefersDark(): boolean {
+  return (
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-color-scheme: dark)").matches
+  );
 }
 
 export function applyTheme(t: Theme) {
@@ -38,24 +47,52 @@ export function applyTheme(t: Theme) {
 
 export function useTheme() {
   const [theme, setThemeState] = useState<Theme>("system");
+  // The OS appearance is state, not a render-time probe: when it flips while
+  // the choice is "system", consumers (notably the xterm canvas) must
+  // re-render to pick up the new colors.
+  const [systemDark, setSystemDark] = useState<boolean>(systemPrefersDark);
   const settingsRef = useRef<AppSettings | null>(null);
   const pendingRef = useRef<Promise<void>>(Promise.resolve());
+  const themeRef = useRef<Theme>("system");
+
+  // One place that records + applies a theme choice, so the React state and
+  // the document class can never disagree.
+  const apply = useCallback((next: Theme) => {
+    themeRef.current = next;
+    setThemeState(next);
+    setSystemDark(systemPrefersDark());
+    applyTheme(next);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     getSettings().then((settings) => {
       if (!cancelled) {
         settingsRef.current = settings;
-        setThemeState(settings.theme);
-        applyTheme(settings.theme);
+        apply(settings.theme);
       }
     }).catch((e) => console.warn("Failed to load theme settings:", e));
     return () => { cancelled = true; };
-  }, []);
+  }, [apply]);
+
+  // Theme changes made in the other window are persisted through the same
+  // backend; `settings-changed` is the cross-window signal (the DOM event
+  // above only reaches instances in this window). Without this, the summoned
+  // terminal window keeps whatever theme it read when it was first created.
+  useEffect(() => {
+    const unlisten = listen("settings-changed", () => {
+      getSettings().then((settings) => {
+        settingsRef.current = settings;
+        if (settings.theme !== themeRef.current) apply(settings.theme);
+      }).catch(() => {});
+    });
+    return () => {
+      unlisten.then((f) => f());
+    };
+  }, [apply]);
 
   const setTheme = useCallback(async (newTheme: Theme) => {
-    setThemeState(newTheme);
-    applyTheme(newTheme);
+    apply(newTheme);
     broadcastThemeChange(newTheme);
     // Serialize writes to prevent race condition
     pendingRef.current = pendingRef.current.then(async () => {
@@ -66,15 +103,21 @@ export function useTheme() {
         console.error("Failed to persist theme:", e);
       }
     });
-  }, []);
+  }, [apply]);
 
+  // Track the OS appearance for the whole lifetime of the hook: it also lets
+  // a switch back to "system" use the current appearance instead of a stale
+  // one recorded when the explicit choice was made.
   useEffect(() => {
-    if (theme !== "system") return;
+    if (typeof window.matchMedia !== "function") return;
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const handler = () => applyTheme("system");
+    const handler = () => {
+      setSystemDark(mq.matches);
+      if (themeRef.current === "system") applyTheme("system");
+    };
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);
-  }, [theme]);
+  }, []);
 
   // Converge independent hook instances (e.g. TerminalWorkspace's own
   // useTheme): a theme applied anywhere re-syncs this instance's state.
@@ -82,6 +125,7 @@ export function useTheme() {
     const handler = (e: Event) => {
       const next = (e as CustomEvent<Theme>).detail;
       if (next) {
+        themeRef.current = next;
         settingsRef.current = settingsRef.current
           ? { ...settingsRef.current, theme: next }
           : settingsRef.current;
@@ -92,5 +136,7 @@ export function useTheme() {
     return () => window.removeEventListener(THEME_CHANGE_EVENT, handler);
   }, []);
 
-  return { theme, setTheme };
+  const isDark = theme === "dark" || (theme === "system" && systemDark);
+
+  return { theme, setTheme, isDark };
 }

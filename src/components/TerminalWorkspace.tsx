@@ -327,7 +327,7 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
   } = useTerminal();
   const { t } = useTranslation();
   const fallbackTitle = t("terminal.title");
-  const { theme } = useTheme();
+  const { isDark } = useTheme();
 
   // FR2 (Phase 2 narrowing): terminal context means focus is inside this
   // workspace's own DOM. The ref is attached to the window-root element
@@ -448,10 +448,6 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
       });
   }, []);
 
-  const dark =
-    theme === "dark" ||
-    (theme === "system" && (window.matchMedia?.("(prefers-color-scheme: dark)")?.matches ?? false));
-
   const state: TerminalTabsState = { sessions, activeId, activeProject, activeByProject };
   const keys = projectKeys(state);
   const activeGroup = activeProject != null ? sessionsOfProject(state, activeProject) : [];
@@ -472,8 +468,8 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
   );
 
   useEffect(() => {
-    setTerminalDark(dark);
-  }, [dark, setTerminalDark]);
+    setTerminalDark(isDark);
+  }, [isDark, setTerminalDark]);
 
   const visibleKeys = useMemo(() => {
     const query = parseFuzzyQuery(projectFilter);
