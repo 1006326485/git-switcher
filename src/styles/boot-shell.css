@@ -1,0 +1,111 @@
+/*
+ * First-paint skeleton shown inside #root until React mounts (see index.html).
+ *
+ * This MUST stay an external stylesheet, never an inline <style> in index.html.
+ * Tauri rewrites style-src with a nonce/hash for every inline <style> it finds,
+ * and a CSP that carries a nonce or hash makes browsers ignore 'unsafe-inline'.
+ * xterm's DOM renderer injects its own un-nonced <style> elements at runtime
+ * (text colors, cursor, selection), so an inline <style> here leaves release
+ * builds with a black-and-white terminal with no cursor and no selection.
+ */
+/* Deliberately self-contained: this runs before globals.css, so it must
+   not depend on Tailwind utilities or the app's token layer. */
+.boot-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  padding: 10px;
+  gap: 10px;
+  box-sizing: border-box;
+  background: #f0f3f9;
+  font-family: system-ui, -apple-system, "SF Pro Text", "Segoe UI", sans-serif;
+}
+.dark .boot-shell {
+  background: #0f1117;
+}
+html.terminal-window .boot-shell {
+  display: none;
+}
+.boot-shell__bar {
+  height: 14px;
+  flex: 0 0 auto;
+}
+.boot-shell__body {
+  display: flex;
+  flex: 1;
+  gap: 10px;
+  min-height: 0;
+}
+.boot-shell__side {
+  width: 224px;
+  flex: 0 0 auto;
+  border-radius: 14px;
+  background: #fff;
+  border: 1px solid rgb(17 24 39 / 0.09);
+}
+.dark .boot-shell__side {
+  background: #1a1d27;
+  border-color: rgb(255 255 255 / 0.08);
+}
+.boot-shell__main {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+}
+.boot-shell__menu {
+  height: 44px;
+  flex: 0 0 auto;
+  border-radius: 14px;
+  background: #fff;
+  border: 1px solid rgb(17 24 39 / 0.09);
+}
+.dark .boot-shell__menu {
+  background: #1a1d27;
+  border-color: rgb(255 255 255 / 0.08);
+}
+.boot-shell__content {
+  flex: 1;
+  min-height: 0;
+  border-radius: 14px;
+  background: #fff;
+  border: 1px solid rgb(17 24 39 / 0.09);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
+}
+.dark .boot-shell__content {
+  background: #1a1d27;
+  border-color: rgb(255 255 255 / 0.08);
+}
+.boot-shell__row {
+  height: 48px;
+  flex: 0 0 auto;
+  border-radius: 12px;
+  background: #e5e7eb;
+}
+.dark .boot-shell__row {
+  background: #2c3040;
+}
+/* Breathing placeholder: the same cue the in-app skeleton uses, at the
+   same tempo, so the transition does not feel like a different app. */
+@keyframes boot-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+.boot-shell__row,
+.boot-shell__side,
+.boot-shell__menu {
+  animation: boot-breathe 1.6s ease-in-out infinite;
+}
+/* Status feedback stays legible without motion. */
+@media (prefers-reduced-motion: reduce) {
+  .boot-shell__row,
+  .boot-shell__side,
+  .boot-shell__menu {
+    animation: none;
+  }
+}
