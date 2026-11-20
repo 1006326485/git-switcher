@@ -1,5 +1,7 @@
 use crate::services::GitService;
-use crate::test_support::GitFixture;
+use crate::test_support::{
+    commit_file, commit_file_on_branch, reset_hard_to_head, stage_file, GitFixture,
+};
 
 /// A bare repository usable as a named remote of `fixture`.
 fn init_bare_remote(fixture: &GitFixture, name: &str) -> (tempfile::TempDir, String) {
@@ -441,4 +443,147 @@ fn run_batch_streaming_with_no_projects_does_nothing() {
     let mut calls = 0usize;
     GitService::run_batch_streaming(&[], |_path: String| Ok(String::new()), |_, _| calls += 1);
     assert_eq!(calls, 0);
+}
+
+// ── Branch merged flags & background summary ────────────────────────────────
+
+/// Local branch tips are compared against one walk of HEAD's history, so a
+/// branch sitting on HEAD counts as merged and one with its own commit does not.
+#[test]
+fn branch_merged_state_follows_head_history() {
+    let fixture = GitFixture::new();
+    let path = fixture.path();
+
+    GitService::create_branch(path, "on-head", None).unwrap();
+    GitService::create_branch(path, "with-work", None).unwrap();
+    commit_file_on_branch(
+        &fixture,
+        "with-work",
+        "work.txt",
+        "work\n",
+        "work on branch",
+    );
+    reset_hard_to_head(&fixture);
+
+    let repo = fixture.open();
+    let branches = GitService::get_branches(&repo).unwrap();
+    let merged_state = |name: &str| {
+        branches
+            .iter()
+            .find(|branch| branch.name == name)
+            .unwrap_or_else(|| panic!("branch {} is listed", name))
+            .is_merged
+    };
+
+    assert!(
+        merged_state("on-head"),
+        "a branch on HEAD's commit is merged"
+    );
+    assert!(
+        !merged_state("with-work"),
+        "a branch with its own commit is not merged"
+    );
+}
+
+/// The reachable-commit set is cached per HEAD tip, but branch tips are re-read
+/// every call: moving a branch must flip its flag even though HEAD did not move
+/// (and the second call is served from the cache).
+#[test]
+fn branch_merged_state_is_recomputed_when_a_branch_advances() {
+    let fixture = GitFixture::new();
+    let path = fixture.path();
+
+    GitService::create_branch(path, "side", None).unwrap();
+
+    let repo = fixture.open();
+    let before = GitService::get_branches(&repo).unwrap();
+    assert!(
+        before
+            .iter()
+            .find(|branch| branch.name == "side")
+            .unwrap()
+            .is_merged,
+        "a branch created at HEAD starts merged"
+    );
+
+    commit_file_on_branch(&fixture, "side", "side.txt", "side\n", "advance side");
+    reset_hard_to_head(&fixture);
+
+    let repo = fixture.open();
+    let after = GitService::get_branches(&repo).unwrap();
+    assert!(
+        !after
+            .iter()
+            .find(|branch| branch.name == "side")
+            .unwrap()
+            .is_merged,
+        "advancing the branch past HEAD makes it unmerged"
+    );
+}
+
+/// Advancing HEAD past a branch's tip must refresh the cached set as well.
+#[test]
+fn branch_merged_state_tracks_a_moving_head() {
+    let fixture = GitFixture::new();
+    let path = fixture.path();
+
+    GitService::create_branch(path, "side", None).unwrap();
+    commit_file_on_branch(&fixture, "side", "side.txt", "side\n", "advance side");
+    reset_hard_to_head(&fixture);
+
+    let repo = fixture.open();
+    let before = GitService::get_branches(&repo).unwrap();
+    assert!(
+        !before
+            .iter()
+            .find(|branch| branch.name == "side")
+            .unwrap()
+            .is_merged
+    );
+
+    // Fast-forward the current branch onto the same commit.
+    let current = current_branch_name(&fixture);
+    {
+        let repo = fixture.open();
+        let oid = repo.refname_to_id("refs/heads/side").unwrap();
+        repo.reference(
+            &format!("refs/heads/{}", current),
+            oid,
+            true,
+            "fast-forward for test",
+        )
+        .expect("fast-forward current branch");
+    }
+    reset_hard_to_head(&fixture);
+
+    let repo = fixture.open();
+    let after = GitService::get_branches(&repo).unwrap();
+    assert!(
+        after
+            .iter()
+            .find(|branch| branch.name == "side")
+            .unwrap()
+            .is_merged,
+        "HEAD now contains the branch tip"
+    );
+}
+
+#[test]
+fn project_summary_reports_counts_without_reading_branches() {
+    let fixture = GitFixture::new();
+    let path = fixture.path();
+
+    commit_file(&fixture, "tracked.txt", "v1\n", "add tracked file");
+    fixture.write_file("untracked.txt", "loose\n");
+    stage_file(&fixture, "staged.txt", "staged\n");
+
+    let summary = GitService::get_project_summary(path).unwrap();
+
+    let head_hash = fixture.open().head().unwrap().target().unwrap().to_string();
+
+    assert_eq!(summary.current_branch, current_branch_name(&fixture));
+    assert_eq!(summary.head_hash.as_deref(), Some(head_hash.as_str()));
+    assert_eq!(summary.status.staged, 1, "staged file is counted");
+    assert_eq!(summary.status.untracked, 1, "untracked file is counted");
+    assert_eq!(summary.status.modified, 0, "committed file is clean");
 }

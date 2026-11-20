@@ -14,7 +14,7 @@ pub struct BackgroundStatus {
     pub last_refresh: Option<i64>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct RefreshCounts {
     pub behind_count: u32,
     pub ahead_count: u32,
@@ -81,7 +81,15 @@ impl BackgroundService {
                             }
                         }
 
-                        let counts = Self::do_refresh(&db);
+                        // The refresh walks every repository, so keep it off the
+                        // async worker threads instead of blocking a runtime
+                        // thread for the whole pass.
+                        let db_for_tick = db.clone();
+                        let counts = tauri::async_runtime::spawn_blocking(move || {
+                            Self::do_refresh(&db_for_tick)
+                        })
+                        .await
+                        .unwrap_or_default();
 
                         // Update last_refresh
                         {
@@ -101,13 +109,7 @@ impl BackgroundService {
     pub(crate) fn do_refresh(db: &Database) -> RefreshCounts {
         let projects = match db.get_all_projects() {
             Ok(p) => p,
-            Err(_) => {
-                return RefreshCounts {
-                    behind_count: 0,
-                    ahead_count: 0,
-                    dirty_count: 0,
-                }
-            }
+            Err(_) => return RefreshCounts::default(),
         };
 
         let mut behind = 0u32;
@@ -118,18 +120,11 @@ impl BackgroundService {
             // Silent fetch
             let _ = GitService::fetch(&project.path, None);
 
-            // Get status after fetch
-            if let Ok(detail) = GitService::get_project_detail(
-                project,
-                crate::models::Group {
-                    id: project.group_id.clone(),
-                    name: String::new(),
-                    color: None,
-                    sort_order: 0,
-                    created_at: String::new(),
-                },
-            ) {
-                let s = &detail.status;
+            // Only the counts are needed here, so read the summary instead of
+            // the full detail: the branch list and stash scan exist for project
+            // rows, and computing them here doubled the cost of every tick.
+            if let Ok(summary) = GitService::get_project_summary(&project.path) {
+                let s = &summary.status;
                 if s.behind > 0 {
                     behind += 1;
                 }
