@@ -103,3 +103,68 @@ describe("MenuItem", () => {
     expect(screen.getByRole("menuitemradio")).toHaveAttribute("aria-checked", "true");
   });
 });
+
+describe("DropdownMenu loading", () => {
+  it("replaces a not-yet-fetched item list with a status row", () => {
+    stubTriggerRect({});
+    render(
+      <DropdownMenu
+        trigger={<button>Workspaces</button>}
+        loading
+        loadingLabel="Loading workspaces…"
+      >
+        <MenuItem label="should not be here" onClick={() => {}} />
+      </DropdownMenu>
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspaces" }));
+
+    expect(screen.getByTestId("dropdown-menu-loading")).toHaveTextContent(
+      "Loading workspaces…"
+    );
+    expect(screen.queryByText("should not be here")).toBeNull();
+
+    // The status row is outside the click-to-close wrapper: reading it must
+    // not dismiss the menu the user is waiting on.
+    fireEvent.click(screen.getByTestId("dropdown-menu-loading"));
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+  });
+
+  it("lets the caller supply placeholder rows that match its own items", () => {
+    stubTriggerRect({});
+    render(
+      <DropdownMenu
+        trigger={<button>Workspaces</button>}
+        loading
+        loadingLabel="Loading workspaces…"
+        loadingSkeleton={<div data-testid="custom-skeleton" />}
+      >
+        <MenuItem label="hidden" onClick={() => {}} />
+      </DropdownMenu>
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspaces" }));
+
+    expect(screen.getByTestId("custom-skeleton")).toBeInTheDocument();
+    // The default rows step aside entirely, so the two never stack up.
+    expect(screen.queryAllByText("Loading workspaces…")).toHaveLength(1);
+  });
+
+  it("defaults to item-shaped placeholder rows", () => {
+    stubTriggerRect({});
+    render(
+      <DropdownMenu trigger={<button>More</button>} loading>
+        <MenuItem label="hidden" onClick={() => {}} />
+      </DropdownMenu>
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "More" }));
+
+    const rows = screen.getByTestId("dropdown-menu-loading").querySelectorAll(":scope > div > div");
+    expect(rows).toHaveLength(3);
+    for (const row of rows) {
+      expect(row.className).toContain("px-3");
+      expect(row.querySelector(".h-5")).not.toBeNull();
+    }
+  });
+});

@@ -30,6 +30,13 @@ export interface ProjectActions {
   getAnyActiveOp?: (path: string) => ActiveGitOp | undefined;
   /** Cancel an active operation by ID */
   cancelOp?: (id: number) => void;
+  /**
+   * Paths with a per-project refresh in flight, from the shared
+   * useProjects bookkeeping. Rows read this instead of keeping their own
+   * `refreshing` flag so *every* entry point (row button, Space key, context
+   * menu, conflict resolver, group assignment) lights up the same way.
+   */
+  refreshingPaths?: ReadonlySet<string>;
   /** Single-project git operations */
   onFetch?: (path: string) => Promise<void>;
   onPull?: (path: string) => Promise<void>;

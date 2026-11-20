@@ -102,6 +102,19 @@ function press(key: string, code: string, modifiers: KeyboardEventInit = {}) {
 
 const pressClose = () => press("w", "KeyW", { ctrlKey: true });
 
+/**
+ * A tab's label renders before the workspace commits it as `activeId`, and the
+ * close chord reads `activeId`: pressing it in that gap is a silent no-op that
+ * nothing retries. Wait for the pane to be the visible one first.
+ */
+async function awaitActivePane(id: string) {
+  await waitFor(() =>
+    expect(within(workspaceRoot()).getByTestId(`terminal-canvas-${id}`).className).not.toContain(
+      "hidden"
+    )
+  );
+}
+
 async function renderAwakeWorkspace() {
   const onClose = vi.fn();
   const view = render(
@@ -137,11 +150,15 @@ describe("TerminalWorkspace wake chords", () => {
     vi.mocked(api.terminalList).mockResolvedValue(demoSessions);
     await renderAwakeWorkspace();
     await screen.findByText("zsh");
+    await awaitActivePane("t1");
     parkFocusOutside();
 
     const event = pressClose();
 
-    await waitFor(() => expect(api.terminalClose).toHaveBeenCalledTimes(1));
+    // Generous timeout: this waits on a real (non-faked) timer while the rest
+    // of the suite runs in parallel, and the 1s default was observed to flake
+    // on a loaded machine — not a behavioural difference.
+    await waitFor(() => expect(api.terminalClose).toHaveBeenCalledTimes(1), { timeout: 5000 });
     expect(api.terminalClose).toHaveBeenCalledWith("t1");
     expect(event.defaultPrevented).toBe(true);
   });
@@ -158,7 +175,7 @@ describe("TerminalWorkspace wake chords", () => {
 
     pressClose();
 
-    await waitFor(() => expect(api.terminalClose).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(api.terminalClose).toHaveBeenCalledTimes(1), { timeout: 5000 });
     expect(api.terminalClose).toHaveBeenCalledWith("t2");
   });
 
@@ -181,12 +198,13 @@ describe("TerminalWorkspace wake chords", () => {
     const { onClose } = await renderAwakeWorkspace();
     await screen.findByText("zsh");
     await waitFor(() => expect(api.listProjects).toHaveBeenCalled());
+    await awaitActivePane("t1");
     parkFocusOutside();
 
     const event = pressClose();
 
     expect(event.defaultPrevented).toBe(true);
-    await waitFor(() => expect(api.terminalClose).toHaveBeenCalledWith("t1"));
+    await waitFor(() => expect(api.terminalClose).toHaveBeenCalledWith("t1"), { timeout: 5000 });
     // Closing tabs never dismisses the panel; the empty workspace stays up.
     await waitFor(() => expect(screen.getByText("No terminals open")).toBeInTheDocument());
     expect(onClose).not.toHaveBeenCalled();
@@ -202,7 +220,7 @@ describe("TerminalWorkspace wake chords", () => {
       fireEvent.click(screen.getByRole("button", { name: "Close zsh" }));
     });
 
-    await waitFor(() => expect(api.terminalClose).toHaveBeenCalledWith("t1"));
+    await waitFor(() => expect(api.terminalClose).toHaveBeenCalledWith("t1"), { timeout: 5000 });
     expect(onClose).not.toHaveBeenCalled();
   });
 
@@ -215,7 +233,7 @@ describe("TerminalWorkspace wake chords", () => {
       fireEvent.click(screen.getByRole("button", { name: "Close zsh" }));
     });
 
-    await waitFor(() => expect(api.terminalClose).toHaveBeenCalledWith("t1"));
+    await waitFor(() => expect(api.terminalClose).toHaveBeenCalledWith("t1"), { timeout: 5000 });
     expect(onClose).not.toHaveBeenCalled();
   });
 
@@ -224,6 +242,7 @@ describe("TerminalWorkspace wake chords", () => {
     await renderAwakeWorkspace();
     await screen.findByText("zsh");
     await waitFor(() => expect(api.listProjects).toHaveBeenCalled());
+    await awaitActivePane("t1");
     parkFocusOutside();
 
     const event = press("n", "KeyN", { ctrlKey: true });
@@ -247,6 +266,7 @@ describe("TerminalWorkspace wake chords", () => {
     await renderAwakeWorkspace();
     await screen.findByText("zsh");
     await waitFor(() => expect(api.listProjects).toHaveBeenCalled());
+    await awaitActivePane("t1");
     parkFocusOutside();
 
     const event = press("N", "KeyN", { ctrlKey: true, shiftKey: true });

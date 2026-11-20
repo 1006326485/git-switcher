@@ -4,6 +4,7 @@ import * as api from "../lib/tauri";
 import { parseError } from "../lib/types";
 import type { GitignoreTemplate } from "../lib/types";
 import { Modal } from "./ui/primitives";
+import { LoadingState } from "./ui/loading";
 
 interface GitignoreEditorProps {
   open: boolean;
@@ -70,10 +71,7 @@ export const GitignoreEditor = memo(function GitignoreEditor({
   return (
     <Modal open={open} onClose={onClose} title={t("gitignoreEditor.title")} width="xl">
       {loading ? (
-        <div className="flex items-center justify-center py-8 text-sm text-gray-500">
-          <span className="animate-spin mr-2">&#x21BB;</span>
-          {t("gitignoreEditor.loading")}
-        </div>
+        <LoadingState variant="block" label={t("gitignoreEditor.loading")} />
       ) : (
         <div className="space-y-3">
           {/* Template picker */}

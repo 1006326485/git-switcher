@@ -8,6 +8,8 @@ import * as api from "../lib/tauri";
 interface ToastApi {
   success: (msg: string) => void;
   error: (msg: string) => void;
+  /** Used to explain a no-op (a batch is already running) instead of failing silently. */
+  info?: (msg: string) => void;
 }
 
 export interface BatchProgress {
@@ -16,10 +18,24 @@ export interface BatchProgress {
   failedProjects: string[];
 }
 
+export interface BatchStartPayload {
+  label: string;
+  total: number;
+}
+
 export function useBatchOps(toast: ToastApi, onRefreshAll: () => void, activeGroup: string | null) {
   const { t } = useTranslation();
   const [loading, setLoading] = useState<string | null>(null);
   const [progress, setProgress] = useState<BatchProgress>({ completed: 0, failed: 0, failedProjects: [] });
+  // Denominator for the progress badge. `list_projects`-style batches report it
+  // up front via `batch-start`; 0 means "not known yet".
+  const [total, setTotal] = useState(0);
+  /**
+   * Set when the safety timeout fires but `batch-done` never arrived. The run
+   * may genuinely still be going, so the UI keeps its pill and says so rather
+   * than pretending the batch ended.
+   */
+  const [stalled, setStalled] = useState(false);
   const callbacksRef = useRef({ toast, onRefreshAll });
   callbacksRef.current = { toast, onRefreshAll };
   const tRef = useRef(t);
@@ -34,6 +50,11 @@ export function useBatchOps(toast: ToastApi, onRefreshAll: () => void, activeGro
     let completedCount = 0;
     const failedNames: string[] = [];
 
+    const unlistenStart = listen<BatchStartPayload>("batch-start", (event) => {
+      setTotal(event.payload.total);
+      setStalled(false);
+    });
+
     const unlistenResult = listen<BatchResult>("batch-result", (event) => {
       completedCount++;
       if (!event.payload.success) {
@@ -46,6 +67,8 @@ export function useBatchOps(toast: ToastApi, onRefreshAll: () => void, activeGro
     const unlistenDone = listen<string>("batch-done", (event) => {
       const op = event.payload;
       setLoading(null);
+      setStalled(false);
+      setTotal(0);
       const tt = tRef.current;
       const labels: Record<string, string> = { fetch: tt("batchOps.fetch"), pull: tt("batchOps.pull"), push: tt("batchOps.push"), pull_behind: tt("batchOps.pullBehind"), push_ahead: tt("batchOps.pushAhead"), sync: tt("batchOps.syncAll") };
       const label = labels[op] ?? op;
@@ -61,25 +84,45 @@ export function useBatchOps(toast: ToastApi, onRefreshAll: () => void, activeGro
     });
 
     return () => {
+      unlistenStart.then((fn) => fn()).catch(() => {});
       unlistenResult.then((fn) => fn()).catch(() => {});
       unlistenDone.then((fn) => fn()).catch(() => {});
     };
   }, []);
 
-  // Safety timeout: reset loading if batch-done never fires
+  // Safety timeout: the backend may be wedged, but it may also just be slow on
+  // a bad network. Either way, silently clearing `loading` was wrong — it let
+  // the UI look idle while the run continued, and the eventual `batch-done`
+  // then reported counts for a batch the user thought had ended. Degrade
+  // instead: keep the pill, flag it as stale, and converge on `batch-done`.
   useEffect(() => {
     if (!loading) return;
     const timer = setTimeout(() => {
-      setLoading(null);
+      setStalled(true);
       callbacksRef.current.toast.error(tRef.current("batchOps.timedOut"));
     }, 120_000);
     return () => clearTimeout(timer);
   }, [loading]);
 
+  /** Lets the user clear a stalled pill without waiting for the backend. */
+  const dismissBatch = useCallback(() => {
+    setLoading(null);
+    setStalled(false);
+    setTotal(0);
+    setProgress({ completed: 0, failed: 0, failedProjects: [] });
+  }, []);
+
   // Reset progress when a new operation starts
   const startOp = useCallback((op: string) => {
-    if (loading) return false;
+    if (loading) {
+      // Previously a silent no-op, so palette / shortcut / tray entry points
+      // looked broken while a batch was already running.
+      callbacksRef.current.toast.info?.(tRef.current("batchOps.alreadyRunning"));
+      return false;
+    }
     setLoading(op);
+    setStalled(false);
+    setTotal(0);
     setProgress({ completed: 0, failed: 0, failedProjects: [] });
     return true;
   }, [loading]);
@@ -152,5 +195,19 @@ export function useBatchOps(toast: ToastApi, onRefreshAll: () => void, activeGro
     }
   }, [startOp]);
 
-  return { batchLoading: loading, batchProgress: progress, fetchAll, pullAll, pushAll, pullBehind, pushAhead, syncAll };
+  return {
+    batchLoading: loading,
+    batchProgress: progress,
+    /** Total repositories in the running batch, or 0 while unknown. */
+    batchTotal: total,
+    /** True when the safety timeout fired without a matching `batch-done`. */
+    batchStalled: stalled,
+    dismissBatch,
+    fetchAll,
+    pullAll,
+    pushAll,
+    pullBehind,
+    pushAhead,
+    syncAll,
+  };
 }

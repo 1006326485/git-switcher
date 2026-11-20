@@ -111,14 +111,14 @@ export const BisectPanel = memo(function BisectPanel({
               disabled={loading}
               className="px-3 py-1.5 rounded-lg text-xs font-medium bg-green-100 dark:bg-green-900/20 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800/50 hover:bg-green-200 dark:hover:bg-green-900/40 disabled:opacity-50"
             >
-              {loading ? "..." : t("bisect.good")}
+              {loading ? t("common.working") : t("bisect.good")}
             </button>
             <button
               onClick={handleBad}
               disabled={loading}
               className="px-3 py-1.5 rounded-lg text-xs font-medium bg-red-100 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800/50 hover:bg-red-200 dark:hover:bg-red-900/40 disabled:opacity-50"
             >
-              {loading ? "..." : t("bisect.bad")}
+              {loading ? t("common.working") : t("bisect.bad")}
             </button>
             <button
               onClick={handleReset}

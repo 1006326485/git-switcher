@@ -23,6 +23,7 @@ const { terminals, FakeTerminal } = vi.hoisted(() => {
     selectedAll = false;
     cleared = false;
     onDataHandler: ((data: string) => void) | null = null;
+    onTitleChangeHandler: ((title: string) => void) | null = null;
     constructor() {
       created.push(this);
     }
@@ -36,6 +37,14 @@ const { terminals, FakeTerminal } = vi.hoisted(() => {
     onData(handler: (data: string) => void) {
       this.onDataHandler = handler;
       return { dispose() {} };
+    }
+    onTitleChange(handler: (title: string) => void) {
+      this.onTitleChangeHandler = handler;
+      return { dispose() {} };
+    }
+    /** Stands in for the shell writing OSC 0/2. */
+    emitTitle(title: string) {
+      this.onTitleChangeHandler?.(title);
     }
     getSelection() {
       return this.selection;
@@ -85,6 +94,8 @@ vi.mock("../lib/tauri", () => ({
   terminalWrite: vi.fn(() => Promise.resolve()),
   terminalResize: vi.fn(() => Promise.resolve()),
   terminalClose: vi.fn(() => Promise.resolve()),
+  terminalReorder: vi.fn(() => Promise.resolve()),
+  terminalSetTitle: vi.fn(() => Promise.resolve()),
 }));
 
 describe("useTerminal viewport resync", () => {
@@ -207,3 +218,79 @@ describe("useTerminal canvas handles", () => {
     expect(api.terminalWrite).not.toHaveBeenCalled();
   });
 });
+
+describe("useTerminal reordering", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    terminals.length = 0;
+  });
+
+  const sessions = [
+    { id: "a", cwd: "/tmp/p", title: "zsh", projectTitle: "p", projectKey: "/tmp/p", exited: false },
+    { id: "b", cwd: "/tmp/p", title: "node", projectTitle: "p", projectKey: "/tmp/p", exited: false },
+  ];
+  const ids = (list: { id: string }[]) => list.map((s) => s.id);
+
+  it("shows the new order at once and mirrors it to the backend", async () => {
+    vi.mocked(api.terminalList).mockResolvedValue(sessions);
+    const { result } = renderHook(() => useTerminal());
+    await act(async () => {});
+    expect(ids(result.current.sessions)).toEqual(["a", "b"]);
+
+    await act(async () => {
+      result.current.reorderSessions(["b", "a"]);
+    });
+    expect(ids(result.current.sessions)).toEqual(["b", "a"]);
+    expect(api.terminalReorder).toHaveBeenCalledWith(["b", "a"]);
+  });
+
+  it("re-reads the backend order when the reorder is refused", async () => {
+    vi.mocked(api.terminalList).mockResolvedValue(sessions);
+    vi.mocked(api.terminalReorder).mockRejectedValueOnce(new Error("reorder expected 2 sessions, got 1"));
+    const { result } = renderHook(() => useTerminal());
+    await act(async () => {});
+
+    await act(async () => {
+      result.current.reorderSessions(["b", "a"]);
+    });
+    // A drop that lost a race with another window must not leave this one
+    // showing an order the backend does not have.
+    expect(api.terminalList).toHaveBeenCalledTimes(2);
+    expect(ids(result.current.sessions)).toEqual(["a", "b"]);
+  });
+});
+
+describe("useTerminal tab titles", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    terminals.length = 0;
+  });
+
+  it("forwards the shell's own title report, once per change", async () => {
+    const { result } = renderHook(() => useTerminal());
+    await act(async () => {});
+    act(() => {
+      result.current.attachTerminal("t1", document.createElement("div"));
+    });
+    const term = terminals[0];
+
+    act(() => {
+      term.emitTitle("  ~/projects/git-switcher  ");
+    });
+    expect(api.terminalSetTitle).toHaveBeenCalledWith("t1", "~/projects/git-switcher");
+
+    // A prompt re-reports the same title every time it draws: only a real
+    // change is worth a round trip, and an empty report never blanks a tab.
+    act(() => {
+      term.emitTitle("~/projects/git-switcher");
+      term.emitTitle("   ");
+    });
+    expect(api.terminalSetTitle).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      term.emitTitle("vim src/App.tsx");
+    });
+    expect(api.terminalSetTitle).toHaveBeenLastCalledWith("t1", "vim src/App.tsx");
+  });
+});
+

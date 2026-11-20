@@ -8,6 +8,7 @@ import { parseError } from "../lib/types";
 import { useContextMenu } from "../hooks/useContextMenu";
 import { ContextMenu, MenuSeparator } from "./ui/ContextMenu";
 import { MenuItem } from "./ui/primitives";
+import { LoadingState } from "./ui/loading";
 
 function formatRelativeTime(t: TFunction, timestamp: number): string {
   const now = Date.now() / 1000;
@@ -135,12 +136,7 @@ export const ReflogView = memo(function ReflogView({ path, onRefresh, onSuccess,
   }, [path, branchEntry, branchName, creatingBranch, onRefresh, onSuccess, onError, t]);
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-4">
-        <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-500 border-t-transparent" />
-        <span className="ml-2 text-xs text-gray-500">{t("reflog.loading")}</span>
-      </div>
-    );
+    return <LoadingState variant="block" label={t("reflog.loading")} />;
   }
 
   if (error) {

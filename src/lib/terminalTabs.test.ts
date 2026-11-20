@@ -3,7 +3,10 @@ import {
   applySessions,
   findCommandSession,
   latestSessionOfProject,
+  moveProjectIds,
+  moveTabIds,
   nextActiveInProject,
+  orderSessions,
   nextProjectKey,
   preferredSessionOfProject,
   projectKeys,
@@ -218,5 +221,54 @@ describe("command session lookup", () => {
     const first = cmd("a1", "pa", "yarn run serve:watch");
     const latest = { ...cmd("a2", "pa", "yarn run serve:watch"), exited: true };
     expect(findCommandSession([first, latest], "pa", "yarn run serve:watch")).toBe(latest);
+  });
+});
+
+describe("drag reordering", () => {
+  // Sessions are not stored contiguously per project: a project's tabs may sit
+  // either side of another project's tab, and only the flat order is shared.
+  const interleaved = () => [
+    session("a1", "pa"),
+    session("b1", "pb"),
+    session("a2", "pa"),
+    session("c1", "pc"),
+  ];
+
+  it("moves a tab onto the slot it was dropped on", () => {
+    expect(moveTabIds(interleaved(), "pa", "a2", "a1")).toEqual(["a2", "b1", "a1", "c1"]);
+  });
+
+  it("leaves other projects' slots untouched when a tab moves", () => {
+    const moved = moveTabIds(interleaved(), "pa", "a1", "a2");
+    expect(moved).toEqual(["a2", "b1", "a1", "c1"]);
+    // Same slots for the other projects, same membership for the moved one.
+    expect(moved[1]).toBe("b1");
+    expect(moved[3]).toBe("c1");
+  });
+
+  it("ignores a drop that is not a move", () => {
+    expect(moveTabIds(interleaved(), "pa", "a1", "a1")).toEqual(["a1", "b1", "a2", "c1"]);
+    expect(moveTabIds(interleaved(), "pa", "a1", "missing")).toEqual(["a1", "b1", "a2", "c1"]);
+  });
+
+  it("moves a whole project block past its neighbours", () => {
+    expect(moveProjectIds(interleaved(), "pa", "pc")).toEqual(["b1", "c1", "a1", "a2"]);
+    expect(moveProjectIds(interleaved(), "pc", "pa")).toEqual(["c1", "a1", "a2", "b1"]);
+  });
+
+  it("writes blocks back contiguously so grouping follows the new order", () => {
+    const state = tabs(...orderSessions(interleaved(), moveProjectIds(interleaved(), "pa", "pc")));
+    expect(projectKeys(state)).toEqual(["pb", "pc", "pa"]);
+    expect(sessionsOfProject(state, "pa").map((s) => s.id)).toEqual(["a1", "a2"]);
+  });
+
+  it("keeps a session the caller did not know about", () => {
+    // A tab opened by another window between drag start and drop.
+    expect(orderSessions(interleaved(), ["c1", "a2", "unknown"]).map((s) => s.id)).toEqual([
+      "c1",
+      "a2",
+      "a1",
+      "b1",
+    ]);
   });
 });

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, memo } from "react";
 import { useTranslation } from "react-i18next";
 import * as api from "../lib/tauri";
 import type { CustomCommand, ProjectDetail } from "../lib/types";
+import { LoadingState } from "./ui/loading";
 
 interface CustomCommandsManagerProps {
   onError?: (msg: string) => void;
@@ -136,15 +137,13 @@ export const CustomCommandsManager = memo(function CustomCommandsManager({
           disabled={adding || !name.trim() || !command.trim()}
           className="h-8 px-3 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-sm font-medium transition-colors disabled:opacity-50 shrink-0"
         >
-          {adding ? "..." : t("customCmd.add")}
+          {adding ? t("common.working") : t("customCmd.add")}
         </button>
       </div>
 
       {/* Commands list */}
       {loading ? (
-        <div className="flex items-center justify-center py-4">
-          <div className="animate-spin rounded-full h-4 w-4 border-2 border-blue-500 border-t-transparent" />
-        </div>
+        <LoadingState variant="block" label={t("customCmd.loading")} />
       ) : commands.length === 0 ? (
         <p className="text-xs text-gray-400 dark:text-gray-500 text-center py-4">
           {t("customCmd.empty")}

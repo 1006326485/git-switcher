@@ -5,9 +5,28 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DraggableAttributes,
+  type DraggableSyntheticListeners,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  horizontalListSortingStrategy,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
 import * as api from "../lib/tauri";
 import {
   parseError,
@@ -19,6 +38,8 @@ import { useTerminal } from "../hooks/useTerminal";
 import { useTheme } from "../hooks/useTheme";
 import {
   findCommandSession,
+  moveProjectIds,
+  moveTabIds,
   preferredSessionOfProject,
   projectKeys,
   sessionsOfProject,
@@ -35,7 +56,11 @@ import { CommandMenu } from "./TerminalCommandMenu";
 import { SelectDropdown } from "./ui/SelectDropdown";
 import { formatHotkey } from "../lib/hotkey";
 import { CloseIcon, PlusIcon, TerminalIcon } from "./ui/icons";
+import { Skeleton, SkeletonGroup, Spinner } from "./ui/loading";
 import { ContextMenu, MenuSeparator } from "./ui/ContextMenu";
+import { TabLabel } from "./ui/TabLabel";
+import { HoverTooltip } from "./ui/HoverTooltip";
+import { useHorizontalScroll } from "../hooks/useScrollEdge";
 import { useContextMenu } from "../hooks/useContextMenu";
 import { isShortcutCapturing } from "../lib/shortcutCapture";
 import { isDirtyChord } from "../lib/heldKeys";
@@ -90,6 +115,82 @@ export interface WorkspaceLaunch {
   token: number;
 }
 
+interface SortableRowRender {
+  setNodeRef: (node: HTMLElement | null) => void;
+  style: CSSProperties;
+  attributes: DraggableAttributes;
+  listeners: DraggableSyntheticListeners;
+  isDragging: boolean;
+  /** True from the moment a drag starts until the click that follows it. */
+  dragged: () => boolean;
+}
+
+/**
+ * One row of a dnd-kit sortable list.
+ *
+ * The transform is pinned to the list's own axis: a tab may only travel along
+ * its strip (the bar clips vertically, so a free 2D drag would slip under the
+ * panel edge) and a sidebar group may only travel down its column. The row
+ * under the pointer follows 1:1 with no transition — a spring there reads as
+ * lag — while the rows it displaces settle on the app's damped spring.
+ */
+function SortableRow({
+  id,
+  axis,
+  children,
+}: {
+  id: string;
+  axis: "x" | "y";
+  children: (row: SortableRowRender) => ReactNode;
+}) {
+  const { setNodeRef, attributes, listeners, transform, isDragging } = useSortable({ id });
+  const dragged = useRef(false);
+
+  useEffect(() => {
+    if (isDragging) {
+      dragged.current = true;
+      return;
+    }
+    if (!dragged.current) return;
+    // The click that ends a gesture arrives just after the drop, before this
+    // timer: it must not also select the row (or close the tab) it moved.
+    const timer = window.setTimeout(() => {
+      dragged.current = false;
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [isDragging]);
+
+  const style: CSSProperties = {
+    transform: transform
+      ? axis === "x"
+        ? `translate3d(${transform.x}px, 0, 0)`
+        : `translate3d(0, ${transform.y}px, 0)`
+      : undefined,
+    // Only a displaced row (or the dragged one) needs an inline transition:
+    // idle rows keep the class's own `transition-all` for hover and colour.
+    transition: isDragging
+      ? "none"
+      : transform
+        ? "transform 260ms var(--ease-spring), translate 200ms var(--ease-spring), scale 200ms var(--ease-spring)"
+        : undefined,
+    // Lift the row over its neighbours without leaving the scroll container.
+    zIndex: isDragging ? 5 : undefined,
+  };
+
+  return (
+    <>
+      {children({
+        setNodeRef,
+        style,
+        attributes,
+        listeners,
+        isDragging,
+        dragged: () => dragged.current,
+      })}
+    </>
+  );
+}
+
 interface TerminalWorkspaceProps {
   open: boolean;
   initial: TerminalLaunchTarget | null;
@@ -112,6 +213,12 @@ interface TerminalCanvasProps {
   active: boolean;
   /** Replay the pane entrance on the wrapper (xterm node itself never animates). */
   animateIn?: boolean;
+  /**
+   * The pty has printed something (or already exited). Until then the canvas is
+   * a blank rectangle — visually identical to a hung shell — so we cover it.
+   */
+  ready: boolean;
+  startingLabel: string;
   onAttach: (id: string, container: HTMLElement) => void;
   onDetach: (id: string) => void;
   onFit: (id: string) => void;
@@ -122,12 +229,36 @@ const TerminalCanvas = memo(function TerminalCanvas({
   id,
   active,
   animateIn,
+  ready,
+  startingLabel,
   onAttach,
   onDetach,
   onFit,
   onContextMenu,
 }: TerminalCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  // A cover that never lifts is worse than a blank canvas: `sleep 60` prints
+  // nothing for a minute, and the user must not be left staring at "Starting
+  // shell…" (or typing under an opaque layer). Give up after a few seconds.
+  const [gaveUp, setGaveUp] = useState(false);
+  const settled = ready || gaveUp;
+  useEffect(() => {
+    if (settled) return;
+    const timer = window.setTimeout(() => setGaveUp(true), 3000);
+    return () => window.clearTimeout(timer);
+  }, [settled]);
+
+  // Keep the overlay mounted for one fade after the first output arrives, so
+  // the prompt does not appear through a hard cut.
+  const [overlayVisible, setOverlayVisible] = useState(!settled);
+  useEffect(() => {
+    if (!settled) {
+      setOverlayVisible(true);
+      return;
+    }
+    const timer = window.setTimeout(() => setOverlayVisible(false), 200);
+    return () => window.clearTimeout(timer);
+  }, [settled]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -147,12 +278,83 @@ const TerminalCanvas = memo(function TerminalCanvas({
   return (
     /* Inset within the padded pane wrapper: the canvas measures this box, so
        xterm's cols/rows already account for the panel's rounded corners. */
+    <>
+      <div
+        ref={containerRef}
+        data-testid={`terminal-canvas-${id}`}
+        onContextMenu={onContextMenu}
+        className={`absolute inset-2 ${active ? "" : "hidden"}${animateIn && active ? " term-pane-in" : ""}`}
+      />
+      {overlayVisible && (
+        /* Decorative cover, not a live region: the pane itself steals focus and
+           xterm announces its own buffer. */
+        <div
+          aria-hidden="true"
+          data-testid={`terminal-starting-${id}`}
+          /* The cover is painted in xterm's own background (#1f2329 dark, #fff
+             light) so the hand-off to the real buffer has no colour jump. */
+          className={`pointer-events-none absolute inset-2 flex items-center justify-center gap-2 bg-white text-xs text-gray-500 transition-opacity duration-200 dark:bg-[#1f2329] dark:text-gray-400 ${settled ? "opacity-0" : "opacity-100"}${active ? "" : " hidden"}`}
+        >
+          <Spinner size="sm" />
+          <span>{startingLabel}</span>
+        </div>
+      )}
+    </>
+  );
+});
+
+/**
+ * The session ids in the order their panes were first mounted.
+ *
+ * Panes are absolutely positioned and only the active one is visible, so their
+ * DOM order means nothing to the user — but React reorders keyed siblings by
+ * removing and re-inserting them, and moving an xterm container leaves the
+ * terminal painted blank until the next output (the next prompt) repaints it.
+ * Dragging a tab or a project group reorders `sessions`, so panes keep this
+ * stable order and only the tab strip and sidebar rows move.
+ */
+function usePaneOrder(ids: string[]): string[] {
+  const orderRef = useRef<string[]>([]);
+  const previous = orderRef.current;
+  const next = previous.filter((id) => ids.includes(id));
+  for (const id of ids) {
+    if (!next.includes(id)) next.push(id);
+  }
+  const unchanged =
+    next.length === previous.length && next.every((id, index) => id === previous[index]);
+  orderRef.current = next;
+  return unchanged ? previous : next;
+}
+
+/**
+ * Placeholder for the window between mount and the first `terminal_list`
+ * reply. Before this existed the workspace rendered `TerminalBlankSlate`
+ * during that window, i.e. it told the user "No terminals open" and offered to
+ * create one, then replaced that with their actual tabs a moment later.
+ */
+const TerminalRestoringSkeleton = memo(function TerminalRestoringSkeleton({
+  label,
+}: {
+  label: string;
+}) {
+  return (
     <div
-      ref={containerRef}
-      data-testid={`terminal-canvas-${id}`}
-      onContextMenu={onContextMenu}
-      className={`absolute inset-2 ${active ? "" : "hidden"}${animateIn && active ? " term-pane-in" : ""}`}
-    />
+      className="absolute inset-0 flex flex-col gap-3 p-4"
+      aria-busy="true"
+      data-testid="terminal-restoring-skeleton"
+    >
+      <SkeletonGroup className="flex items-center gap-2">
+        <Skeleton className="h-6 w-24 rounded-md" />
+        <Skeleton className="h-6 w-20 rounded-md" />
+        <Skeleton className="h-6 w-16 rounded-md" />
+      </SkeletonGroup>
+      <SkeletonGroup className="flex-1 space-y-2 rounded-lg border border-[var(--border-color)] p-3">
+        <Skeleton className="h-3 w-2/5" />
+        <Skeleton className="h-3 w-1/3" />
+        <Skeleton className="h-3 w-1/2" />
+      </SkeletonGroup>
+      <span className="sr-only">{label}</span>
+    </div>
   );
 });
 
@@ -169,12 +371,21 @@ const TerminalBlankSlate = memo(function TerminalBlankSlate({
   projects,
   fallbackTitle,
   opening,
+  loading,
+  loadFailed,
+  onRetry,
   onNew,
   onQuickRun,
 }: {
   projects: { cwd: string; title: string }[];
   fallbackTitle: string;
   opening: boolean;
+  /** The project list itself has not arrived yet — `projects` is empty because
+   * nothing was read, not because there is nothing to show. Rendering the
+   * "New Terminal" fallback here told the user their projects were gone. */
+  loading: boolean;
+  loadFailed: boolean;
+  onRetry: () => void;
   onNew: (cwd: string, projectTitle: string) => void;
   onQuickRun: (cwd: string, projectTitle: string, item: PickerItem) => void;
 }) {
@@ -221,14 +432,53 @@ const TerminalBlankSlate = memo(function TerminalBlankSlate({
         ◧
       </span>
       <span className="text-sm text-gray-400">{t("terminal.noTerminals")}</span>
-      {shown.length === 0 ? (
+      {loading ? (
+        <div
+          className="w-full max-w-2xl"
+          data-testid="terminal-blank-projects-skeleton"
+        >
+          <SkeletonGroup className="grid grid-cols-1 gap-2.5 w-full sm:grid-cols-3">
+            {[0, 1, 2].map((i) => (
+              <div
+                key={i}
+                className="rounded-2xl border border-[var(--border-color)] bg-[var(--surface-1)] p-3.5 flex flex-col gap-2.5"
+              >
+                <div className="flex items-center gap-2">
+                  <Skeleton className="w-7 h-7 shrink-0 rounded-lg" />
+                  <div className="flex-1 space-y-1.5">
+                    <Skeleton className="h-2.5 w-20" />
+                    <Skeleton className="h-2 w-28" />
+                  </div>
+                </div>
+                <Skeleton className="h-6 w-full rounded-lg" />
+                <Skeleton className="h-6 w-full rounded-lg" />
+                <Skeleton className="h-7 w-full rounded-lg" />
+              </div>
+            ))}
+          </SkeletonGroup>
+        </div>
+      ) : loadFailed && shown.length === 0 ? (
+        <div className="flex flex-col items-center gap-2">
+          <span className="text-xs text-red-500">{t("terminal.projectsLoadFailed")}</span>
+          <button
+            type="button"
+            onClick={onRetry}
+            className="press px-3 py-1.5 text-xs rounded-md border border-[var(--border-color)] text-gray-700 dark:text-gray-200 hover:bg-[var(--surface-2)] transition-colors"
+          >
+            {t("common.retry")}
+          </button>
+        </div>
+      ) : shown.length === 0 ? (
         <button
           type="button"
           onClick={() => onNew("", fallbackTitle)}
           disabled={opening}
-          className="press px-3 py-1.5 text-xs rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white transition-colors disabled:opacity-50"
+          className="press inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white transition-colors disabled:opacity-50"
         >
-          {t("terminal.newTerminalButton")}
+          {/* Clicking used to only grey the button out: no spinner, no text
+              change, nothing to distinguish "opening" from "did nothing". */}
+          {opening && <Spinner size="xs" />}
+          {opening ? t("terminal.startingShell") : t("terminal.newTerminalButton")}
         </button>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 w-full max-w-2xl">
@@ -256,7 +506,14 @@ const TerminalBlankSlate = memo(function TerminalBlankSlate({
                     </span>
                   </span>
                 </div>
-                {cmds.length > 0 && (
+                {items[p.cwd] === undefined ? (
+                  // Commands load per card after mount; rendering nothing made
+                  // "still fetching" look like "this project has none".
+                  <div className="flex flex-col gap-1.5" aria-hidden="true" data-testid="terminal-blank-cmd-skeleton">
+                    <Skeleton className="h-[26px] w-full rounded-lg" />
+                    <Skeleton className="h-[26px] w-3/4 rounded-lg" />
+                  </div>
+                ) : cmds.length > 0 && (
                   <div className="flex flex-col gap-1.5">
                     {cmds.map((item) => (
                       <button
@@ -276,9 +533,10 @@ const TerminalBlankSlate = memo(function TerminalBlankSlate({
                   type="button"
                   onClick={() => onNew(p.cwd, p.title)}
                   disabled={opening}
-                  className="press mt-auto w-full text-[11.5px] font-semibold rounded-lg px-2.5 py-1.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white transition-colors disabled:opacity-50"
+                  className="press mt-auto w-full inline-flex items-center justify-center gap-1.5 text-[11.5px] font-semibold rounded-lg px-2.5 py-1.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white transition-colors disabled:opacity-50"
                 >
-                  {t("terminal.newTerminalButton")}
+                  {opening && <Spinner size="xs" />}
+                  {opening ? t("terminal.startingShell") : t("terminal.newTerminalButton")}
                 </button>
               </div>
             );
@@ -310,6 +568,7 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
     restartTerminal,
     closeAllTerminals,
     selectTerminal,
+    reorderSessions,
     setActiveProject,
     selectAdjacentProject,
     selectTerminalByIndex,
@@ -324,6 +583,10 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
     sendInput,
     setTerminalDark,
     activeByProject,
+    bootstrapping,
+    bootstrapError,
+    retrySessions,
+    isSessionReady,
   } = useTerminal();
   const { t } = useTranslation();
   const fallbackTitle = t("terminal.title");
@@ -383,6 +646,15 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
   const [saveOpen, setSaveOpen] = useState(false);
   const [saveName, setSaveName] = useState("");
   const [projects, setProjects] = useState<ProjectDetail[]>([]);
+  // `projects === []` is ambiguous: it means "nothing read yet" on the very
+  // first open and "you genuinely have no projects" afterwards. These two flags
+  // separate them so the empty canvas never lies about an in-flight read.
+  const [projectsLoaded, setProjectsLoaded] = useState(false);
+  const [projectsError, setProjectsError] = useState(false);
+  const [projectsLoadTick, setProjectsLoadTick] = useState(0);
+  // Same split for the saved-workspaces menu: an empty list while the read is
+  // in flight claimed "No workspaces saved".
+  const [presetsLoading, setPresetsLoading] = useState(true);
   const [projectFilter, setProjectFilter] = useState("");
   const [menuSession, setMenuSession] = useState<TerminalSessionState | null>(null);
   const [menuProject, setMenuProject] = useState<{ key: string; cwd: string; title: string } | null>(null);
@@ -404,6 +676,21 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
   const quickLoading = useRef<Set<string>>(new Set());
 
   const tabbarRef = useRef<HTMLDivElement | null>(null);
+  // Tabs keep a fixed width, so a full strip scrolls instead of squeezing
+  // titles. The scrollbar is hidden (it would eat 8px of a 32px bar), so the
+  // edge fades + arrows below are the only affordance that more tabs exist.
+  const tabStrip = useHorizontalScroll(tabbarRef);
+  // Hovering a tab shows its full title in a tooltip: a fixed width truncates
+  // from the middle, and the reveal belongs to the app, not to a native
+  // tooltip (which would double up with the middle-click hint it carries).
+  const [tabHoverId, setTabHoverId] = useState<string | null>(null);
+  // A drag must not leave a tooltip behind it: pointerenter keeps firing on the
+  // tabs the dragged row passes over, so hover is suspended while one runs.
+  const [tabDragActive, setTabDragActive] = useState(false);
+  const tabHoverRef = useRef<HTMLElement | null>(null);
+  // Looked up per render, not captured on hover: a shell that renames itself
+  // while the pointer rests on the tab should show the new name.
+  const hoveredTab = tabHoverId ? (sessions.find((s) => s.id === tabHoverId) ?? null) : null;
   // Newly opened tabs pop in once (jelly tabIn). Render happens before the
   // effect that records the new id, so the effect bumps a tick to re-render
   // with the class; render consumes the id so a later re-render (e.g. title
@@ -451,6 +738,10 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
   const state: TerminalTabsState = { sessions, activeId, activeProject, activeByProject };
   const keys = projectKeys(state);
   const activeGroup = activeProject != null ? sessionsOfProject(state, activeProject) : [];
+  const sessionIds = useMemo(() => sessions.map((s) => s.id), [sessions]);
+  const sessionsById = useMemo(() => new Map(sessions.map((s) => [s.id, s])), [sessions]);
+  // Panes render in mount order, never in tab order — see usePaneOrder.
+  const paneIds = usePaneOrder(sessionIds);
   const activeGroupTitle = activeGroup[0]?.projectTitle || fallbackTitle;
   const isMac = useMemo(() => detectMac(), []);
   // Badge of the tab bar's "+": the effective (possibly rebound) new-tab
@@ -465,6 +756,36 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
   const activeGroupDetail = useMemo(
     () => projects.find((p) => p.project.path === activeGroupCwd) ?? null,
     [projects, activeGroupCwd]
+  );
+
+  // 6px of travel before a drag takes over, so a click still selects a tab or
+  // a group and the row only starts moving once the pointer means it. Keyboard
+  // drags follow the sortable geometry, so Space/arrows reorder without a mouse.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+
+  // A drop lands the tab on the slot it was over — dnd-kit reports the two ids,
+  // the pure helpers turn that into the full session order the backend owns.
+  const handleTabDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (!over || active.id === over.id || activeProject == null) return;
+      reorderSessions(moveTabIds(sessions, activeProject, String(active.id), String(over.id)));
+    },
+    [activeProject, reorderSessions, sessions]
+  );
+
+  // Group drops move the whole block of tabs, so a group keeps its internal
+  // tab order and its tabs stay adjacent in the flat list the sidebar reads.
+  const handleGroupDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+      reorderSessions(moveProjectIds(sessions, String(active.id), String(over.id)));
+    },
+    [reorderSessions, sessions]
   );
 
   useEffect(() => {
@@ -516,8 +837,14 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
   }, [activeGroup, activeGroupTitle, fallbackTitle, handleNewTerminal]);
 
   // Slide the indicator to the active tab after paint, and keep it in view.
-  // Placed after activeGroup is declared (used only for the dep count).
-  const activeGroupLength = activeGroup.length;
+  // Keyed on the tab order as well as the selection: a drag can move the
+  // indicator's tab (or slide it) without changing which tab is active.
+  const activeTabIds = activeGroup.map((s) => s.id);
+  const activeGroupOrder = activeTabIds.join("|");
+  // Stable across renders (the strip's own state object is not), so the
+  // indicator effect can re-measure the overflow chrome without re-running on
+  // every render.
+  const remeasureTabStrip = tabStrip.remeasure;
   useEffect(() => {
     const bar = tabbarRef.current;
     if (!bar || activeId == null) return;
@@ -529,9 +856,12 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
         return prev.left === next.left && prev.width === next.width ? prev : next;
       });
       el.scrollIntoView({ block: "nearest", inline: "nearest" });
+      // Tabs may have been added or closed, which changes scrollWidth without
+      // resizing the bar — the fades and arrows have to hear about it.
+      remeasureTabStrip();
     });
     return () => cancelAnimationFrame(raf);
-  }, [activeId, activeGroupLength]);
+  }, [activeId, activeGroupOrder, remeasureTabStrip]);
 
   useEffect(() => {
     if (!open || !initial || consumedInitial.current === initial) return;
@@ -743,19 +1073,37 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
   }, [open, activeId, closeTab, selectAdjacentProject, selectTerminalByIndex, selectAdjacentTerminal, termBindings, focusTerminal, clearScreen, newTerminalInActiveProject]);
 
   const loadPresets = useCallback(() => {
+    setPresetsLoading(true);
     api
       .listRunPresets()
       .then(setPresets)
-      .catch(() => setPresets([]));
+      .catch(() => setPresets([]))
+      .finally(() => setPresetsLoading(false));
   }, []);
 
   useEffect(() => {
     if (!open) return;
+    let cancelled = false;
+    setProjectsError(false);
     api
       .listProjects()
-      .then(setProjects)
-      .catch(() => setProjects([]));
-  }, [open]);
+      .then((list) => {
+        if (cancelled) return;
+        setProjects(list);
+        setProjectsLoaded(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        // Keep whatever we already had: a failed refresh must not wipe a list
+        // the user is looking at. Only a cold failure is surfaced.
+        setProjectsError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, projectsLoadTick]);
+
+  const projectsPending = !projectsLoaded && !projectsError;
 
   const projectOptions = useMemo(
     () => [
@@ -1041,6 +1389,7 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
             <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
               {t("terminal.projects")}
             </span>
+
             {keys.length > 1 && (
               <KbdBadge label={t("terminal.switchGroupBadge")} size="sm" title={t("terminal.switchGroup")} />
             )}
@@ -1054,6 +1403,8 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
                 disabled={opening}
                 size="sm"
                 openSignal={newMenuSignal}
+                loading={projectsPending}
+                loadingLabel={t("terminal.projectsLoading")}
               />
             </div>
           </div>
@@ -1070,74 +1421,105 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
             </div>
           )}
           <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-2 space-y-0.5">
-            {visibleKeys.map((key) => {
-              const group = sessionsOfProject(state, key);
-              const title = group[0]?.projectTitle || fallbackTitle;
-              const cwd = group[0]?.cwd || "";
-              const hasLive = group.some((s) => !s.exited);
-              const isActive = key === activeProject;
-              const items = quickItems[cwd];
-              return (
-                <div
-                  key={key}
-                  onClick={() => setActiveProject(key)}
-                  onContextMenu={(e) => handleProjectContextMenu(e, key)}
-                  onMouseEnter={() => preloadQuickItems(cwd)}
-                  onFocus={() => preloadQuickItems(cwd)}
-                  title={cwd || title}
-                  className={`group relative flex items-center gap-1.5 rounded-md px-2 py-1.5 cursor-pointer transition-all duration-200 hover:translate-x-0.5 active:scale-[0.98] ${
-                    isActive
-                      ? "bg-[var(--surface-2)] text-gray-900 dark:text-gray-100 font-semibold"
-                      : "hover:bg-gray-100 dark:hover:bg-gray-800"
-                  }`}
-                >
-                  {isActive && (
-                    <span
-                      aria-hidden="true"
-                      className="term-proj-rail absolute left-[-8px] top-[7px] bottom-[7px] w-[3px] rounded bg-[var(--accent)]"
-                    />
-                  )}
-                  <span
-                    aria-hidden="true"
-                    title={hasLive ? undefined : t("terminal.exited")}
-                    className={`w-[7px] h-[7px] rounded-full shrink-0 ${
-                      hasLive ? "bg-emerald-400 term-dot-live" : "bg-red-500"
-                    }`}
-                  />
-                  <span className="flex-1 truncate text-xs text-gray-700 dark:text-gray-200">
-                    {title}
-                  </span>
-                  {/* Quick-run ▶: fixed 20px slot, visibility-toggled so the
-                      count pill never shifts when it appears (preview .run).
-                      Opens the same searchable listbox the rest of the app
-                      uses. Hidden once loaded and confirmed empty — no
-                      shortcuts, no button. Stays visible while loading (items
-                      undefined) so hover-preload can still resolve. */}
-                  <CommandMenu
-                    ariaLabel={t("terminal.quickRunAria", { title })}
-                    title={t("terminal.quickRun")}
-                    items={items ?? []}
-                    loading={items === undefined}
-                    onLoad={() => preloadQuickItems(cwd)}
-                    onSelect={(item) => handleQuickRun(cwd, title, item)}
-                    loadingLabel={t("terminal.quickRunLoading")}
-                    emptyLabel={t("terminal.quickRunEmpty")}
-                    noMatchLabel={t("terminal.quickRunNoMatch")}
-                    hidden={items !== undefined && items.length === 0}
-                    hoverOnly
-                    className="shrink-0 w-5 h-5 inline-flex items-center justify-center"
-                    triggerClassName="press w-5 h-5 inline-flex items-center justify-center rounded text-gray-400 hover:text-emerald-500 hover:bg-gray-200 dark:hover:bg-gray-700 transition-all active:scale-90"
-                  />
-                  <span className={`text-[10px] tabular-nums shrink-0 min-w-6 px-[7px] py-px rounded-full text-center ${
-                    isActive
-                      ? "bg-[var(--accent)] text-white"
-                      : "text-gray-400 bg-[var(--surface-2)]"
-                  }`}>
-                    {group.length}
-                  </span>
-                </div>
-              );
-            })}
+            {/* Groups reorder by drag as whole blocks: a group keeps its tabs
+                in order and simply moves past its neighbours. */}
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleGroupDragEnd}
+            >
+              <SortableContext items={visibleKeys} strategy={verticalListSortingStrategy}>
+                {visibleKeys.map((key) => {
+                  const group = sessionsOfProject(state, key);
+                  const title = group[0]?.projectTitle || fallbackTitle;
+                  const cwd = group[0]?.cwd || "";
+                  const hasLive = group.some((s) => !s.exited);
+                  const isActive = key === activeProject;
+                  const items = quickItems[cwd];
+                  return (
+                    <SortableRow key={key} id={key} axis="y">
+                      {({ setNodeRef, style, attributes, listeners, isDragging, dragged }) => (
+                        <div
+                          ref={setNodeRef}
+                          style={style}
+                          data-project-key={key}
+                          data-dragging={isDragging ? "" : undefined}
+                          {...listeners}
+                          onClick={() => {
+                            if (dragged()) return;
+                            setActiveProject(key);
+                          }}
+                          onContextMenu={(e) => handleProjectContextMenu(e, key)}
+                          onMouseEnter={() => preloadQuickItems(cwd)}
+                          onFocus={() => preloadQuickItems(cwd)}
+                          title={cwd || title}
+                          className={`group relative flex items-center gap-1.5 rounded-md px-2 py-1.5 cursor-grab active:cursor-grabbing transition-all duration-200 hover:translate-x-0.5 active:scale-[0.98] ${
+                            isDragging
+                              ? "bg-[var(--surface-1)] shadow-lg ring-1 ring-[var(--accent)]/30"
+                              : isActive
+                                ? "bg-[var(--surface-2)] text-gray-900 dark:text-gray-100 font-semibold"
+                                : "hover:bg-gray-100 dark:hover:bg-gray-800"
+                          }`}
+                        >
+                          {isActive && (
+                            <span
+                              aria-hidden="true"
+                              className="term-proj-rail absolute left-[-8px] top-[7px] bottom-[7px] w-[3px] rounded bg-[var(--accent)]"
+                            />
+                          )}
+                          <span
+                            aria-hidden="true"
+                            title={hasLive ? undefined : t("terminal.exited")}
+                            className={`w-[7px] h-[7px] rounded-full shrink-0 ${
+                              hasLive ? "bg-emerald-400 term-dot-live" : "bg-red-500"
+                            }`}
+                          />
+                          <button
+                            type="button"
+                            {...attributes}
+                            onClick={() => {
+                              if (dragged()) return;
+                              setActiveProject(key);
+                            }}
+                            className="flex-1 min-w-0 truncate text-left text-xs text-gray-700 dark:text-gray-200"
+                          >
+                            {title}
+                          </button>
+                          {/* Quick-run ▶: fixed 20px slot, visibility-toggled so the
+                              count pill never shifts when it appears (preview .run).
+                              Opens the same searchable listbox the rest of the app
+                              uses. Hidden once loaded and confirmed empty — no
+                              shortcuts, no button. Stays visible while loading (items
+                              undefined) so hover-preload can still resolve. */}
+                          <CommandMenu
+                            ariaLabel={t("terminal.quickRunAria", { title })}
+                            title={t("terminal.quickRun")}
+                            items={items ?? []}
+                            loading={items === undefined}
+                            onLoad={() => preloadQuickItems(cwd)}
+                            onSelect={(item) => handleQuickRun(cwd, title, item)}
+                            loadingLabel={t("terminal.quickRunLoading")}
+                            emptyLabel={t("terminal.quickRunEmpty")}
+                            noMatchLabel={t("terminal.quickRunNoMatch")}
+                            hidden={items !== undefined && items.length === 0}
+                            hoverOnly
+                            className="shrink-0 w-5 h-5 inline-flex items-center justify-center"
+                            triggerClassName="press w-5 h-5 inline-flex items-center justify-center rounded text-gray-400 hover:text-emerald-500 hover:bg-gray-200 dark:hover:bg-gray-700 transition-all active:scale-90"
+                          />
+                          <span className={`text-[10px] tabular-nums shrink-0 min-w-6 px-[7px] py-px rounded-full text-center ${
+                            isActive
+                              ? "bg-[var(--accent)] text-white"
+                              : "text-gray-400 bg-[var(--surface-2)]"
+                          }`}>
+                            {group.length}
+                          </span>
+                        </div>
+                      )}
+                    </SortableRow>
+                  );
+                })}
+              </SortableContext>
+            </DndContext>
           </div>
           <div className="p-2 border-t border-[var(--border-color)] space-y-0.5">
             <DropdownMenu
@@ -1149,8 +1531,30 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
                   {t("terminal.workspaces")}
                 </button>
               }
+              loading={presetsLoading}
+              loadingLabel={t("terminal.workspacesLoading")}
+              loadingSkeleton={
+                /* Mirrors a saved workspace row: name line, `terminalsCount`
+                   description under it, and the hover-only delete button's
+                   slot on the right. */
+                <SkeletonGroup>
+                  {["58%", "46%"].map((width) => (
+                    <div key={width} className="px-3 py-2 flex items-center gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex h-5 items-center">
+                          <Skeleton className="h-4 rounded-sm" style={{ width }} />
+                        </div>
+                        <div className="mt-0.5 flex h-4 items-center">
+                          <Skeleton className="h-3 w-[34%] rounded-sm" />
+                        </div>
+                      </div>
+                      <Skeleton className="mr-2 h-3.5 w-3.5 shrink-0 rounded" />
+                    </div>
+                  ))}
+                </SkeletonGroup>
+              }
             >
-              {presets.length === 0 && (
+              {presets.length === 0 && !presetsLoading && (
                 <div className="px-3 py-2 text-xs text-gray-400">{t("terminal.noWorkspaces")}</div>
               )}
               {presets.map((p) => (
@@ -1201,78 +1605,176 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
         {/* Terminals for the active project */}
         <div className="flex-1 min-w-0 flex flex-col gap-[var(--panel-gap)]">
           {activeGroup.length > 0 && (
-          <div ref={tabbarRef} className="app-panel relative px-2 py-1.5 flex items-center gap-1.5 shrink-0 overflow-x-auto">
-            {activeGroup.length > 0 && (
-              <span
-                aria-hidden="true"
-                className="term-tab-indicator pointer-events-none absolute left-0 top-1.5 bottom-1.5 rounded-md bg-[var(--surface-2)] shadow-[inset_0_0_0_1px_var(--border-color)]"
-                style={{ transform: `translateX(${indicator.left}px)`, width: indicator.width }}
-              />
-            )}
-            {activeGroup.map((s) => (
+          <div className="app-panel relative px-2 py-1.5 flex items-center gap-1.5 shrink-0">
+            {/* The strip scrolls, the chrome does not. Tabs hold a fixed width
+                (--term-tab-width) so one more tab never squeezes a title into
+                unreadability; past the panel's width the strip scrolls, and
+                the fades + arrows below are its only scrollbar. */}
+            <div className="relative flex-1 min-w-0">
               <div
-                key={s.id}
-                data-tab-id={s.id}
-                onClick={() => {
-                  if (s.id === activeId) {
-                    setTabSquish((prev) => ({ id: s.id, tick: (prev?.tick ?? 0) + 1 }));
-                  }
-                  selectTerminal(s.id);
-                }}
-                onContextMenu={(e) => handleTabContextMenu(e, s)}
-                onMouseDown={(e) => {
-                  if (e.button === 1) e.preventDefault();
-                }}
-                onAuxClick={(e) => {
-                  if (e.button === 1) closeTab(s.id);
-                }}
-                title={t("terminal.middleClickClose", { path: s.cwd || s.title })}
-                className={`group relative z-[1] flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs shrink-0 min-w-0 max-w-[12rem] cursor-pointer transition-all duration-200 hover:-translate-y-px active:scale-[0.98] ${
-                  newTabIds.current.delete(s.id) ? "term-tab-new" : ""
-                }${
-                  tabSquish && tabSquish.id === s.id ? ` term-tab-squish tab-squish-${tabSquish.tick}` : ""
-                } ${
-                  s.id === activeId
-                    ? "text-gray-900 dark:text-gray-100 font-medium"
-                    : "text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
-                }`}
+                ref={tabbarRef}
+                data-testid="terminal-tab-strip"
+                className="no-scrollbar relative flex items-center gap-1.5 overflow-x-auto"
               >
-                <button
-                  type="button"
-                  onClick={() => selectTerminal(s.id)}
-                  className="flex items-center gap-1.5 max-w-[10rem] min-w-0 flex-1"
+                <span
+                  aria-hidden="true"
+                  className="term-tab-indicator pointer-events-none absolute left-0 inset-y-0 rounded-md bg-[var(--surface-2)] shadow-[inset_0_0_0_1px_var(--border-color)]"
+                  style={{ transform: `translateX(${indicator.left}px)`, width: indicator.width }}
+                />
+                {/* Tabs reorder by drag: the row follows the pointer along the
+                    strip, the drop lands it on the slot it was over, and the new
+                    order is mirrored to the backend so every window agrees. */}
+                <DndContext
+                  sensors={sensors}
+                  collisionDetection={closestCenter}
+                  onDragStart={() => {
+                    setTabHoverId(null);
+                    setTabDragActive(true);
+                  }}
+                  onDragEnd={(event) => {
+                    setTabDragActive(false);
+                    handleTabDragEnd(event);
+                  }}
+                  onDragCancel={() => setTabDragActive(false)}
                 >
-                  <span className="truncate">{s.title}</span>
-                  {s.exited && (
-                    <span className="text-[9px] uppercase tracking-wide px-1 py-0.5 rounded bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400 shrink-0">
-                      {t("terminal.exitedBadge")}
-                    </span>
-                  )}
-                </button>
-                {s.command && (
-                  <button
-                    type="button"
-                    onClick={() => void restartTerminal(s.id)}
-                    aria-label={t("terminal.restartAria", { title: s.title })}
-                    title={t("terminal.restart")}
-                    className="p-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-400 transition-colors opacity-0 group-hover:opacity-100 focus-visible:opacity-100 shrink-0"
-                  >
-                    <svg aria-hidden="true" width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
-                      <path d="M8 2a6 6 0 106 6 .75.75 0 011.5 0A7.5 7.5 0 118 .5a.75.75 0 010 1.5z" />
-                      <path d="M14 2.75a.75.75 0 01.75-.75h2a.75.75 0 01-.75.75v2a.75.75 0 01-1.5 0V4.06l-1.97 1.97a.75.75 0 11-1.06-1.06l1.97-1.97h-1.19a.75.75 0 01-.75-.75z" />
-                    </svg>
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => closeTab(s.id)}
-                  aria-label={t("terminal.closeAria", { title: s.title })}
-                  className="p-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-400 transition-colors shrink-0"
-                >
-                  <CloseIcon size={10} />
-                </button>
+                  <SortableContext items={activeTabIds} strategy={horizontalListSortingStrategy}>
+                    {activeGroup.map((s) => (
+                      <SortableRow key={s.id} id={s.id} axis="x">
+                        {({ setNodeRef, style, attributes, listeners, isDragging, dragged }) => (
+                          <div
+                            ref={setNodeRef}
+                            style={style}
+                            data-tab-id={s.id}
+                            data-dragging={isDragging ? "" : undefined}
+                            {...listeners}
+                            onClick={() => {
+                              if (dragged()) return;
+                              if (s.id === activeId) {
+                                setTabSquish((prev) => ({ id: s.id, tick: (prev?.tick ?? 0) + 1 }));
+                              }
+                              selectTerminal(s.id);
+                            }}
+                            onContextMenu={(e) => handleTabContextMenu(e, s)}
+                            onMouseDown={(e) => {
+                              setTabHoverId(null);
+                              if (e.button === 1) e.preventDefault();
+                            }}
+                            onAuxClick={(e) => {
+                              if (e.button === 1) closeTab(s.id);
+                            }}
+                            onPointerEnter={(e) => {
+                              if (tabDragActive) return;
+                              tabHoverRef.current = e.currentTarget;
+                              setTabHoverId(s.id);
+                            }}
+                            onPointerLeave={() => {
+                              tabHoverRef.current = null;
+                              setTabHoverId(null);
+                            }}
+                            className={`group relative z-[1] flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs shrink-0 w-[var(--term-tab-width)] cursor-grab active:cursor-grabbing transition-all duration-200 hover:-translate-y-px active:scale-[0.98] ${
+                              newTabIds.current.delete(s.id) ? "term-tab-new" : ""
+                            }${
+                              tabSquish && tabSquish.id === s.id ? ` term-tab-squish tab-squish-${tabSquish.tick}` : ""
+                            } ${
+                              isDragging
+                                ? "bg-[var(--surface-1)] shadow-lg ring-1 ring-[var(--accent)]/30"
+                                : s.id === activeId
+                                  ? "text-gray-900 dark:text-gray-100 font-medium"
+                                  : "text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+                            }`}
+                          >
+                            <button
+                              type="button"
+                              {...attributes}
+                              aria-label={s.title}
+                              onClick={() => {
+                                if (dragged()) return;
+                                selectTerminal(s.id);
+                              }}
+                              className="flex items-center gap-1.5 min-w-0 flex-1"
+                            >
+                              <TabLabel text={s.title} className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-left" />
+                              {s.exited && (
+                                <span className="text-[9px] uppercase tracking-wide px-1 py-0.5 rounded bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400 shrink-0">
+                                  {t("terminal.exitedBadge")}
+                                </span>
+                              )}
+                            </button>
+                            {s.command && (
+                              <button
+                                type="button"
+                                onClick={() => void restartTerminal(s.id)}
+                                aria-label={t("terminal.restartAria", { title: s.title })}
+                                title={t("terminal.restart")}
+                                className="p-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-400 transition-colors opacity-0 group-hover:opacity-100 focus-visible:opacity-100 shrink-0"
+                              >
+                                <svg aria-hidden="true" width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                                  <path d="M8 2a6 6 0 106 6 .75.75 0 011.5 0A7.5 7.5 0 118 .5a.75.75 0 010 1.5z" />
+                                  <path d="M14 2.75a.75.75 0 01.75-.75h2a.75.75 0 01-.75.75v2a.75.75 0 01-1.5 0V4.06l-1.97 1.97a.75.75 0 11-1.06-1.06l1.97-1.97h-1.19a.75.75 0 01-.75-.75z" />
+                                </svg>
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => closeTab(s.id)}
+                              aria-label={t("terminal.closeAria", { title: s.title })}
+                              className="p-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-400 transition-colors shrink-0"
+                            >
+                              <CloseIcon size={10} />
+                            </button>
+                          </div>
+                        )}
+                      </SortableRow>
+                    ))}
+                  </SortableContext>
+                </DndContext>
               </div>
-            ))}
+              {tabStrip.overflow && !tabStrip.atStart && (
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-[var(--panel-bg)] to-transparent"
+                />
+              )}
+              {tabStrip.overflow && !tabStrip.atEnd && (
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-[var(--panel-bg)] to-transparent"
+                />
+              )}
+              {tabStrip.overflow && !tabStrip.atStart && (
+                <button
+                  type="button"
+                  onClick={() => tabStrip.scrollBy(-1)}
+                  aria-label={t("terminal.scrollTabsLeft")}
+                  className="absolute left-1 top-1/2 -translate-y-1/2 grid h-6 w-6 place-items-center rounded-full border border-[var(--border-color)] bg-[var(--surface-1)] text-gray-500 shadow-sm transition-colors hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                >
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                    <path d="M10.53 3.47a.75.75 0 010 1.06L6.06 8l4.47 3.47a.75.75 0 11-1.06 1.06L4.47 8.53a.75.75 0 010-1.06l5-5a.75.75 0 011.06 0z" />
+                  </svg>
+                </button>
+              )}
+              {tabStrip.overflow && !tabStrip.atEnd && (
+                <button
+                  type="button"
+                  onClick={() => tabStrip.scrollBy(1)}
+                  aria-label={t("terminal.scrollTabsRight")}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 grid h-6 w-6 place-items-center rounded-full border border-[var(--border-color)] bg-[var(--surface-1)] text-gray-500 shadow-sm transition-colors hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                >
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                    <path d="M5.47 3.47a.75.75 0 011.06 0l5 5a.75.75 0 010 1.06l-5 5a.75.75 0 11-1.06-1.06L9.94 8 5.47 4.53a.75.75 0 010-1.06z" />
+                  </svg>
+                </button>
+              )}
+              {/* The full title, revealed after a hover: the tab itself shows a
+                  fixed width with the middle elided, so this is the only place
+                  the whole name is readable. The hint rides along because the
+                  native title attribute that used to carry it would now stack a
+                  second tooltip on top of this one. */}
+              <HoverTooltip anchorRef={tabHoverRef} visible={hoveredTab !== null}>
+                <span className="block break-all">{hoveredTab?.title}</span>
+                <span className="mt-0.5 block text-[11px] opacity-60">{t("terminal.middleClickHint")}</span>
+              </HoverTooltip>
+            </div>
             {/* One more tab in the project whose terminals are shown; the
                 tooltip names the chord that does the same thing. */}
             {activeGroup.length > 0 && (
@@ -1284,7 +1786,9 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
                 aria-label={t("terminal.newTerminal")}
                 className="p-1 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors shrink-0 disabled:opacity-50"
               >
-                <PlusIcon />
+                {/* The tab bar's "+" greys out while the pty spawns; without
+                    the arc the click reads as ignored. */}
+                {opening ? <Spinner size="sm" /> : <PlusIcon />}
               </button>
             )}
             {activeGroup.length > 1 && (
@@ -1319,6 +1823,21 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
               terminal's edge cells (prompt char, scrollbar). */}
           <div className="app-panel relative flex-1 min-h-0 overflow-hidden">
             {sessions.length === 0 ? (
+              bootstrapping ? (
+                <TerminalRestoringSkeleton label={t("terminal.restoringSessions")} />
+              ) : bootstrapError ? (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center">
+                  <span className="text-sm text-red-500">{t("terminal.restoreFailed")}</span>
+                  <span className="max-w-md break-words text-[11px] text-gray-400">{bootstrapError}</span>
+                  <button
+                    type="button"
+                    onClick={() => void retrySessions()}
+                    className="press mt-1 px-3 py-1.5 text-xs rounded-md border border-[var(--border-color)] text-gray-700 dark:text-gray-200 hover:bg-[var(--surface-2)] transition-colors"
+                  >
+                    {t("common.retry")}
+                  </button>
+                </div>
+              ) : (
               <TerminalBlankSlate
                 projects={[...projects]
                   .sort((a, b) =>
@@ -1330,23 +1849,37 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({
                   }))}
                 fallbackTitle={fallbackTitle}
                 opening={opening}
+                loading={projectsPending}
+                loadFailed={projectsError && !projectsLoaded}
+                onRetry={() => {
+                  setProjectsLoaded(false);
+                  setProjectsError(false);
+                  setProjectsLoadTick((n) => n + 1);
+                }}
                 onNew={(cwd, title) => void handleNewTerminal(cwd, title)}
                 onQuickRun={handleQuickRun}
               />
+              )
             ) : (
               <div className="absolute inset-0">
-              {sessions.map((s) => (
-                <TerminalCanvas
-                  key={s.id}
-                  id={s.id}
-                  active={s.id === activeId}
-                  animateIn={s.id === activeId}
-                  onAttach={attachTerminal}
-                  onDetach={detachTerminal}
-                  onFit={fitTerminal}
-                  onContextMenu={handleCanvasContextMenu}
-                />
-              ))}
+              {paneIds.map((id) => {
+                const s = sessionsById.get(id);
+                if (!s) return null;
+                return (
+                  <TerminalCanvas
+                    key={id}
+                    id={id}
+                    active={id === activeId}
+                    animateIn={id === activeId}
+                    ready={isSessionReady(id)}
+                    startingLabel={t("terminal.startingShell")}
+                    onAttach={attachTerminal}
+                    onDetach={detachTerminal}
+                    onFit={fitTerminal}
+                    onContextMenu={handleCanvasContextMenu}
+                  />
+                );
+              })}
               </div>
             )}
           </div>

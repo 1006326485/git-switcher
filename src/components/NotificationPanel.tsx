@@ -4,6 +4,7 @@ import type { TFunction } from "i18next";
 import * as api from "../lib/tauri";
 import type { GitNotification } from "../lib/types";
 import { popoverAnimation, popoverExitAnimation, usePresence } from "./ui/primitives";
+import { LoadingState } from "./ui/loading";
 
 function formatRelativeTime(t: TFunction, timestamp: number): string {
   const now = Date.now() / 1000;
@@ -105,11 +106,7 @@ export const NotificationPanel = memo(function NotificationPanel({
 
         {/* List */}
         <div className="select-text flex-1 overflow-y-auto">
-          {loading && (
-            <div className="flex items-center justify-center py-6">
-              <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-500 border-t-transparent" />
-            </div>
-          )}
+          {loading && <LoadingState variant="block" label={t("notif.loading")} />}
 
           {!loading && notifications.length === 0 && (
             <p className="text-sm text-gray-400 text-center py-6">{t("notif.empty")}</p>

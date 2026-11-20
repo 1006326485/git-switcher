@@ -104,6 +104,11 @@ function openCalls(): number {
 describe("TerminalWorkspace hotkeys", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // `clearAllMocks` clears call history but NOT implementations, so a test
+    // that set `terminalList` to a non-empty list leaked into every test after
+    // it. Reset it here so each case states its own fixture and the mount
+    // barrier below ("No terminals open") is deterministic.
+    vi.mocked(api.terminalList).mockResolvedValue([]);
     class ObserverStub {
       observe() {}
       unobserve() {}

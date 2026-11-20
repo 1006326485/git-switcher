@@ -38,6 +38,10 @@ export const ProjectGroupsPanel = memo(function ProjectGroupsPanel({
 }: ProjectGroupsPanelProps) {
   const { t } = useTranslation();
   const [groups, setGroups] = useState<Group[]>([]);
+  // Three-state list: the fetch is in flight, it failed (retryable in place),
+  // or it succeeded — only the last case may show the empty copy.
+  const [groupsLoading, setGroupsLoading] = useState(true);
+  const [groupsError, setGroupsError] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
   const [newColor, setNewColor] = useState("#3B82F6");
@@ -50,11 +54,16 @@ export const ProjectGroupsPanel = memo(function ProjectGroupsPanel({
   const { onContextMenu, menuProps } = useContextMenu();
 
   const loadGroups = useCallback(async () => {
+    setGroupsLoading(true);
+    setGroupsError(false);
     try {
       const g = await api.listGroups();
       setGroups(g);
     } catch (e) {
+      setGroupsError(true);
       onError(t("groups.loadError", { error: String(e) }));
+    } finally {
+      setGroupsLoading(false);
     }
   }, [onError, t]);
 
@@ -235,8 +244,23 @@ export const ProjectGroupsPanel = memo(function ProjectGroupsPanel({
         {t("groups.allProjects")}
       </button>
 
-      {/* Group list */}
-      {groups.map((g) => (
+      {/* Group list: in flight → failed (retry) → loaded-and-empty → rows */}
+      {groupsLoading ? (
+        <p className="px-3 py-1.5 text-sm text-gray-500 dark:text-gray-400">{t("groups.loading")}</p>
+      ) : groupsError ? (
+        <div className="space-y-1.5 px-3 py-1.5">
+          <p className="text-sm text-red-600 dark:text-red-400">{t("groups.loadFailed")}</p>
+          <button
+            type="button"
+            onClick={() => void loadGroups()}
+            className="text-xs px-2 py-1 rounded-lg border border-(--border-color) text-gray-600 dark:text-gray-300 hover:bg-[var(--surface-2)] transition-colors"
+          >
+            {t("groups.retry")}
+          </button>
+        </div>
+      ) : groups.length === 0 ? (
+        <p className="px-3 py-1.5 text-sm text-gray-500 dark:text-gray-400">{t("groups.empty")}</p>
+      ) : groups.map((g) => (
         <div
           key={g.id}
           className="flex items-center gap-1 group"

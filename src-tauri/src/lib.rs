@@ -10,6 +10,7 @@ pub mod macos_menu;
 pub mod models;
 pub mod services;
 pub mod tray_icon;
+pub mod window_placement;
 
 #[cfg(test)]
 mod test_support;
@@ -494,6 +495,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             // Terminal
             commands::terminal_open,
             commands::terminal_list,
+            commands::terminal_reorder,
+            commands::terminal_set_title,
             commands::terminal_write,
             commands::terminal_resize,
             commands::terminal_close,

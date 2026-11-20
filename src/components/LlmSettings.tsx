@@ -5,6 +5,7 @@ import { parseError } from "../lib/types";
 import { getSettings, updateSettings, listLlmModels } from "../lib/tauri";
 import { SelectDropdown, type SelectOption } from "./ui/SelectDropdown";
 import { Modal, PrimaryButton, popoverAnimation } from "./ui/primitives";
+import { Spinner } from "./ui/loading";
 import {
   LLM_DEFAULT_REVIEW_PROMPT,
   LLM_PROMPT_DIFF_PLACEHOLDER,
@@ -214,16 +215,19 @@ export const LlmSettings = memo(function LlmSettings({ onError }: LlmSettingsPro
                 aria-label={t("settings.llm.fetchModels")}
                 className="flex items-center gap-1 text-xs text-[var(--accent)] hover:underline disabled:text-gray-400 disabled:no-underline disabled:cursor-not-allowed"
               >
-                <svg
-                  aria-hidden="true"
-                  width="12"
-                  height="12"
-                  viewBox="0 0 16 16"
-                  fill="currentColor"
-                  className={modelsLoading ? "animate-spin" : ""}
-                >
-                  <path d="M8 1.5a6.5 6.5 0 105.9 3.78.75.75 0 011.37-.61A8 8 0 118 0v1.5z" />
-                </svg>
+                {modelsLoading ? (
+                  <Spinner size="xs" />
+                ) : (
+                  <svg
+                    aria-hidden="true"
+                    width="12"
+                    height="12"
+                    viewBox="0 0 16 16"
+                    fill="currentColor"
+                  >
+                    <path d="M8 1.5a6.5 6.5 0 105.9 3.78.75.75 0 011.37-.61A8 8 0 118 0v1.5z" />
+                  </svg>
+                )}
                 {modelsLoading ? t("settings.llm.fetchingModels") : t("settings.llm.fetchModels")}
               </button>
             </div>
@@ -234,8 +238,13 @@ export const LlmSettings = memo(function LlmSettings({ onError }: LlmSettingsPro
                   value={config.model}
                   onChange={(model) => update("model", model)}
                   placeholder={t("settings.llm.modelPlaceholder")}
-                  disabled={modelOptions.length === 0}
+                  // While the list is being fetched the menu is openable on
+                  // purpose: it explains why it is empty instead of being a
+                  // greyed-out control with no reason given.
+                  disabled={modelOptions.length === 0 && !modelsLoading}
                   ariaLabel={t("settings.llm.modelSelectAria")}
+                  loading={modelsLoading}
+                  loadingLabel={t("settings.llm.fetchingModels")}
                 />
               </div>
               <input

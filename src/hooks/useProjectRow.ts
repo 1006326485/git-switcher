@@ -2,7 +2,7 @@ import { useState, useCallback } from "react";
 import type { ProjectDetail, ProjectScript } from "../lib/types";
 import { parseError } from "../lib/types";
 import { getRecentCommand, type RecentCommandEntry } from "../lib/recentCommands";
-import { useProjectActions } from "../context/ProjectContext";
+import { useOptionalProjectActions } from "../context/ProjectContext";
 
 interface UseProjectRowOptions {
   detail: ProjectDetail;
@@ -15,11 +15,13 @@ interface UseProjectRowOptions {
 
 export function useProjectRow({ detail, onSwitchBranch, onRefresh, onRemove, onConfirmDirtySwitch }: UseProjectRowOptions) {
   const { project, status } = detail;
-  const { onOpenBuiltInTerminal, onRunProjectScript } = useProjectActions();
+  const actions = useOptionalProjectActions();
+  const onOpenBuiltInTerminal = actions?.onOpenBuiltInTerminal;
+  const onRunProjectScript = actions?.onRunProjectScript;
   const [recent, setRecent] = useState<RecentCommandEntry | null>(() => getRecentCommand(project.path));
   const [switching, setSwitching] = useState(false);
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
+  const [refreshPending, setRefreshPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [logOpen, setLogOpen] = useState(false);
   const [branchMgrOpen, setBranchMgrOpen] = useState(false);
@@ -63,11 +65,11 @@ export function useProjectRow({ detail, onSwitchBranch, onRefresh, onRemove, onC
   }, [project.path, onRefresh]);
 
   const handleRefresh = useCallback(async () => {
-    setRefreshing(true);
+    setRefreshPending(true);
     try {
       await handleGitRefresh();
     } finally {
-      setRefreshing(false);
+      setRefreshPending(false);
     }
   }, [handleGitRefresh]);
 
@@ -104,6 +106,12 @@ export function useProjectRow({ detail, onSwitchBranch, onRefresh, onRemove, onC
       setError(parseError(e));
     }
   }, [onRemove, project.id]);
+
+  // Busy comes from the shared bookkeeping so the row lights up no matter
+  // which entry point started the read (this button, Space, the context menu,
+  // the conflict resolver, group assignment).
+  const sharedRefreshing = actions?.refreshingPaths?.has(project.path) ?? false;
+  const refreshing = refreshPending || sharedRefreshing;
 
   return {
     switching,

@@ -14,6 +14,11 @@ use crate::models::{
 };
 use crate::AppError;
 
+/// How many repositories a batch operation may process at once. Bounds both
+/// the thread count and the load we put on remotes when syncing an entire
+/// workspace.
+pub const BATCH_MAX_CONCURRENT: usize = 8;
+
 pub struct GitService;
 
 impl GitService {
@@ -249,6 +254,20 @@ impl GitService {
                 .map(|i| &branch_name[i + 1..])
                 .unwrap_or(branch_name);
 
+            // `git checkout <local_name>` only creates the local branch when
+            // Git can guess a unique remote-tracking source. That guess fails
+            // (or silently lands on a same-named tag) when several remotes
+            // carry the branch, when a tag shares the short name, or when
+            // checkout.guess is disabled — leaving the branch remote-only.
+            // Create it from the exact ref the user picked instead.
+            // "origin/HEAD" is the remote's symbolic HEAD, not a branch name:
+            // keep the old no-op checkout rather than try to create "HEAD".
+            let needs_local_branch = local_name != "HEAD"
+                && repo
+                    .find_reference(&format!("refs/remotes/{}", branch_name))
+                    .is_ok()
+                && repo.find_branch(local_name, BranchType::Local).is_err();
+
             // Check for uncommitted changes
             let has_changes = {
                 let mut status_opts = StatusOptions::new();
@@ -270,7 +289,18 @@ impl GitService {
             };
 
             // Use git CLI for the switch (handles remote tracking branches correctly)
-            let checkout = Self::run_cli(path, &["checkout", local_name], 120, "git checkout");
+            let checkout = if needs_local_branch {
+                // Create the local branch from the selected remote-tracking ref
+                // and make it track that ref, independent of Git's DWIM guess.
+                Self::run_cli(
+                    path,
+                    &["checkout", "-b", local_name, "--track", branch_name],
+                    120,
+                    "git checkout",
+                )
+            } else {
+                Self::run_cli(path, &["checkout", local_name], 120, "git checkout")
+            };
 
             if let Err(e) = checkout {
                 // If checkout failed and we stashed, try to pop the stash back
@@ -1901,8 +1931,127 @@ impl GitService {
 
     // ── Remote operations (batch-capable, parallel) ────────────────────
 
+    // Single-project entry points for the streaming batch runner. The batch
+    // commands drive these one repo at a time so `batch-result` can fire as
+    // each repository settles instead of after the slowest one finishes.
+
+    pub fn fetch_single(path: &str) -> Result<String, AppError> {
+        Self::fetch(path, None)
+    }
+
+    pub fn pull_single(path: &str) -> Result<String, AppError> {
+        Self::pull(path, None)
+    }
+
+    pub fn push_single(path: &str) -> Result<String, AppError> {
+        Self::push(path, None, false, None)
+    }
+
+    pub fn sync_single(path: &str) -> Result<String, AppError> {
+        Self::fetch(path, None)?;
+        let repo = git2::Repository::open(path)
+            .map_err(|e| AppError::Git(format!("Failed to open repo: {}", e)))?;
+        let status = Self::get_status(&repo)?;
+        if status.behind > 0 {
+            let msg = Self::pull(path, None)?;
+            Ok(format!("Pulled: {}", msg))
+        } else if status.ahead > 0 {
+            let msg = Self::push(path, None, false, None)?;
+            Ok(format!("Pushed: {}", msg))
+        } else {
+            Ok("Up to date".to_string())
+        }
+    }
+
     pub fn fetch_all_projects(paths: &[String]) -> Vec<(String, Result<String, AppError>)> {
         Self::run_batch(paths, |p| Self::fetch(&p, None))
+    }
+
+    /// Same bounded-concurrency work as [`Self::run_batch`], but reports each
+    /// repository the moment it settles instead of buffering the whole batch.
+    ///
+    /// This is what makes batch progress real: the UI used to jump 0 → N when
+    /// the last repository finished, which read as a hang on a slow network.
+    ///
+    /// Concurrency stays capped at [`BATCH_MAX_CONCURRENT`] via a sliding
+    /// window — the next repository is launched as soon as one slot frees up,
+    /// so the cap bounds load without quantising progress into chunks.
+    pub fn run_batch_streaming<F, G>(paths: &[String], op: F, mut on_done: G)
+    where
+        F: Fn(String) -> Result<String, AppError> + Send + Sync + 'static,
+        G: FnMut(String, Result<String, AppError>),
+    {
+        use std::panic::catch_unwind;
+        use std::sync::mpsc;
+
+        if paths.is_empty() {
+            return;
+        }
+
+        let op = std::sync::Arc::new(op);
+        let (tx, rx) = mpsc::channel();
+
+        let spawn = |path: &String,
+                     op: &std::sync::Arc<F>,
+                     tx: &mpsc::Sender<(String, Result<String, AppError>)>| {
+            let path = path.clone();
+            let name = std::path::Path::new(&path)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| path.clone());
+            let op = op.clone();
+            let tx = tx.clone();
+            std::thread::spawn(move || {
+                let result = catch_unwind(std::panic::AssertUnwindSafe(|| op(path)))
+                    .unwrap_or_else(|e| {
+                        let msg = if let Some(s) = e.downcast_ref::<String>() {
+                            s.clone()
+                        } else if let Some(s) = e.downcast_ref::<&str>() {
+                            s.to_string()
+                        } else {
+                            "unknown panic".to_string()
+                        };
+                        log::error!("Thread panicked during batch operation: {}", msg);
+                        Err(AppError::Other(format!("Thread panicked: {}", msg)))
+                    });
+                let _ = tx.send((name, result));
+            })
+        };
+
+        let mut pending = paths.iter();
+        let mut handles = Vec::with_capacity(paths.len());
+        let mut in_flight = 0usize;
+
+        // Prime the window.
+        for _ in 0..BATCH_MAX_CONCURRENT {
+            match pending.next() {
+                Some(path) => {
+                    handles.push(spawn(path, &op, &tx));
+                    in_flight += 1;
+                }
+                None => break,
+            }
+        }
+
+        // Drain one result at a time, refilling the window immediately: that is
+        // what turns each completion into a progress tick.
+        while in_flight > 0 {
+            let (name, result) = match rx.recv() {
+                Ok(item) => item,
+                Err(_) => break, // every sender dropped unexpectedly
+            };
+            in_flight -= 1;
+            on_done(name, result);
+            if let Some(path) = pending.next() {
+                handles.push(spawn(path, &op, &tx));
+                in_flight += 1;
+            }
+        }
+
+        drop(tx);
+        for h in handles {
+            let _ = h.join();
+        }
     }
 
     /// Fetch all projects, skipping any that were fetched within the last 5 minutes.
@@ -1972,13 +2121,12 @@ impl GitService {
     {
         use std::panic::catch_unwind;
         use std::sync::mpsc;
-        const MAX_CONCURRENT: usize = 8;
 
         let op = std::sync::Arc::new(op);
         let (tx, rx) = mpsc::channel();
 
         // Process in chunks to bound concurrency
-        for chunk in paths.chunks(MAX_CONCURRENT) {
+        for chunk in paths.chunks(BATCH_MAX_CONCURRENT) {
             let handles: Vec<_> = chunk
                 .iter()
                 .map(|p| {

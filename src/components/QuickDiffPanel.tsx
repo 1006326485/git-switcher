@@ -7,6 +7,7 @@ import { dialogAnimation, dialogExitAnimation, scrimAnimation, scrimExitAnimatio
 import { useTranslation } from "react-i18next";
 import { isShortcutCapturing } from "../lib/shortcutCapture";
 import { isDirtyChord } from "../lib/heldKeys";
+import { LoadingState } from "./ui/loading";
 
 interface QuickDiffPanelProps {
   open: boolean;
@@ -137,15 +138,7 @@ export const QuickDiffPanel = memo(function QuickDiffPanel({
 
         {/* Content */}
         <div className="select-text flex-1 overflow-y-auto min-h-0">
-          {loading && (
-            <div className="flex items-center justify-center py-12">
-              <svg className="animate-spin h-5 w-5 text-gray-400 mr-2" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-              <span className="text-sm text-gray-400">{t("quickdiff.scanning")}</span>
-            </div>
-          )}
+          {loading && <LoadingState variant="block" label={t("quickdiff.scanning")} />}
 
           {error && (
             <div className="px-4 py-8 text-center">

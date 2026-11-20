@@ -107,6 +107,13 @@ function renderHeader() {
       onPushAhead={noop}
       onSyncAll={noop}
       onRunCommandAll={noop}
+      isRefreshingAll={false}
+      refreshingProjectCount={0}
+      autoFetch={null}
+      lastRefreshedAt={null}
+      batchTotal={0}
+      batchStalled={false}
+      onDismissBatch={noop}
       behindCount={0}
       aheadCount={0}
       needsAttention={0}

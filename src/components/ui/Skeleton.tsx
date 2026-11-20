@@ -1,22 +1,22 @@
-import { memo } from "react";
+import { Skeleton, SkeletonGroup } from "./loading";
 
-interface SkeletonProps {
-  className?: string;
-}
+// ═══════════════════════════════════════════════════════════════════════════
+// Project-grid skeleton shapes (card / list / compact / table / dashboard)
+//
+// Built on the loading primitives so bars follow --skeleton and the shimmer
+// highlight, and so the *container* owns the only `animate-pulse` (nested
+// pulse used to compound opacity out of phase and pulsed card borders too).
+//
+// Shapes mirror the real views — colors stripe, branch control, status pills,
+// action row — so the swap to content does not visibly jump.
+// ═══════════════════════════════════════════════════════════════════════════
 
-export const Skeleton = memo(function Skeleton({ className = "" }: SkeletonProps) {
+const CARD_GRID = "grid grid-cols-1 gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4";
+
+function SkeletonRow({ compact = false }: { compact?: boolean }) {
   return (
     <div
-      className={`bg-gray-200 dark:bg-gray-700 rounded animate-pulse ${className}`}
-      aria-hidden="true"
-    />
-  );
-});
-
-export function SkeletonRow({ compact = false }: { compact?: boolean }) {
-  return (
-    <div
-      className={`bg-[var(--surface-1)] border border-[var(--border-color)] rounded-xl animate-pulse ${
+      className={`bg-[var(--surface-1)] border border-[var(--border-color)] rounded-xl overflow-hidden ${
         compact ? "px-3 py-2" : "px-4 py-3"
       }`}
     >
@@ -33,42 +33,68 @@ export function SkeletonRow({ compact = false }: { compact?: boolean }) {
   );
 }
 
-export function SkeletonCard() {
+/** Card view: color stripe + name/alias header, action row, branch control, status pills. */
+function SkeletonCard() {
   return (
-    <div className="bg-[var(--surface-1)] rounded-xl border border-[var(--border-color)] p-4 animate-pulse">
-      <div className="flex items-center gap-2 mb-3">
-        <Skeleton className="h-4 w-24" />
-        <Skeleton className="w-2 h-2 rounded-full" />
-      </div>
-      <Skeleton className="h-3 w-full mb-3" />
-      <Skeleton className="h-8 w-full rounded-lg mb-3" />
-      <div className="flex gap-2">
-        <Skeleton className="h-5 rounded-full w-16" />
-        <Skeleton className="h-5 rounded-full w-14" />
+    <div className="bg-[var(--surface-1)] rounded-xl border border-[var(--border-color)] overflow-hidden">
+      {/* Color stripe (matches ProjectCard's identity bar) */}
+      <Skeleton className="h-1 w-full rounded-none" />
+      <div className="p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className="w-2 h-2 rounded-full" />
+          <div className="ml-auto flex gap-1">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-6 w-6 rounded-lg" />
+            ))}
+          </div>
+        </div>
+        {/* Branch control */}
+        <Skeleton className="h-8 w-full rounded-lg mb-3" />
+        {/* Status pills */}
+        <div className="flex gap-2">
+          <Skeleton className="h-5 rounded-full w-16" />
+          <Skeleton className="h-5 rounded-full w-14" />
+        </div>
       </div>
     </div>
   );
 }
 
-export function SkeletonTable() {
+/**
+ * Table view: header + rows.
+ *
+ * `columns` comes from the caller so the placeholder cannot drift out of sync
+ * with the real table the way the old hard-coded 7-cell header did while
+ * ProjectTable rendered 9.
+ */
+function SkeletonTable({
+  columns = 9,
+  rows = 8,
+}: {
+  columns?: number;
+  rows?: number;
+}) {
+  const track = Array.from({ length: columns });
   return (
-    <div className="bg-[var(--surface-1)] border border-[var(--border-color)] rounded-xl overflow-hidden animate-pulse">
+    <div className="bg-[var(--surface-1)] border border-[var(--border-color)] rounded-xl overflow-hidden">
       <div className="bg-[var(--surface-2)] border-b border-[var(--border-color)] px-3 py-2.5">
         <div className="flex gap-4">
-          {["w-16", "w-14", "w-12", "w-12", "w-14", "w-10", "w-10"].map((w, i) => (
-            <Skeleton key={i} className={`h-3 ${w}`} />
+          {track.map((_, i) => (
+            <Skeleton key={i} className={i < 2 ? "h-3 w-20" : "h-3 w-12"} />
           ))}
+          <Skeleton className="h-3 w-12 ml-auto" />
         </div>
       </div>
-      {Array.from({ length: 8 }).map((_, i) => (
-        <div key={i} className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-700/50 last:border-0">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="px-3 py-2.5 border-b border-[var(--border-color)] last:border-0">
           <div className="flex gap-4 items-center">
-            <Skeleton className="h-3.5 w-28" />
+            <Skeleton className="h-3.5 w-32" />
             <Skeleton className="h-6 w-32 rounded-lg" />
-            {Array.from({ length: 5 }).map((_, j) => (
-              <Skeleton key={j} className="h-3 w-6 mx-auto" />
+            {track.slice(2).map((_, j) => (
+              <Skeleton key={j} className="h-3 w-6" />
             ))}
-            <div className="flex gap-0.5 justify-end">
+            <div className="flex gap-0.5 ml-auto">
               <Skeleton className="w-6 h-6 rounded" />
               <Skeleton className="w-6 h-6 rounded" />
             </div>
@@ -78,3 +104,32 @@ export function SkeletonTable() {
     </div>
   );
 }
+
+/** Dashboard view: stat tiles + a summary card. */
+function SkeletonDashboard() {
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="bg-[var(--surface-1)] rounded-lg p-4 border border-[var(--border-color)]">
+            <Skeleton className="h-8 w-12 mb-2" />
+            <Skeleton className="h-3 w-24" />
+          </div>
+        ))}
+      </div>
+      <div className="bg-[var(--surface-1)] rounded-lg border border-[var(--border-color)] p-4">
+        <Skeleton className="h-4 w-24 mb-3" />
+        <div className="grid grid-cols-3 gap-4">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="text-center">
+              <Skeleton className="h-7 w-10 mx-auto mb-1" />
+              <Skeleton className="h-3 w-16 mx-auto" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export { SkeletonRow, SkeletonCard, SkeletonTable, SkeletonDashboard, CARD_GRID, SkeletonGroup };

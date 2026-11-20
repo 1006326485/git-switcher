@@ -5,6 +5,7 @@ import type { CommitInfo } from "../lib/types";
 import { parseError } from "../lib/types";
 import { Modal } from "./ui/primitives";
 import { OperationConfirmDialog } from "./OperationConfirmDialog";
+import { LoadingState, Spinner } from "./ui/loading";
 
 type RebaseAction = "pick" | "squash" | "drop";
 
@@ -222,10 +223,7 @@ export const InteractiveRebase = memo(function InteractiveRebase({
 
           {/* Commit list */}
           {loading ? (
-            <div className="flex items-center justify-center py-8 text-sm text-gray-500">
-              <span className="animate-spin mr-2">&#x21BB;</span>
-              {t("interactiveRebase.loadingCommits")}
-            </div>
+            <LoadingState variant="block" label={t("interactiveRebase.loadingCommits")} />
           ) : entries.length === 0 ? (
             <div className="text-center py-8 text-sm text-gray-400 italic">
               {t("interactiveRebase.noCommits")}
@@ -314,7 +312,7 @@ export const InteractiveRebase = memo(function InteractiveRebase({
             >
               {applying ? (
                 <span className="flex items-center gap-1.5">
-                  <span className="animate-spin">&#x21BB;</span>
+                  <Spinner size="xs" />
                   {t("interactiveRebase.applying")}
                 </span>
               ) : (

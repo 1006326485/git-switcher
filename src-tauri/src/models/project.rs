@@ -136,6 +136,15 @@ pub struct BatchResult {
     pub message: String,
 }
 
+/// Emitted once when a batch begins, so the UI can show "3 / 12" instead of an
+/// undifferentiated spinner. `total` is the number of repositories the run
+/// actually selected (a filtered batch may be smaller than the project list).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchStart {
+    pub label: String,
+    pub total: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FileStatus {

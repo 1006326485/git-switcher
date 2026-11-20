@@ -59,6 +59,9 @@ objc2-app-kit = { version = "0.3.2", default-features = false, features = [
 objc2-foundation = { version = "0.3.2", default-features = false, features = [
   "std",
   "NSData",
+  # NSPoint/NSRect for the window-server hit test that anchors the main
+  # window's z-order when it lives on another display (see hotkeys.rs).
+  "NSGeometry",
 ] }
 
 [dev-dependencies]

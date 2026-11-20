@@ -10,6 +10,7 @@ import { OperationConfirmDialog } from "./OperationConfirmDialog";
 import { Modal, MenuItem } from "./ui/primitives";
 import { ContextMenu, MenuSeparator } from "./ui/ContextMenu";
 import { useContextMenu } from "../hooks/useContextMenu";
+import { LoadingState } from "./ui/loading";
 
 const ConflictResolver = lazy(() => import("./ConflictResolver").then((m) => ({ default: m.ConflictResolver })));
 
@@ -185,12 +186,7 @@ export const CommitLog = memo(function CommitLog({ path, onSuccess, onError, onR
   }, [path, onError, load]);
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-4 text-xs text-gray-400">
-        <span className="animate-spin mr-2">&#x21BB;</span>
-        Loading commit log...
-      </div>
-    );
+    return <LoadingState variant="block" label={t("commlog.loading")} />;
   }
 
   if (error) {
@@ -359,7 +355,7 @@ export const CommitLog = memo(function CommitLog({ path, onSuccess, onError, onR
                     className="px-1.5 py-0.5 rounded text-[10px] opacity-0 group-hover:opacity-100 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/50 hover:bg-amber-200 dark:hover:bg-amber-900/50 disabled:opacity-50 transition-all shrink-0"
                     title={`Cherry-pick ${entry.short_hash}`}
                   >
-                    {isCherryPicking ? "..." : t("commitLog.cherryPick")}
+                    {isCherryPicking ? t("common.working") : t("commitLog.cherryPick")}
                   </button>
 
                   {/* Author + time — opacity reveal (not display swap) so the

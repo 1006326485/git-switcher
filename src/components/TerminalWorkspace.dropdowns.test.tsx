@@ -495,6 +495,24 @@ describe("TerminalWorkspace branch switching", () => {
     );
   });
 
+  it("opens the branch list with the checked-out branch as its first option", async () => {
+    // The backend returns branches alphabetically, so "dev" would otherwise
+    // lead the Local group and hide where the terminal actually is.
+    const detail = makeDetail("/tmp/demo", "main");
+    detail.branches = [
+      { name: "dev", is_current: false, is_remote: false, is_merged: false, is_tag: false },
+      { name: "main", is_current: true, is_remote: false, is_merged: true, is_tag: false },
+      { name: "origin/dev", is_current: false, is_remote: true, is_merged: false, is_tag: false },
+    ];
+    vi.mocked(api.listProjects).mockResolvedValue([detail]);
+    renderWorkspace();
+    await screen.findByText("zsh");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Branch: main. Click to switch." }));
+    const list = await screen.findByRole("listbox", { name: "Branches" });
+    expect(within(list).getAllByRole("option")[0]).toHaveTextContent("main");
+  });
+
   it("asks before switching a project with uncommitted changes", async () => {
     vi.mocked(api.listProjects).mockResolvedValue([
       makeDetail("/tmp/demo", "main", { modified: 2, untracked: 1 }),

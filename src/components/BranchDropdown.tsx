@@ -5,6 +5,7 @@ import type { BranchInfo } from "../lib/types";
 import { useDropdownPortal } from "../hooks/useDropdownPortal";
 import { filterByFuzzy, parseFuzzyQuery } from "../lib/fuzzyMatch";
 import { popoverAnimation } from "./ui/primitives";
+import { Spinner } from "./ui/loading";
 
 interface BranchDropdownProps {
   currentBranch: string;
@@ -35,7 +36,13 @@ export const BranchDropdown = memo(function BranchDropdown({
 
   const flatItems = useMemo(() => {
     const filtered = filterByFuzzy(branches, parseFuzzyQuery(search), (b) => [b.name]);
-    const local = filtered.filter((b) => !b.is_remote && !b.is_tag);
+    // The checked-out branch leads the Local group: opening the picker must
+    // answer "where am I?" before "what else is there?". The backend sorts
+    // branches alphabetically, so without this the current branch sits
+    // wherever its name happens to fall.
+    const local = filtered
+      .filter((b) => !b.is_remote && !b.is_tag)
+      .sort((a, b) => Number(b.is_current) - Number(a.is_current));
     const remote = filtered.filter((b) => b.is_remote);
     const tags = filtered.filter((b) => b.is_tag);
     const items: { type: "header" | "branch"; label?: string; branch?: BranchInfo }[] = [];
@@ -219,7 +226,7 @@ export const BranchDropdown = memo(function BranchDropdown({
             {currentBranch}
           </span>
           {loading ? (
-            <span className="animate-spin">&#x21BB;</span>
+            <Spinner size="xs" />
           ) : (
             <span className="text-gray-400">&#x25BE;</span>
           )}

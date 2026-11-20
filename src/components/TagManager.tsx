@@ -8,6 +8,7 @@ import { useContextMenu } from "../hooks/useContextMenu";
 import { Modal, Tabs, PrimaryButton, MenuItem } from "./ui/primitives";
 import { ContextMenu, MenuSeparator } from "./ui/ContextMenu";
 import { OperationConfirmDialog } from "./OperationConfirmDialog";
+import { LoadingState } from "./ui/loading";
 
 interface TagManagerProps {
   path: string;
@@ -202,7 +203,7 @@ export const TagManager = memo(function TagManager({
         {tab === "delete" && (
           <div className="space-y-4">
             {loadingTags ? (
-              <p className="text-sm text-gray-500 dark:text-gray-400">{t("tag.loadingTags")}</p>
+              <LoadingState label={t("tag.loadingTags")} />
             ) : tags.length === 0 ? (
               <p className="text-sm text-gray-500 dark:text-gray-400">{t("tag.empty")}</p>
             ) : (

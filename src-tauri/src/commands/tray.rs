@@ -254,11 +254,9 @@ fn run_git_batch(app: &AppHandle, kind: &'static str) {
     tauri::async_runtime::spawn_blocking(move || {
         let db = app.state::<Database>().inner().clone();
         let outcome = match kind {
-            "fetch" => {
-                git::run_batch_sync(&app, &db, "fetch", None, GitService::fetch_all_projects)
-            }
-            "pull" => git::run_batch_sync(&app, &db, "pull", None, GitService::pull_all_projects),
-            "push" => git::run_batch_sync(&app, &db, "push", None, GitService::push_all_projects),
+            "fetch" => git::run_batch_sync(&app, &db, "fetch", None, GitService::fetch_single),
+            "pull" => git::run_batch_sync(&app, &db, "pull", None, GitService::pull_single),
+            "push" => git::run_batch_sync(&app, &db, "push", None, GitService::push_single),
             "refresh" => {
                 let counts = BackgroundService::do_refresh(&db);
                 let _ = app.emit("background-refresh-done", &counts);

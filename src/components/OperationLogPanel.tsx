@@ -5,6 +5,7 @@ import * as api from "../lib/tauri";
 import { useHorizontalScroll } from "../hooks/useScrollEdge";
 import type { OperationLogEntry } from "../lib/types";
 import { popoverAnimation, popoverExitAnimation, listItemAnimation, usePresence } from "./ui/primitives";
+import { LoadingState } from "./ui/loading";
 
 const OP_ICONS: Record<string, string> = {
   fetch: "📥",
@@ -256,11 +257,7 @@ export const OperationLogPanel = memo(function OperationLogPanel({
 
         {/* List */}
         <div className="select-text flex-1 overflow-y-auto">
-          {loading && (
-            <div className="flex items-center justify-center py-8">
-              <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-500 border-t-transparent" />
-            </div>
-          )}
+          {loading && <LoadingState variant="block" label={t("opLog.loading")} />}
 
           {!loading && filtered.length === 0 && (
             <div className="flex flex-col items-center justify-center py-8 text-center">

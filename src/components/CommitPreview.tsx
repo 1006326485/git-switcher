@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { gitGetLog } from "../lib/tauri";
 import type { CommitInfo } from "../lib/types";
 import { popoverAnimation } from "./ui/primitives";
+import { LoadingState } from "./ui/loading";
 
 interface CommitPreviewProps {
   path: string;
@@ -69,7 +70,7 @@ export const CommitPreview = memo(function CommitPreview({ path, anchorRef, onCl
         {t("commitPreview.recentCommits")}
       </div>
       {loading ? (
-        <div className="text-xs text-gray-400">{t("common.loading")}</div>
+        <LoadingState label={t("common.loading")} />
       ) : commits.length === 0 ? (
         <div className="text-xs text-gray-400 italic">{t("commitLog.noCommits")}</div>
       ) : (

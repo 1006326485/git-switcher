@@ -6,6 +6,7 @@ import { MenuItem, Modal } from "./ui/primitives";
 import { ContextMenu, MenuSeparator } from "./ui/ContextMenu";
 import { useContextMenu } from "../hooks/useContextMenu";
 import { OperationConfirmDialog } from "./OperationConfirmDialog";
+import { LoadingState } from "./ui/loading";
 
 const LIMIT = 50;
 
@@ -393,9 +394,7 @@ export const GitLogViewer = memo(function GitLogViewer({ path, projectName, open
 
       <div className="select-text max-h-[60vh] overflow-y-auto" role="region" aria-label={t("log.historyAria")}>
         {loading ? (
-          <div className="flex items-center justify-center h-32 text-gray-500">
-            <span className="animate-spin mr-2">&#x21BB;</span> {t("log.loading")}
-          </div>
+          <LoadingState variant="block" label={t("log.loading")} />
         ) : error ? (
           <div className="flex items-center justify-center h-32 text-red-500 text-sm">
             {error}

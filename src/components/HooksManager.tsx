@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import * as api from "../lib/tauri";
 import type { GitHook } from "../lib/types";
 import { parseError } from "../lib/types";
+import { LoadingState } from "./ui/loading";
 
 interface HooksManagerProps {
   path: string;
@@ -97,7 +98,7 @@ export const HooksManager = memo(function HooksManager({ path, onSuccess, onErro
       {expanded && (
         <div className="mt-1 ml-3 space-y-1">
           {loading ? (
-            <p className="text-xs text-gray-400 dark:text-gray-500 italic">{t("hooks.loading")}</p>
+            <LoadingState label={t("hooks.loading")} />
           ) : hooks.length === 0 ? (
             <p className="text-xs text-gray-400 dark:text-gray-500 italic">{t("hooks.empty")}</p>
           ) : (

@@ -7,6 +7,9 @@ import { ProjectGroupsPanel } from "./components/ProjectGroupsPanel";
 import { ErrorBoundary } from "./components/ui/ErrorBoundary";
 import { ToastContainer } from "./components/Toast";
 import { OfflineBanner, type AutoFetchFailure } from "./components/OfflineBanner";
+import type { AutoFetchProgress } from "./components/RefreshStatus";
+import { LoadingBar } from "./components/ui/loading";
+import { ActiveOpsIndicator } from "./components/ActiveOpsIndicator";
 import { ProjectProvider } from "./context/ProjectContext";
 
 const AddProjectDialog = lazy(() => import("./components/AddProjectDialog"));
@@ -122,6 +125,11 @@ export default function App() {
   const {
     projects,
     loading,
+    isRefreshing,
+    isRefreshingAll,
+    refreshingProjectCount,
+    refreshingPaths,
+    lastRefreshedAt,
     addProject,
     removeProject,
     importWorkspace,
@@ -134,7 +142,7 @@ export default function App() {
     reorderProjects,
   } = useProjects(toast, activeGroup);
 
-  const { batchLoading, batchProgress, fetchAll, pullAll, pushAll, pullBehind, pushAhead, syncAll } = useBatchOps(toast, refreshAll, activeGroup);
+  const { batchLoading, batchProgress, batchTotal, batchStalled, dismissBatch, fetchAll, pullAll, pushAll, pullBehind, pushAhead, syncAll } = useBatchOps(toast, refreshAll, activeGroup);
 
   const { viewMode, setViewMode, settingsVersion, notifySettingsChanged, accentColor, setAccentColor } = useAppSettings(
     useCallback((msg: string) => toastRef.current.error(msg), [])
@@ -209,7 +217,7 @@ export default function App() {
     };
   }, [refreshAll, t]);
 
-  const { cancelOp, isOpActive, getActiveOp, getAnyActiveOp } = useGitOpTracker();
+  const { activeOps, cancelOp, isOpActive, getActiveOp, getAnyActiveOp } = useGitOpTracker();
 
   // ── Undo last destructive git operation ───────────────────────────────
   const { undoPrompt, undoLast, dismissUndo } = useOperationHistory({
@@ -238,26 +246,51 @@ export default function App() {
   // Fetches each project through the tracked per-project command so failures
   // can be aggregated and shown, instead of being swallowed silently.
   const autoFetchDoneRef = useRef(false);
+  // Re-entrancy guard: the offline banner's Retry button used to be able to
+  // start a second concurrent sweep over the same repositories.
+  const autoFetchRunningRef = useRef(false);
   const [autoFetchFailures, setAutoFetchFailures] = useState<AutoFetchFailure[]>([]);
+  const [autoFetchProgress, setAutoFetchProgress] = useState<AutoFetchProgress | null>(null);
   const runAutoFetch = useCallback(async () => {
+    if (autoFetchRunningRef.current) return;
     const targets = projectsRef.current.map((p) => ({ name: p.project.name, path: p.project.path }));
     if (targets.length === 0) return;
+
+    autoFetchRunningRef.current = true;
+    // Seed the counter before the first await so the header can say
+    // "fetching 0/12" on the very frame the sweep begins.
+    setAutoFetchProgress({ total: targets.length, done: 0, failed: 0, running: true });
+
     const failures: AutoFetchFailure[] = [];
     const queue = [...targets];
     const worker = async () => {
       for (;;) {
         const target = queue.shift();
         if (!target) return;
+        let failed = false;
         try {
           await gitFetch(target.path);
         } catch (e) {
           const message = parseError(e);
-          if (!isBenignFetchFailure(message)) failures.push({ ...target, message });
+          if (!isBenignFetchFailure(message)) {
+            failures.push({ ...target, message });
+            failed = true;
+          }
         }
+        setAutoFetchProgress((prev) =>
+          prev ? { ...prev, done: prev.done + 1, failed: prev.failed + (failed ? 1 : 0) } : prev
+        );
       }
     };
-    await Promise.all(Array.from({ length: Math.min(3, queue.length) }, worker));
-    setAutoFetchFailures(failures);
+    try {
+      await Promise.all(Array.from({ length: Math.min(3, queue.length) }, worker));
+    } finally {
+      autoFetchRunningRef.current = false;
+      setAutoFetchFailures(failures);
+      // Fold the finished sweep into the refresh status immediately rather
+      // than leaving a stuck "running" pill behind.
+      setAutoFetchProgress(null);
+    }
   }, []);
 
   useEffect(() => {
@@ -872,13 +905,23 @@ export default function App() {
     { bareKeysDisabled, terminalContextOwnsFocus: terminalContextFocus }
   );
 
+  // Stable identity on purpose: this value lives in ProjectContext, and every
+  // project row / panel keys its loaders on it. Recreating it whenever the
+  // toast list or the refresh bookkeeping changed used to re-fire those
+  // loaders (an open Git Operations panel re-read itself forever).
+  const projectError = useCallback(
+    (msg: string, rawError?: unknown, path?: string) =>
+      toastRef.current.error(msg, undefined, rawError, path),
+    []
+  );
+
   const projectActions = useMemo(
     () => ({
       onSwitchBranch: switchBranch,
       onRefresh: refreshProject,
       onRemove: handleRemoveRequest,
       onSuccess: toast.success,
-      onError: (msg: string, rawError?: unknown, path?: string) => toast.error(msg, undefined, rawError, path),
+      onError: projectError,
       onInfo: toast.info,
       onReorder: handleReorder,
       onAliasChange: updateAlias,
@@ -892,8 +935,9 @@ export default function App() {
       onPush: handlePushProject,
       onOpenBuiltInTerminal: handleOpenBuiltInTerminal,
       onRunProjectScript: handleRunProjectScript,
+      refreshingPaths,
     }),
-    [switchBranch, refreshProject, handleRemoveRequest, toast, handleReorder, updateAlias, setProjectColorLocally, isOpActive, getActiveOp, getAnyActiveOp, cancelOp, handleFetchProject, handlePullProject, handlePushProject, handleOpenBuiltInTerminal, handleRunProjectScript]
+    [switchBranch, refreshProject, handleRemoveRequest, toast, projectError, handleReorder, updateAlias, setProjectColorLocally, isOpActive, getActiveOp, getAnyActiveOp, cancelOp, handleFetchProject, handlePullProject, handlePushProject, handleOpenBuiltInTerminal, handleRunProjectScript, refreshingPaths]
   );
 
   return (
@@ -968,6 +1012,9 @@ export default function App() {
         <div
           className="relative flex-1 min-w-0 flex flex-col overflow-hidden gap-[var(--panel-gap)]"
         >
+          {/* Background refreshes keep the list on screen and only raise this
+              hairline — a skeleton would throw away data the user is reading. */}
+          <LoadingBar active={isRefreshing} label={t("header.activity.refreshingAll")} />
           {/* Menu bar — 流内 header 面板，内容不再从其下方滚过 */}
           <div className="app-panel shrink-0 z-20">
             <Header
@@ -1004,6 +1051,13 @@ export default function App() {
             behindCount={behindCount}
             aheadCount={aheadCount}
             needsAttention={needsAttention}
+            isRefreshingAll={isRefreshingAll}
+            refreshingProjectCount={refreshingProjectCount}
+            autoFetch={autoFetchProgress}
+            lastRefreshedAt={lastRefreshedAt}
+            batchTotal={batchTotal}
+            batchStalled={batchStalled}
+            onDismissBatch={dismissBatch}
             onAttentionClick={handleAttentionClick}
             onOpenShortcutsHelp={handleOpenShortcutsHelp}
           />
@@ -1015,6 +1069,7 @@ export default function App() {
             className="app-panel flex-1 min-h-[240px] min-w-0 overflow-y-auto px-3 pt-3 pb-3 sm:px-4 sm:pt-4 sm:pb-4 lg:px-6 lg:pt-6 lg:pb-6"
           >
             <ErrorBoundary>
+              <ActiveOpsIndicator ops={activeOps} onCancel={cancelOp} />
               <OfflineBanner
                 online={online}
                 failures={autoFetchFailures}

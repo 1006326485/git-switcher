@@ -28,6 +28,9 @@ const { terminals, FakeTerminal } = vi.hoisted(() => {
     onData() {
       return { dispose() {} };
     }
+    onTitleChange() {
+      return { dispose() {} };
+    }
     getSelection() {
       return this.selection;
     }
