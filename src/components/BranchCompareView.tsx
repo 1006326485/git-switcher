@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import * as api from "../lib/tauri";
 import type { BranchCompareResult } from "../lib/types";
 import { parseError } from "../lib/types";
+import { LoadingState } from "./ui/loading";
 
 interface BranchCompareViewProps {
   path: string;
@@ -57,10 +58,7 @@ export const BranchCompareView = memo(function BranchCompareView({
         {/* Content */}
         <div className="select-text flex-1 overflow-y-auto p-5 space-y-4">
           {loading && (
-            <div className="flex items-center justify-center py-8">
-              <div className="animate-spin rounded-full h-6 w-6 border-2 border-blue-500 border-t-transparent" />
-              <span className="ml-2 text-sm text-gray-500">{t("branchCompare.loading")}</span>
-            </div>
+            <LoadingState variant="block" label={t("branchCompare.loading")} />
           )}
 
           {error && (

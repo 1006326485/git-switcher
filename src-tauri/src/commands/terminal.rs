@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -101,6 +102,57 @@ impl TerminalManager {
     /// Session metadata in creation order — the shared tab list of all windows.
     pub fn list(&self) -> Vec<SessionMeta> {
         self.entries().iter().map(|e| e.meta.clone()).collect()
+    }
+
+    /// Replaces the shared tab order. `ordered_ids` must be a permutation of
+    /// the tracked sessions — a partial or stale list (a window that raced a
+    /// close or a new tab) is rejected rather than silently reordering a list
+    /// it does not fully describe.
+    pub fn reorder(&self, ordered_ids: &[String]) -> Result<(), AppError> {
+        let mut entries = self.entries();
+        if ordered_ids.len() != entries.len() {
+            return Err(AppError::Other(format!(
+                "reorder expected {} sessions, got {}",
+                entries.len(),
+                ordered_ids.len()
+            )));
+        }
+        let mut position = HashMap::with_capacity(ordered_ids.len());
+        for (index, id) in ordered_ids.iter().enumerate() {
+            if position.insert(id.as_str(), index).is_some() {
+                return Err(AppError::Other("reorder ids are not unique".to_string()));
+            }
+        }
+        for entry in entries.iter() {
+            if !position.contains_key(entry.meta.id.as_str()) {
+                return Err(AppError::Other(format!(
+                    "reorder missing session {}",
+                    entry.meta.id
+                )));
+            }
+        }
+        entries.sort_by_key(|entry| position[entry.meta.id.as_str()]);
+        Ok(())
+    }
+
+    /// Retitles a session from the shell's own title report (OSC 0/2), which
+    /// is how iTerm2's tabs track the cwd and the running command. A session
+    /// opened with an explicit command keeps the name it was given: "pnpm run
+    /// dev" says more than whatever that process later reports. Returns
+    /// whether anything changed so the caller can skip a pointless broadcast —
+    /// shells re-report the same title on every prompt.
+    pub fn set_title(&self, id: &str, title: &str) -> Result<bool, AppError> {
+        let title = title.trim();
+        let mut entries = self.entries();
+        let entry = entries
+            .iter_mut()
+            .find(|entry| entry.meta.id == id)
+            .ok_or_else(|| AppError::NotFound(format!("terminal session {}", id)))?;
+        if title.is_empty() || entry.meta.command.is_some() || entry.meta.title == title {
+            return Ok(false);
+        }
+        entry.meta.title = title.to_string();
+        Ok(true)
     }
 
     pub fn write(&self, id: &str, data: &str) -> Result<(), AppError> {
@@ -317,6 +369,34 @@ pub async fn terminal_list(
     Ok(state.list())
 }
 
+/// Drag-reorder of tabs / project groups: the frontend sends the full list in
+/// its new order and every other window re-renders from the broadcast.
+#[tauri::command]
+pub async fn terminal_reorder(
+    app: AppHandle,
+    state: State<'_, TerminalManager>,
+    ordered_ids: Vec<String>,
+) -> Result<(), AppError> {
+    state.reorder(&ordered_ids)?;
+    broadcast_sessions(&app, &state);
+    Ok(())
+}
+
+/// A shell reported its own title (OSC 0/2). Tabs follow it the way iTerm2's
+/// do, and the broadcast keeps every window's tab list identical.
+#[tauri::command]
+pub async fn terminal_set_title(
+    app: AppHandle,
+    state: State<'_, TerminalManager>,
+    id: String,
+    title: String,
+) -> Result<(), AppError> {
+    if state.set_title(&id, &title)? {
+        broadcast_sessions(&app, &state);
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn terminal_write(
     state: State<'_, TerminalManager>,
@@ -427,6 +507,77 @@ mod tests {
         manager.insert(b, meta("b"));
         let ids: Vec<String> = manager.list().into_iter().map(|m| m.id).collect();
         assert_eq!(ids, vec!["a".to_string(), "b".to_string()]);
+    }
+
+    /// Reorder only touches metadata, so these tests seed entries without a
+    /// pty: opening one needs OS pty permissions the sandbox may not grant.
+    fn manager_with(ids: &[&str]) -> TerminalManager {
+        let manager = TerminalManager::default();
+        {
+            let mut entries = manager.entries();
+            for id in ids {
+                entries.push(TerminalEntry {
+                    session: None,
+                    meta: meta(id),
+                });
+            }
+        }
+        manager
+    }
+
+    fn ids_of(manager: &TerminalManager) -> Vec<String> {
+        manager.list().into_iter().map(|m| m.id).collect()
+    }
+
+    #[test]
+    fn reorder_applies_a_full_permutation() {
+        let manager = manager_with(&["a", "b", "c"]);
+        manager
+            .reorder(&["c".to_string(), "a".to_string(), "b".to_string()])
+            .unwrap();
+        assert_eq!(ids_of(&manager), vec!["c", "a", "b"]);
+    }
+
+    #[test]
+    fn reorder_rejects_a_partial_or_duplicated_list() {
+        let manager = manager_with(&["a", "b"]);
+
+        // A stale list from a window that has not seen the new tab yet.
+        assert!(manager.reorder(&["a".to_string()]).is_err());
+        // Same count, wrong ids.
+        assert!(manager
+            .reorder(&["a".to_string(), "a".to_string()])
+            .is_err());
+        // No reordering happened on either rejection.
+        assert_eq!(ids_of(&manager), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn set_title_follows_the_shell_but_keeps_explicit_names() {
+        let manager = manager_with(&["a", "b"]);
+
+        // The shell's report is trimmed and stored.
+        assert!(manager
+            .set_title("a", "  ~/projects/git-switcher  ")
+            .unwrap());
+        assert_eq!(manager.list()[0].title, "~/projects/git-switcher");
+
+        // Shells re-report the same title on every prompt: no churn, no
+        // broadcast, and an empty report never blanks a tab.
+        assert!(!manager.set_title("a", "~/projects/git-switcher").unwrap());
+        assert!(!manager.set_title("a", "   ").unwrap());
+        assert_eq!(manager.list()[0].title, "~/projects/git-switcher");
+
+        // A tab opened with an explicit command keeps the name it was given.
+        {
+            let mut entries = manager.entries();
+            entries[1].meta.command = Some("pnpm run dev".to_string());
+        }
+        assert!(!manager.set_title("b", "dev server").unwrap());
+        assert_eq!(manager.list()[1].title, "zsh");
+
+        // Unknown sessions are reported, not silently dropped.
+        assert!(manager.set_title("gone", "x").is_err());
     }
 
     #[test]

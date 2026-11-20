@@ -124,5 +124,7 @@ export function useHorizontalScroll(ref: RefObject<HTMLElement | null>) {
     [ref]
   );
 
-  return { ...state, scrollBy };
+  // Callers whose *content* changes without resizing the box (a tab strip
+  // gaining tabs) re-measure through this instead of waiting for a scroll.
+  return { ...state, scrollBy, remeasure: update };
 }

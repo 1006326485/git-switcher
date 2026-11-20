@@ -8,6 +8,7 @@ import { OperationConfirmDialog } from "./OperationConfirmDialog";
 import { useContextMenu } from "../hooks/useContextMenu";
 import { ContextMenu, MenuSeparator } from "./ui/ContextMenu";
 import { MenuItem } from "./ui/primitives";
+import { LoadingState } from "./ui/loading";
 
 interface WorktreeManagerProps {
   path: string;
@@ -216,9 +217,7 @@ export const WorktreeManager = memo(function WorktreeManager({
 
           {/* Worktree list */}
           {loading && !showAddForm ? (
-            <p className="text-xs text-gray-400 dark:text-gray-500 italic py-1">
-              {t("common.loading")}
-            </p>
+            <LoadingState label={t("common.loading")} />
           ) : worktrees.length === 0 ? (
             <p className="text-xs text-gray-400 dark:text-gray-500 italic py-1">
               {t("worktrees.noWorktrees")}

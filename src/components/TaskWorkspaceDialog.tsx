@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ProjectDetail, TaskWorkspace, TaskWorkspaceDetail, TaskWorkspacePlan, TaskWorkspaceExecution, TaskWorkspaceOutcome, TaskStrategy } from "../lib/types";
 import * as api from "../lib/tauri";
 import { Modal } from "./ui/primitives";
+import { LoadingState } from "./ui/loading";
 import { OperationConfirmDialog } from "./OperationConfirmDialog";
 import { useTranslation } from "react-i18next";
 
@@ -21,6 +22,12 @@ export function TaskWorkspaceDialog({ open, projects, onClose, onSuccess, onErro
   const [description, setDescription] = useState("");
   const [projectIds, setProjectIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
+  // The workspace list has its own three-state lifecycle: a first fetch (no
+  // workspaces yet), a failure that is retryable in place, and only then the
+  // "nothing here yet" copy. Rendering the empty hint while `listTaskWorkspaces`
+  // is still in flight was the fake-empty state.
+  const [listLoading, setListLoading] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [plan, setPlan] = useState<TaskWorkspacePlan | null>(null);
   const [execution, setExecution] = useState<TaskWorkspaceExecution | null>(null);
@@ -28,8 +35,11 @@ export function TaskWorkspaceDialog({ open, projects, onClose, onSuccess, onErro
   const [confirmExecute, setConfirmExecute] = useState(false);
 
   const load = useCallback(async () => {
+    setListLoading(true);
+    setListError(null);
     try { setWorkspaces(await api.listTaskWorkspaces(showArchived)); }
-    catch (error) { onError(String(error)); }
+    catch (error) { setListError(String(error)); onError(String(error)); }
+    finally { setListLoading(false); }
   }, [onError, showArchived]);
 
   useEffect(() => { if (open) { setSelected(null); load(); } }, [open, load]);
@@ -84,7 +94,14 @@ export function TaskWorkspaceDialog({ open, projects, onClose, onSuccess, onErro
           <button onClick={create} disabled={loading || !name.trim()} className="px-3 py-1.5 rounded bg-[var(--accent)] text-white text-sm disabled:opacity-50">{t("taskws.create")}</button>
         </div>
         <label className="text-xs flex gap-2"><input type="checkbox" checked={showArchived} onChange={(event) => setShowArchived(event.target.checked)} />{t("taskws.showArchived")}</label>
-        <div className="space-y-2">{workspaces.map((workspace) => <button key={workspace.id} onClick={() => openWorkspace(workspace.id)} className="w-full text-left rounded border border-[var(--border-color)] p-3 hover:bg-[var(--surface-2)]"><div className="flex justify-between"><span className="font-medium">{workspace.name}</span><span className="text-xs text-gray-500">{workspace.status}</span></div><p className="text-xs text-gray-500 truncate">{workspace.description || t("taskws.noDescription")}</p></button>)}{workspaces.length === 0 && <p className="text-sm text-gray-500">{t("taskws.emptyHint")}</p>}</div>
+        <div className="space-y-2">{listLoading ? (
+          <LoadingState variant="inline" label={t("common.loading")} />
+        ) : listError ? (
+          <div className="space-y-1.5 rounded border border-red-200 dark:border-red-900 p-2">
+            <p className="text-sm text-red-600 dark:text-red-400">{t("taskws.loadFailed")}</p>
+            <button onClick={() => { void load(); }} className="px-2 py-1 text-xs rounded border border-[var(--border-color)] text-gray-600 dark:text-gray-300 hover:bg-[var(--surface-2)]">{t("common.retry")}</button>
+          </div>
+        ) : <>{workspaces.map((workspace) => <button key={workspace.id} onClick={() => openWorkspace(workspace.id)} className="w-full text-left rounded border border-[var(--border-color)] p-3 hover:bg-[var(--surface-2)]"><div className="flex justify-between"><span className="font-medium">{workspace.name}</span><span className="text-xs text-gray-500">{workspace.status}</span></div><p className="text-xs text-gray-500 truncate">{workspace.description || t("taskws.noDescription")}</p></button>)}{workspaces.length === 0 && <p className="text-sm text-gray-500">{t("taskws.emptyHint")}</p>}</>}</div>
       </>}
     </div>
     {confirmExecute && plan && <OperationConfirmDialog open operation="task_workspace_execute" targets={plan.entries.map((item) => ({ path: item.entry.project.path, label: item.entry.project.name }))} onConfirm={async () => { try { setLoading(true); setExecution({ workspace_id: plan.workspace_id, executed_at: new Date().toISOString(), outcomes: plan.entries.map((item) => ({ id: `pending-${item.entry.entry.id}`, workspace_id: plan.workspace_id, entry_id: item.entry.entry.id, state: "pending", message: t("taskws.pendingMessage", { name: item.entry.project.name }), start_branch: item.observed_branch, start_head: item.observed_head, result_branch: null, worktree_path: item.entry.entry.worktree_path, created_at: new Date().toISOString() })) }); const result = await api.executeTaskWorkspacePlan(plan); setExecution(result); setOutcomes(result.outcomes); } catch (error) { onError(String(error)); } finally { setLoading(false); setConfirmExecute(false); } }} onCancel={() => setConfirmExecute(false)} />}

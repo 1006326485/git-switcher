@@ -10,6 +10,7 @@ import {
   applySessions,
   nextActiveInProject,
   nextProjectKey,
+  orderSessions,
   projectKeys,
   sessionsOfProject,
   setActive,
@@ -78,11 +79,44 @@ function disposeSafely(term: Terminal) {
  */
 export function useTerminal() {
   const [tabs, setTabs] = useState<TerminalTabsState>(EMPTY_TABS);
+  /**
+   * True until the first `terminal_list` settles. Without this the workspace
+   * could not tell "we have not asked yet" from "you have no sessions", so
+   * summoning a window with live shells briefly showed the empty-canvas
+   * prose ("No terminals open") before the tabs popped in.
+   */
+  const [bootstrapping, setBootstrapping] = useState(true);
+  /** Set when the first `terminal_list` failed; the list may be incomplete. */
+  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+  /**
+   * Sessions whose pty has produced output in this window. The pane can be
+   * mounted before the shell prints anything (zsh + rc files take a few
+   * hundred ms), and a blank canvas is indistinguishable from a hung one.
+   */
+  const [readyIds, setReadyIds] = useState<ReadonlySet<string>>(() => new Set());
   const viewsRef = useRef(new Map<string, TerminalView>());
   const pendingRef = useRef(new Map<string, Uint8Array[]>());
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
   const darkRef = useRef(false);
+
+  /**
+   * Reads the live session list from the backend. Previously fired once,
+   * unchecked: a failure was swallowed and left the workspace rendering the
+   * "no terminals" slate forever, with no way to recover.
+   */
+  const loadSessions = useCallback(async () => {
+    setBootstrapping(true);
+    setBootstrapError(null);
+    try {
+      const list = await api.terminalList();
+      setTabs((prev) => applySessions(prev, list));
+    } catch (error) {
+      setBootstrapError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBootstrapping(false);
+    }
+  }, []);
 
   useEffect(() => {
     const unlistenData = listen<{ id: string; data: string }>("terminal-data", (event) => {
@@ -90,6 +124,9 @@ export function useTerminal() {
       const bytes = base64ToBytes(data);
       const view = viewsRef.current.get(id);
       if (view) {
+        // First bytes for this session in this window: the shell is alive, so
+        // the "starting" overlay can go away.
+        setReadyIds((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
         view.term.write(bytes);
         // TEMP-DIAG: diag() dedups on state change, so this is cheap unless the
         // scroll state actually moved — that is exactly the transition to catch.
@@ -112,10 +149,7 @@ export function useTerminal() {
       setTabs((prev) => (prev.sessions.some((s) => s.id === id) ? setActive(prev, id) : prev));
     });
 
-    api
-      .terminalList()
-      .then((list) => setTabs((prev) => applySessions(prev, list)))
-      .catch(() => {});
+    loadSessions();
 
     return () => {
       unlistenData.then((fn) => fn()).catch(() => {});
@@ -123,6 +157,29 @@ export function useTerminal() {
       unlistenFocus.then((fn) => fn()).catch(() => {});
     };
   }, []);
+
+  // Keep the readiness set in step with the session list: drop ids whose
+  // session is gone (they can never be rendered again) and treat an already
+  // exited session as ready — it will never print another byte, so an
+  // "Starting shell…" overlay on it would be a permanent lie.
+  useEffect(() => {
+    setReadyIds((prev) => {
+      const known = new Set(tabs.sessions.map((s) => s.id));
+      const next = new Set<string>();
+      let changed = false;
+      for (const id of prev) {
+        if (known.has(id)) next.add(id);
+        else changed = true; // session gone: it can never render again
+      }
+      for (const session of tabs.sessions) {
+        if (session.exited && !next.has(session.id)) {
+          next.add(session.id);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [tabs.sessions]);
 
   useEffect(() => {
     const views = viewsRef.current;
@@ -207,6 +264,26 @@ export function useTerminal() {
     await Promise.all(ids.map((id) => api.terminalClose(id).catch(() => {})));
   }, [disposeView]);
 
+  /**
+   * Drag-reorder: applies the new order locally at once (the tab must land
+   * under the pointer without waiting on IPC) and mirrors it to the backend,
+   * which broadcasts it to the other windows. A rejected list means the
+   * window raced a close/open; resync instead of trusting a private order.
+   */
+  const reorderSessions = useCallback((orderedIds: string[]) => {
+    setTabs((prev) => {
+      const sessions = orderSessions(prev.sessions, orderedIds);
+      if (sessions.every((session, index) => session === prev.sessions[index])) return prev;
+      return { ...prev, sessions };
+    });
+    api.terminalReorder(orderedIds).catch(() => {
+      api
+        .terminalList()
+        .then((list) => setTabs((prev) => applySessions(prev, list)))
+        .catch(() => {});
+    });
+  }, []);
+
   const selectTerminal = useCallback((id: string) => {
     setTabs((prev) => setActive(prev, id));
   }, []);
@@ -260,9 +337,28 @@ export function useTerminal() {
     diagReset(id);
     diag(id, "attach", term, true);
     term.onData((data) => {
+      // Typing counts as proof of life: a command that prints nothing at all
+      // (say `sleep 60`) would otherwise leave the "starting" cover up while
+      // the user types invisibly underneath it.
+      setReadyIds((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
       // TEMP-DIAG: record what the user typed and whether it jumped the viewport.
       diag(id, "onData", term, true, `data=${JSON.stringify(data.slice(0, 24))}`);
       writeToPty(id, data);
+    });
+    // The shell reports its own title on every prompt (OSC 2, the one xterm
+    // surfaces as `onTitleChange`), so a tab's name follows the cwd and whatever
+    // is running instead of freezing at the spawn-time title. The report is kept
+    // whole: how much of it fits is the tab's business, and the label is
+    // truncated to the width it is given. Repeats are dropped here so a prompt
+    // that re-sends the same title costs neither a round trip nor a broadcast,
+    // and an empty report never blanks a tab. The backend likewise ignores
+    // reports for tabs that were opened with an explicit command.
+    let reported = "";
+    term.onTitleChange((title) => {
+      const next = title.trim();
+      if (!next || next === reported) return;
+      reported = next;
+      api.terminalSetTitle(id, next).catch(() => {});
     });
     viewsRef.current.set(id, { term, fitAddon });
     const pending = pendingRef.current.get(id);
@@ -361,6 +457,7 @@ export function useTerminal() {
     closeProjectTerminals,
     closeAllTerminals,
     selectTerminal,
+    reorderSessions,
     setActiveProject: selectProject,
     selectAdjacentProject,
     selectTerminalByIndex,
@@ -374,5 +471,10 @@ export function useTerminal() {
     clearScreen,
     sendInput,
     setTerminalDark,
+    bootstrapping,
+    bootstrapError,
+    retrySessions: loadSessions,
+    /** True once the session's pty has printed something (or already exited). */
+    isSessionReady: (id: string) => readyIds.has(id),
   };
 }

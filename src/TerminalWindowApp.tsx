@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
@@ -8,6 +8,12 @@ import { getSettings, terminalWindowDismiss } from "./lib/tauri";
 import { formatHotkey } from "./lib/hotkey";
 import { syncLanguageFromSettings } from "./hooks/useLanguage";
 import { isDirtyChord, installHeldKeyTracking } from "./lib/heldKeys";
+
+// How long a blur must last before we re-check it, so the transient key
+// flicker of a summon (resign key → become key) never hides the window.
+const BLUR_HIDE_DELAY_MS = 250;
+// Fresh-focus grace window: blur arriving right after a summon is ignored.
+const BLUR_HIDE_GRACE_MS = 500;
 
 /**
  * Standalone terminal window summoned by the global hotkey — terminal UI only,
@@ -40,11 +46,47 @@ export const TerminalWindowApp = memo(function TerminalWindowApp() {
     void terminalWindowDismiss();
   }, []);
 
+  // Debounce + re-check instead of hiding on the first blur: summoning shakes
+  // the key window for a frame and that phantom blur used to hide the panel
+  // the user had just opened.
+  const lastFocusAtRef = useRef(0);
+
   useEffect(() => {
     if (!hideOnBlur) return;
-    const onBlur = () => void getCurrentWindow().hide();
+    const win = getCurrentWindow();
+    let timer: number | undefined;
+
+    const onFocus = () => {
+      lastFocusAtRef.current = Date.now();
+      if (timer) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+    };
+
+    const onBlur = () => {
+      if (timer) clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        timer = undefined;
+        if (Date.now() - lastFocusAtRef.current < BLUR_HIDE_GRACE_MS) return;
+        // A failed check means "stay visible": hiding the window by mistake
+        // would leave the user with no way to explain where it went.
+        Promise.resolve()
+          .then(() => win.isFocused())
+          .then((focused) => {
+            if (!focused) void win.hide();
+          })
+          .catch(() => {});
+      }, BLUR_HIDE_DELAY_MS);
+    };
+
+    window.addEventListener("focus", onFocus);
     window.addEventListener("blur", onBlur);
-    return () => window.removeEventListener("blur", onBlur);
+    return () => {
+      if (timer) clearTimeout(timer);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("blur", onBlur);
+    };
   }, [hideOnBlur]);
 
   // The main window persists settings through the backend; pick up a language

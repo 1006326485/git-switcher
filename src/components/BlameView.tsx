@@ -6,6 +6,7 @@ import type { TFunction } from "i18next";
 import * as api from "../lib/tauri";
 import type { BlameLine } from "../lib/types";
 import { parseError } from "../lib/types";
+import { LoadingState } from "./ui/loading";
 
 interface BlameViewProps {
   path: string;
@@ -136,7 +137,7 @@ export const BlameView = memo(function BlameView({ path, filePath, onClose }: Bl
         {/* Content */}
         <div ref={scrollRef} className="select-text flex-1 overflow-auto font-mono text-xs leading-5">
           {loading ? (
-            <div className="flex items-center justify-center h-full text-gray-400">{t("blame.loading")}</div>
+            <LoadingState variant="block" label={t("blame.loading")} />
           ) : error ? (
             <div className="flex items-center justify-center h-full text-red-500">{error}</div>
           ) : lines.length === 0 ? (

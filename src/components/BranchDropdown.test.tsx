@@ -42,6 +42,60 @@ describe("BranchDropdown ref grouping", () => {
   });
 });
 
+describe("BranchDropdown current branch ordering", () => {
+  beforeEach(() => {
+    class ObserverStub {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    window.ResizeObserver = ObserverStub as unknown as typeof ResizeObserver;
+    Element.prototype.scrollIntoView = vi.fn();
+  });
+
+  // The terminal pill opens this picker; the first option must name the
+  // branch already checked out, not whichever local branch sorts first
+  // alphabetically.
+  const unsorted: BranchInfo[] = [
+    { name: "alpha", is_current: false, is_remote: false, is_merged: false, is_tag: false },
+    { name: "main", is_current: true, is_remote: false, is_merged: true, is_tag: false },
+    { name: "zeta", is_current: false, is_remote: false, is_merged: false, is_tag: false },
+    { name: "origin/alpha", is_current: false, is_remote: true, is_merged: false, is_tag: false },
+    { name: "v0.9.0", is_current: false, is_remote: false, is_merged: false, is_tag: true },
+  ];
+
+  it("lists the checked-out branch first when the menu opens", () => {
+    render(<BranchDropdown currentBranch="main" branches={unsorted} onSwitch={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /branch: main/i }));
+
+    const options = screen.getAllByRole("option");
+    expect(options[0]).toHaveTextContent("main");
+    // It is still the (non-selectable) current branch, marked as such.
+    expect(options[0]).toHaveAttribute("aria-disabled", "true");
+    expect(options.map((o) => o.textContent)).toEqual([
+      expect.stringContaining("main"),
+      expect.stringContaining("alpha"),
+      expect.stringContaining("zeta"),
+      expect.stringContaining("origin/alpha"),
+      expect.stringContaining("v0.9.0"),
+    ]);
+  });
+
+  it("keeps the checked-out branch first among search matches", () => {
+    render(<BranchDropdown currentBranch="main" branches={unsorted} onSwitch={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /branch: main/i }));
+    const search = screen.getByRole("textbox", { name: /search/i });
+
+    // "a" matches main, alpha, zeta and origin/alpha; current still leads.
+    fireEvent.change(search, { target: { value: "a" } });
+    expect(screen.getAllByRole("option")[0]).toHaveTextContent("main");
+
+    // When the current branch does not match, the top match is simply first.
+    fireEvent.change(search, { target: { value: "zeta" } });
+    expect(screen.getAllByRole("option")[0]).toHaveTextContent("zeta");
+  });
+});
+
 describe("BranchDropdown long branch names", () => {
   // Regression: the compact terminal pill clamps at max-w-40 and the popover
   // keeps the trigger's width (min 280px), so a long branch used to lose its

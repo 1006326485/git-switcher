@@ -4,6 +4,10 @@ import { createPortal } from "react-dom";
 import { useDropdownPortal } from "../../hooks/useDropdownPortal";
 import { filterByFuzzy, parseFuzzyQuery } from "../../lib/fuzzyMatch";
 import { popoverAnimation } from "./primitives";
+import { Skeleton, SkeletonGroup } from "./loading";
+
+/** Placeholder label widths for the loading rows — varied like real labels. */
+const SKELETON_OPTION_WIDTHS = ["62%", "44%", "55%"];
 
 export interface SelectOption {
   value: string;
@@ -41,6 +45,14 @@ interface SelectDropdownProps {
    * (e.g. Cmd+N = the active project).
    */
   preferredValue?: string;
+  /**
+   * The options come from an async source that has not answered yet. An empty
+   * list and a pending list used to render identically ("no options"), which
+   * reads as "your data is gone" rather than "wait a beat".
+   */
+  loading?: boolean;
+  /** Copy for the loading row; defaults to the shared "Loading…". */
+  loadingLabel?: string;
 }
 
 /**
@@ -67,6 +79,8 @@ export const SelectDropdown = memo(function SelectDropdown({
   onOpenSignal,
   onAfterSelect,
   preferredValue,
+  loading = false,
+  loadingLabel,
 }: SelectDropdownProps) {
   const { t } = useTranslation();
   const defaultPlaceholder = t("ui.select.placeholder");
@@ -271,8 +285,10 @@ export const SelectDropdown = memo(function SelectDropdown({
           className={`origin-bottom-left bg-(--surface-1) border border-(--border-color) rounded-xl shadow-lg overflow-hidden ${popoverAnimation}`}
         >
           {/* Stays mounted while a query is active: hiding it would drop the
-              filter as soon as the results shrink below the threshold. */}
-          {(options.length > 5 || search.length > 0) && (
+              filter as soon as the results shrink below the threshold. Shown
+              while loading too — the box is part of the panel's final shape,
+              and popping it in later would shove the options down. */}
+          {(loading || options.length > 5 || search.length > 0) && (
             <div className="p-2 border-b border-(--border-color)">
               <input
                 ref={inputRef}
@@ -298,8 +314,14 @@ export const SelectDropdown = memo(function SelectDropdown({
               />
             </div>
           )}
-          <div ref={listRef} role="listbox" aria-label={t("ui.select.options")} className="overflow-y-auto max-h-65 py-1">
-            {filtered.length === 0 ? (
+          <div
+            ref={listRef}
+            role="listbox"
+            aria-label={t("ui.select.options")}
+            aria-busy={loading}
+            className="overflow-y-auto max-h-65 py-1"
+          >
+            {!loading && filtered.length === 0 ? (
               <div className="px-3 py-4 text-sm text-gray-500 dark:text-gray-400 text-center">
                 {t("ui.select.noOptions")}
               </div>
@@ -342,6 +364,28 @@ export const SelectDropdown = memo(function SelectDropdown({
                   </button>
                 );
               })
+            )}
+            {/* BELOW the options that already arrived: `Home` is a real,
+                clickable choice; only the project rows are still pending, and
+                pending rows belong at the end of the list, not above it. */}
+            {loading && (
+              <div data-testid="select-dropdown-loading">
+                {/* Same geometry as an option row — `px-3 py-2` around a 20px
+                    line box (`h-5`, the height of `text-sm`/leading-5), with a
+                    right-hand hint bar that matches the `text-[10px]` path hint
+                    the project rows carry. */}
+                <SkeletonGroup>
+                  {SKELETON_OPTION_WIDTHS.map((width, i) => (
+                    <div key={i} className="px-3 py-2 flex items-center gap-2">
+                      <div className="flex h-5 min-w-0 flex-1 items-center">
+                        <Skeleton className="h-4 rounded-sm" style={{ width }} />
+                      </div>
+                      {i === 0 && <Skeleton className="h-3 w-12 shrink-0 rounded-sm" />}
+                    </div>
+                  ))}
+                </SkeletonGroup>
+                <span className="sr-only">{loadingLabel ?? t("ui.select.loading")}</span>
+              </div>
             )}
           </div>
         </div>,

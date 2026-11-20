@@ -607,12 +607,22 @@ export async function terminalList(): Promise<TerminalSessionState[]> {
   return invoke("terminal_list");
 }
 
+/** Persists the shared tab order (drag-reorder) for every window. */
+export async function terminalReorder(orderedIds: string[]): Promise<void> {
+  return invoke("terminal_reorder", { orderedIds });
+}
+
 export async function terminalWrite(id: string, data: string): Promise<void> {
   return invoke("terminal_write", { id, data });
 }
 
 export async function terminalResize(id: string, cols: number, rows: number): Promise<void> {
   return invoke("terminal_resize", { id, cols, rows });
+}
+
+/** Mirrors a shell's own OSC title report into the shared tab list. */
+export async function terminalSetTitle(id: string, title: string): Promise<void> {
+  return invoke("terminal_set_title", { id, title });
 }
 
 export async function terminalClose(id: string): Promise<void> {

@@ -12,6 +12,7 @@ import { useContextMenu } from "../hooks/useContextMenu";
 import { setProjectDescription, setProjectNotes, setProjectColor, setProjectAlias, listGroups, assignToGroup } from "../lib/tauri";
 import { useTranslation, Trans } from "react-i18next";
 import { useProjectActions } from "../context/ProjectContext";
+import { Spinner } from "./ui/loading";
 import { isDirtyChord } from "../lib/heldKeys";
 import type { ActiveGitOp } from "../hooks/useGitOpTracker";
 
@@ -406,8 +407,8 @@ function ActiveOpBanner({ op, onCancel }: { op: ActiveGitOp; onCancel?: () => vo
   return (
     <div className="px-4 pb-1">
       <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-xs text-blue-700 dark:text-blue-300">
-        <span className="animate-spin text-sm">&#x21BB;</span>
-        <span className="font-medium">{label}...</span>
+        <Spinner size="sm" />
+        <span className="font-medium">{label}…</span>
         {elapsed > 0 && (
           <span className="text-blue-500 dark:text-blue-400 tabular-nums">
             {t("row.op.elapsed", { time: elapsed })}
@@ -525,7 +526,7 @@ const ActionButtons = memo(function ActionButtons({
           className="p-1.5 rounded-lg text-gray-400 opacity-50 hover:opacity-100 transition-all duration-150 disabled:opacity-30 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 active:scale-[0.95]"
         >
           {fetching ? (
-            <span className="animate-spin inline-block text-xs">&#x21BB;</span>
+            <Spinner size="xs" />
           ) : (
             <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
               <path d="M8 2.5a5.487 5.487 0 00-4.131 1.869l1.204 1.204A.25.25 0 014.896 6H1.25A.25.25 0 011 5.75V2.104a.25.25 0 01.427-.177l1.38 1.38A7.001 7.001 0 0115 8a.75.75 0 01-1.5 0A5.5 5.5 0 008 2.5zM2.25 9.25a.25.25 0 00-.25.25v3.646a.25.25 0 00.427.177l1.38-1.38A7.001 7.001 0 0015 8a.75.75 0 011.5 0 8.501 8.501 0 01-14.131 4.869l1.204 1.204A.25.25 0 012.104 14H5.75a.25.25 0 000-1.5H2.25z" />
@@ -542,7 +543,7 @@ const ActionButtons = memo(function ActionButtons({
           className="p-1.5 rounded-lg text-gray-400 opacity-50 hover:opacity-100 transition-all duration-150 disabled:opacity-30 hover:text-green-500 hover:bg-green-50 dark:hover:bg-green-900/20 active:scale-[0.95]"
         >
           {pulling ? (
-            <span className="animate-spin inline-block text-xs">&#x21BB;</span>
+            <Spinner size="xs" />
           ) : (
             <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
               <path d="M2.75 14A1.75 1.75 0 011 12.25v-2.5a.75.75 0 011.5 0v2.5c0 .138.112.25.25.25h10.5a.25.25 0 00.25-.25v-2.5a.75.75 0 011.5 0v2.5A1.75 1.75 0 0113.25 14H2.75z" />
@@ -560,7 +561,7 @@ const ActionButtons = memo(function ActionButtons({
           className="p-1.5 rounded-lg text-gray-400 opacity-50 hover:opacity-100 transition-all duration-150 disabled:opacity-30 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 active:scale-[0.95]"
         >
           {pushing ? (
-            <span className="animate-spin inline-block text-xs">&#x21BB;</span>
+            <Spinner size="xs" />
           ) : (
             <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
               <path d="M13.25 14A1.75 1.75 0 0015 12.25v-2.5a.75.75 0 00-1.5 0v2.5a.25.25 0 01-.25.25H2.75a.25.25 0 01-.25-.25v-2.5a.75.75 0 00-1.5 0v2.5c0 .966.784 1.75 1.75 1.75h10.5z" />
@@ -602,9 +603,7 @@ const ActionButtons = memo(function ActionButtons({
         <ClockIcon />
       </IconButton>
       <IconButton onClick={row.handleRefresh} title={t("row.buttons.refresh")} hoverColor="gray">
-        <span className={row.refreshing ? "animate-spin inline-block text-sm" : "text-sm"}>
-          &#x21BB;
-        </span>
+        {row.refreshing ? <Spinner size="sm" /> : <span className="text-sm">&#x21BB;</span>}
       </IconButton>
       <ProjectContextMenu
         projectId={project.id}

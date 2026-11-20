@@ -7,6 +7,7 @@ import { parseError } from "../lib/types";
 import { useContextMenu } from "../hooks/useContextMenu";
 import { ContextMenu } from "./ui/ContextMenu";
 import { MenuItem } from "./ui/primitives";
+import { LoadingState } from "./ui/loading";
 
 interface SubmoduleManagerProps {
   path: string;
@@ -127,9 +128,7 @@ export const SubmoduleManager = memo(function SubmoduleManager({
       {showList && (
         <div className="space-y-2">
           {loading ? (
-            <p className="text-xs text-gray-400 dark:text-gray-500 italic py-1">
-              {t("submodules.loading")}
-            </p>
+            <LoadingState label={t("submodules.loading")} />
           ) : submodules.length === 0 ? (
             <p className="text-xs text-gray-400 dark:text-gray-500 italic py-1">
               {t("submodules.empty")}

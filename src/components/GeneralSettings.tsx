@@ -9,6 +9,7 @@ import { getSettings, updateSettingsPartial } from "../lib/tauri";
 import { applyTheme, broadcastThemeChange } from "../hooks/useTheme";
 import { bindingToDisplayParts, normalizeBinding } from "../lib/hotkey";
 import { applyLanguageChoice, type LanguageChoice } from "../lib/i18n";
+import { LoadingState } from "./ui/loading";
 
 interface GeneralSettingsProps {
   onError: (msg: string) => void;
@@ -117,7 +118,7 @@ export const GeneralSettings = memo(function GeneralSettings({ onError, accentCo
   );
 
   if (!settings) {
-    return <div className="text-sm text-gray-500 dark:text-gray-400">{t("common.loading")}</div>;
+    return <LoadingState variant="block" label={t("common.loading")} />;
   }
 
   return (

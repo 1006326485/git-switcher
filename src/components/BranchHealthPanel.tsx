@@ -5,6 +5,7 @@ import type { BranchHealthItem, BranchHealthReport } from "../lib/types";
 import { deleteMergedBranches } from "../lib/tauri";
 import { useOptionalProjectActions } from "../context/ProjectContext";
 import { OperationConfirmDialog } from "./OperationConfirmDialog";
+import { Skeleton, SkeletonGroup } from "./ui/loading";
 
 interface BranchHealthPanelProps {
   reports: Array<{ projectName: string; path: string; report: BranchHealthReport }>;
@@ -72,14 +73,25 @@ export const BranchHealthPanel = memo(function BranchHealthPanel({
   }, [allMerged, actions, onRefresh]);
 
   if (loading) {
+    // First paint only: placeholder mirrors the loaded panel — a title bar
+    // followed by three branch rows — so the panel does not jump when the
+    // report lands. Bars carry --skeleton; the group owns the only pulse.
     return (
-      <div className="bg-(--surface-1) rounded-xl border border-(--border-color) p-4 animate-pulse">
-        <div className="h-5 bg-gray-200 dark:bg-gray-700 rounded w-40 mb-4" />
-        <div className="space-y-2">
+      <div
+        className="bg-(--surface-1) rounded-xl border border-(--border-color) p-4"
+        aria-busy="true"
+        data-testid="branch-health-skeleton"
+      >
+        <SkeletonGroup className="space-y-2">
+          <Skeleton className="h-5 w-40 mb-4" />
           {[1, 2, 3].map((i) => (
-            <div key={i} className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-full" />
+            <div key={i} className="flex items-center justify-between gap-3">
+              <Skeleton className="h-4 flex-1 max-w-[60%]" />
+              <Skeleton className="h-3 w-16" />
+            </div>
           ))}
-        </div>
+        </SkeletonGroup>
+        <span className="sr-only">{t("common.loading")}</span>
       </div>
     );
   }

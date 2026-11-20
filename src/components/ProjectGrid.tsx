@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -28,7 +28,19 @@ import { ProjectList } from "./ProjectList";
 import { ProjectCompact } from "./ProjectCompact";
 import { ProjectTable } from "./ProjectTable";
 import { DashboardView, type DashboardFilter } from "./DashboardView";
-import { SkeletonRow, SkeletonCard, SkeletonTable } from "./ui/Skeleton";
+import { SkeletonRow, SkeletonCard, SkeletonTable, SkeletonDashboard, SkeletonGroup, CARD_GRID } from "./ui/Skeleton";
+
+// Mirrors ProjectTable's <thead> (name, branch, modified, staged, untracked,
+// ahead, behind, stash, actions). Kept here so the table skeleton draws the
+// same number of columns the real table does.
+const TABLE_COLUMNS = 9;
+
+/**
+ * How long the skeleton→content crossfade runs. Matches the
+ * `loadingFadeIn` keyframes in styles/globals.css (180ms) plus a frame of
+ * slack, so the one-shot class is dropped only after the fade has finished.
+ */
+const CROSSFADE_MS = 200;
 
 const SORT_KEYS: Record<SortOption, "custom" | "nameAsc" | "nameDesc" | "modified" | "changes" | "branch"> = {
   custom: "custom",
@@ -149,6 +161,25 @@ export const ProjectGrid = memo(function ProjectGrid({
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
+  // Crossfade: only the skeleton → content swap fades. The list itself stays
+  // mounted across refreshes, so this one-shot class is raised exactly once
+  // per placeholder replacement (and dropped again after the fade, so a later
+  // remount cannot replay it out of context). Reduced motion cancels the
+  // animation in CSS — the class then simply does nothing.
+  const wasLoadingRef = useRef(loading);
+  const [crossfading, setCrossfading] = useState(false);
+
+  useEffect(() => {
+    const replacedSkeleton = wasLoadingRef.current && !loading;
+    wasLoadingRef.current = loading;
+    if (!replacedSkeleton) return;
+    setCrossfading(true);
+    const timer = window.setTimeout(() => setCrossfading(false), CROSSFADE_MS);
+    return () => window.clearTimeout(timer);
+  }, [loading]);
+
+  const crossfadeClass = crossfading ? " loading-fade-in" : "";
+
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 8 },
@@ -178,53 +209,42 @@ export const ProjectGrid = memo(function ProjectGrid({
   const sortableIds = useMemo(() => projects.map((p) => p.project.id), [projects]);
 
   if (loading) {
+    // One `animate-pulse` per view, not per bar: the bars carry the shimmer,
+    // the group carries the breath, so the placeholder cannot stack opacity
+    // and the card borders stay calm.
     if (viewMode === "list" || viewMode === "compact") {
       return (
-        <div className="flex flex-col gap-2">
+        <SkeletonGroup className="flex flex-col gap-2">
           {Array.from({ length: 8 }).map((_, i) => (
             <SkeletonRow key={i} compact={viewMode === "compact"} />
           ))}
-        </div>
+        </SkeletonGroup>
       );
     }
 
     if (viewMode === "table") {
-      return <SkeletonTable />;
+      return (
+        <SkeletonGroup>
+          <SkeletonTable columns={TABLE_COLUMNS} />
+        </SkeletonGroup>
+      );
     }
 
     if (viewMode === "dashboard") {
       return (
-        <div className="space-y-6 animate-pulse">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
-                <div className="h-8 bg-gray-200 dark:bg-gray-700 rounded w-12 mb-2" />
-                <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded w-24" />
-              </div>
-            ))}
-          </div>
-          <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
-            <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-24 mb-3" />
-            <div className="grid grid-cols-3 gap-4">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="text-center">
-                  <div className="h-7 bg-gray-200 dark:bg-gray-700 rounded w-10 mx-auto mb-1" />
-                  <div className="h-3 bg-gray-100 dark:bg-gray-700/50 rounded w-16 mx-auto" />
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+        <SkeletonGroup>
+          <SkeletonDashboard />
+        </SkeletonGroup>
       );
     }
 
     // card (default)
     return (
-      <div className="grid grid-cols-1 gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+      <SkeletonGroup className={CARD_GRID}>
         {Array.from({ length: 8 }).map((_, i) => (
           <SkeletonCard key={i} />
         ))}
-      </div>
+      </SkeletonGroup>
     );
   }
 
@@ -341,13 +361,29 @@ export const ProjectGrid = memo(function ProjectGrid({
   const content = (() => {
     switch (viewMode) {
       case "dashboard":
-        return <DashboardView projects={projects} onDrillDown={onDashboardDrillDown} />;
+        return (
+          <div className={crossfadeClass}>
+            <DashboardView projects={projects} onDrillDown={onDashboardDrillDown} />
+          </div>
+        );
       case "list":
-        return <ProjectList projects={projects} sortable={sortable} focusedIndex={focusedIndex} />;
+        return (
+          <div className={crossfadeClass}>
+            <ProjectList projects={projects} sortable={sortable} focusedIndex={focusedIndex} />
+          </div>
+        );
       case "compact":
-        return <ProjectCompact projects={projects} sortable={sortable} focusedIndex={focusedIndex} />;
+        return (
+          <div className={crossfadeClass}>
+            <ProjectCompact projects={projects} sortable={sortable} focusedIndex={focusedIndex} />
+          </div>
+        );
       case "table":
-        return <ProjectTable projects={projects} focusedIndex={focusedIndex} />;
+        return (
+          <div className={crossfadeClass}>
+            <ProjectTable projects={projects} focusedIndex={focusedIndex} />
+          </div>
+        );
       case "card":
       default: {
         // Expanding Git Operations makes the card itself take the whole grid
@@ -377,7 +413,7 @@ export const ProjectGrid = memo(function ProjectGrid({
             : cardExpandInFromLeft;
 
         return (
-          <div className="grid grid-cols-1 gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 items-start">
+          <div className={`${CARD_GRID} items-start${crossfadeClass}`}>
             {projects.map((detail, index) => {
               const expanded = expandedIndex === index;
               const collapsing = closingIndex === index;

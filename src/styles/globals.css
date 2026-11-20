@@ -50,6 +50,11 @@
     0 1px 2px rgb(16 24 40 / 0.06),
     0 8px 24px rgb(16 24 40 / 0.08);
 
+  /* Terminal tab width. Tabs never shrink to their titles: a fixed slot keeps
+   * the strip scannable and makes ⌘←→ / click-to-scroll land predictably,
+   * while the strip itself scrolls once the tabs no longer fit. */
+  --term-tab-width: 11rem;
+
   /* Semantic status — backgrounds */
   --status-modified-bg: var(--color-yellow-100);
   --status-staged-bg: var(--color-green-100);
@@ -65,6 +70,14 @@
   --status-ahead-text: var(--color-blue-800);
   --status-behind-text: var(--color-purple-800);
   --status-error-text: var(--color-red-800);
+
+  /* Loading — skeleton bars and their shimmer highlight. The base bar sits
+   * one notch below the pane it fills so it reads as an empty placeholder;
+   * the highlight is a lighten of that same bar, never a white flash. */
+  --skeleton: var(--color-gray-200);
+  --skeleton-highlight: var(--color-gray-100);
+  --loading-bar-h: 2px;
+  --loading-bar-track: var(--color-gray-200);
 }
 
 .dark {
@@ -98,6 +111,12 @@
   --status-ahead-text: var(--color-blue-300);
   --status-behind-text: var(--color-purple-300);
   --status-error-text: var(--color-red-300);
+
+  /* Dark bars must recede from --surface-2 (#252836), not glow above it, so
+   * they step *down* instead of up. */
+  --skeleton: #2c3040;
+  --skeleton-highlight: #363b4e;
+  --loading-bar-track: rgb(255 255 255 / 0.08);
 }
 
 /* ═══ Component Specifications ═══
@@ -821,8 +840,31 @@ body {
 /* ═══ Accessibility Preferences ═══ */
 
 /* Reduced motion: collapse animation/transition timing to an instant.
- * Spinners/pulses are kept — they are continuous status feedback, not
- * decorative motion (Vestibular-safe loading indication). */
+ *
+ * Loading status must stay perceivable, so two opt-outs follow. They carry
+ * explicit durations instead of `revert`: `revert` rolls back to the UA
+ * origin rather than to Tailwind's utilities layer, which leaves spinners
+ * either frozen or flickering at 0.01ms × infinite — a photosensitivity
+ * hazard precisely for the users who asked for less motion.
+ *   - spinners: rotate visibly but slowly (2s/turn) — the cue is motion
+ *     direction, not speed;
+ *   - pulses and shimmer sweeps: off, replaced by a static half-opacity
+ *     state so the placeholder still reads as "not real content yet". */
+@keyframes loadingSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes skeletonShimmer {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -833,10 +875,97 @@ body {
     scroll-behavior: auto !important;
   }
 
-  .animate-spin,
+  .loading-spin,
+  .animate-spin.loading-spin {
+    animation: loadingSpin 2s linear infinite !important;
+  }
+
   .animate-pulse {
-    animation-duration: revert !important;
-    animation-iteration-count: infinite !important;
+    animation: none !important;
+    opacity: 0.75;
+  }
+
+  .skeleton-shimmer::after {
+    animation: none !important;
+    display: none;
+  }
+}
+
+/* ═══ Loading Primitives (styles for src/components/ui/loading.tsx) ═══
+ *
+ * One visual language for "work in progress":
+ *   .loading-spin          rotation for the <Spinner> arc (reduced-motion → 2s)
+ *   .skeleton-shimmer      a highlight sweep across a skeleton bar; the parent
+ *                          owns overflow:hidden so ::after can translate 100%
+ *   .loading-indeterminate barber-pole for unknown-duration progress bars
+ *   .loading-fade-in       one-shot fade applied to content that replaces a
+ *                          skeleton (see ProjectGrid's crossfade)
+ */
+.loading-spin {
+  animation: loadingSpin 800ms linear infinite;
+}
+
+.skeleton-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+
+.skeleton-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--skeleton-highlight),
+    transparent
+  );
+  transform: translateX(-100%);
+  animation: skeletonShimmer 1.6s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes loadingIndeterminate {
+  from {
+    transform: translateX(-100%) scaleX(0.4);
+  }
+  to {
+    transform: translateX(250%) scaleX(0.4);
+  }
+}
+
+.loading-indeterminate {
+  animation: loadingIndeterminate 1.2s var(--ease-out-soft) infinite;
+}
+
+/* Skeleton → content crossfade. Applied for one shot when a list swaps its
+ * placeholder for real rows, so the swap reads as a fade instead of a blink.
+ * `both` holds the final frame, so no flash of the pre-animation opacity. */
+@keyframes loadingFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.loading-fade-in {
+  animation: loadingFadeIn 180ms var(--ease-out-soft) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-indeterminate {
+    animation: none !important;
+    transform: none !important;
+    width: 100% !important;
+    opacity: 0.6;
+  }
+
+  /* The crossfade is pure decoration: the content must simply be there. */
+  .loading-fade-in {
+    animation: none !important;
+    opacity: 1 !important;
   }
 }
 

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, memo } from "react";
 import { useTranslation } from "react-i18next";
 import { formatDateTime } from "../lib/format";
 import type { BackgroundStatus } from "../lib/types";
+import { LoadingState } from "./ui/loading";
 import {
   getBackgroundStatus,
   pauseBackgroundRefresh,
@@ -62,7 +63,7 @@ export const BackgroundSettings = memo(function BackgroundSettings({ onError }: 
   );
 
   if (!status) {
-    return <div className="text-sm text-gray-500 dark:text-gray-400">{t("common.loading")}</div>;
+    return <LoadingState variant="block" label={t("common.loading")} />;
   }
 
   const formatTime = (ts: number | null) => {

@@ -4,10 +4,10 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::db::Database;
 use crate::models::{
-    BatchResult, BisectState, BlameLine, BranchCompareResult, BranchHealthReport, BranchInfo,
-    CommitInfo, FileCommitEntry, FileDiffStats, GitFileEntry, GitStatus, LogEntry, MergeResult,
-    ProjectDetail, ProjectDiffSummary, ProjectStats, ReflogEntry, RemoteInfo, StashInfo,
-    SubmoduleInfo, TagInfo, WorktreeInfo,
+    BatchResult, BatchStart, BisectState, BlameLine, BranchCompareResult, BranchHealthReport,
+    BranchInfo, CommitInfo, FileCommitEntry, FileDiffStats, GitFileEntry, GitStatus, LogEntry,
+    MergeResult, ProjectDetail, ProjectDiffSummary, ProjectStats, ReflogEntry, RemoteInfo,
+    StashInfo, SubmoduleInfo, TagInfo, WorktreeInfo,
 };
 use crate::services::GitService;
 use crate::AppError;
@@ -1235,13 +1235,72 @@ pub async fn git_set_remote_url(path: String, name: String, url: String) -> Resu
 
 // ── Batch operations: non-blocking, results stream via events ──────────
 
-type BatchOperation = fn(&[String]) -> Vec<(String, Result<String, AppError>)>;
+/// One repository, one operation. The batch runners drive this per project so
+/// `batch-result` streams out as each repo settles.
+type BatchOperation = fn(&str) -> Result<String, AppError>;
 type StatusFilter = fn(&GitStatus) -> bool;
 
 /// Success/failure tallies for one batch run, used for tray feedback.
 pub(crate) struct BatchOutcome {
     pub ok: usize,
     pub failed: usize,
+}
+
+/// Announces the start of a batch so the UI can render "0 / total" right away
+/// instead of a bare spinner with no denominator.
+fn emit_batch_start(app: &AppHandle, label: &str, total: usize) {
+    let payload = BatchStart {
+        label: label.to_string(),
+        total,
+    };
+    if let Err(e) = app.emit("batch-start", &payload) {
+        log::error!("failed to emit batch-start: {}", e);
+    }
+}
+
+/// Runs `op` across the selected repositories with bounded concurrency and
+/// emits one `batch-result` per repository *as it settles*.
+fn run_batch_emit(
+    app: &AppHandle,
+    label: &str,
+    paths: &[String],
+    op: BatchOperation,
+) -> BatchOutcome {
+    // Shared with the streaming callback: the runner owns the loop, we only
+    // get an FnMut hook per completion, so the tallies live behind a RefCell.
+    let outcome = std::cell::RefCell::new(BatchOutcome { ok: 0, failed: 0 });
+    let app_ref = app.clone();
+    let label_owned = label.to_string();
+    let outcome_ref = &outcome;
+
+    GitService::run_batch_streaming(
+        paths,
+        move |path: String| op(&path),
+        move |name, result| {
+            {
+                let mut tallies = outcome_ref.borrow_mut();
+                if result.is_ok() {
+                    tallies.ok += 1;
+                } else {
+                    tallies.failed += 1;
+                }
+            }
+            let batch_result = BatchResult {
+                project_name: name,
+                success: result.is_ok(),
+                message: result.unwrap_or_else(|e| e.to_string()),
+            };
+            if let Err(e) = app_ref.emit("batch-result", &batch_result) {
+                log::error!(
+                    "failed to emit batch-result for {} batch: {}",
+                    label_owned,
+                    e
+                );
+            }
+        },
+    );
+
+    outcome.into_inner()
 }
 
 pub(crate) fn run_batch_sync(
@@ -1257,23 +1316,9 @@ pub(crate) fn run_batch_sync(
     };
     let paths: Vec<String> = projects.iter().map(|p| p.path.clone()).collect();
 
-    let results = op(&paths);
-    let mut outcome = BatchOutcome { ok: 0, failed: 0 };
-    for (name, result) in results {
-        if result.is_ok() {
-            outcome.ok += 1;
-        } else {
-            outcome.failed += 1;
-        }
-        let batch_result = BatchResult {
-            project_name: name,
-            success: result.is_ok(),
-            message: result.unwrap_or_else(|e| e.to_string()),
-        };
-        if let Err(e) = app.emit("batch-result", &batch_result) {
-            log::error!("failed to emit batch-result: {}", e);
-        }
-    }
+    emit_batch_start(app, label, paths.len());
+    let outcome = run_batch_emit(app, label, &paths, op);
+
     if let Err(e) = app.emit("batch-done", label) {
         log::error!("failed to emit batch-done: {}", e);
     }
@@ -1295,7 +1340,7 @@ pub async fn fetch_all(
             &db,
             "fetch",
             group_id.as_deref(),
-            GitService::fetch_all_projects,
+            GitService::fetch_single,
         )
     })
     .await
@@ -1344,7 +1389,7 @@ pub async fn pull_all(
             &db,
             "pull",
             group_id.as_deref(),
-            GitService::pull_all_projects,
+            GitService::pull_single,
         )
     })
     .await
@@ -1366,7 +1411,7 @@ pub async fn push_all(
             &db,
             "push",
             group_id.as_deref(),
-            GitService::push_all_projects,
+            GitService::push_single,
         )
     })
     .await
@@ -1401,30 +1446,19 @@ fn run_batch_filtered(
         }
     }
 
-    let mut outcome = BatchOutcome { ok: 0, failed: 0 };
     if filtered.is_empty() {
+        // Still announce an empty batch: 0/0 is a definite answer, and the UI
+        // otherwise sits on its "starting" state until the safety timeout.
+        emit_batch_start(app, label, 0);
         if let Err(e) = app.emit("batch-done", label) {
             log::error!("failed to emit batch-done: {}", e);
         }
-        return Ok(outcome);
+        return Ok(BatchOutcome { ok: 0, failed: 0 });
     }
 
-    let results = op(&filtered);
-    for (name, result) in results {
-        if result.is_ok() {
-            outcome.ok += 1;
-        } else {
-            outcome.failed += 1;
-        }
-        let batch_result = BatchResult {
-            project_name: name,
-            success: result.is_ok(),
-            message: result.unwrap_or_else(|e| e.to_string()),
-        };
-        if let Err(e) = app.emit("batch-result", &batch_result) {
-            log::error!("failed to emit batch-result: {}", e);
-        }
-    }
+    emit_batch_start(app, label, filtered.len());
+    let outcome = run_batch_emit(app, label, &filtered, op);
+
     if let Err(e) = app.emit("batch-done", label) {
         log::error!("failed to emit batch-done: {}", e);
     }
@@ -1454,7 +1488,7 @@ pub async fn pull_behind(
             "pull_behind",
             group_id.as_deref(),
             behind_filter,
-            GitService::pull_all_projects,
+            GitService::pull_single,
         )
     })
     .await
@@ -1477,7 +1511,7 @@ pub async fn push_ahead(
             "push_ahead",
             group_id.as_deref(),
             ahead_filter,
-            GitService::push_all_projects,
+            GitService::push_single,
         )
     })
     .await
@@ -1559,7 +1593,7 @@ pub async fn sync_all(
             &db,
             "sync",
             group_id.as_deref(),
-            GitService::sync_all_projects,
+            GitService::sync_single,
         )
     })
     .await

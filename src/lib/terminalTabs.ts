@@ -162,6 +162,76 @@ export function upsertSession(
   return setActive({ ...state, sessions }, session.id);
 }
 
+/**
+ * Rewrites the session list into `orderedIds`. Ids the caller does not know
+ * about (a session opened by another window mid-drag) keep their relative
+ * position at the end, so a reorder can never drop a tab.
+ */
+export function orderSessions(
+  sessions: TerminalSessionState[],
+  orderedIds: string[]
+): TerminalSessionState[] {
+  const remaining = new Map(sessions.map((s) => [s.id, s]));
+  const ordered: TerminalSessionState[] = [];
+  for (const id of orderedIds) {
+    const session = remaining.get(id);
+    if (!session) continue;
+    ordered.push(session);
+    remaining.delete(id);
+  }
+  for (const session of sessions) {
+    if (remaining.has(session.id)) ordered.push(session);
+  }
+  return ordered;
+}
+
+/**
+ * Moves one tab onto another tab's slot and returns the full session id order.
+ * Only the project's own tabs are permuted: other projects' sessions keep the
+ * slots they already occupy, so a tab drag never reorders a sibling group.
+ */
+export function moveTabIds(
+  sessions: TerminalSessionState[],
+  projectKey: string,
+  activeId: string,
+  overId: string
+): string[] {
+  const groupIds = sessions.filter((s) => s.projectKey === projectKey).map((s) => s.id);
+  const from = groupIds.indexOf(activeId);
+  const to = groupIds.indexOf(overId);
+  if (from < 0 || to < 0 || from === to) return sessions.map((s) => s.id);
+  const [moved] = groupIds.splice(from, 1);
+  groupIds.splice(to, 0, moved);
+  let next = 0;
+  return sessions.map((s) => (s.projectKey === projectKey ? groupIds[next++] : s.id));
+}
+
+/**
+ * Moves a whole project group onto another group's slot and returns the full
+ * session id order. Groups are blocks: their tabs keep their internal order,
+ * and the blocks are written back contiguously, which is the flat order the
+ * sidebar reads its groups from.
+ */
+export function moveProjectIds(
+  sessions: TerminalSessionState[],
+  fromKey: string,
+  toKey: string
+): string[] {
+  const blocks = new Map<string, TerminalSessionState[]>();
+  for (const session of sessions) {
+    const block = blocks.get(session.projectKey);
+    if (block) block.push(session);
+    else blocks.set(session.projectKey, [session]);
+  }
+  const keys = [...blocks.keys()];
+  const from = keys.indexOf(fromKey);
+  const to = keys.indexOf(toKey);
+  if (from < 0 || to < 0 || from === to) return sessions.map((s) => s.id);
+  const [moved] = keys.splice(from, 1);
+  keys.splice(to, 0, moved);
+  return keys.flatMap((key) => blocks.get(key)!.map((s) => s.id));
+}
+
 export function setActive(state: TerminalTabsState, id: string): TerminalTabsState {
   const session = state.sessions.find((s) => s.id === id);
   if (!session) return state;

@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { LoadingState } from "./ui/loading";
 import { createPortal } from "react-dom";
 import { useDropdownPortal } from "../hooks/useDropdownPortal";
 import { popoverAnimation } from "./ui/primitives";
@@ -260,7 +261,14 @@ export const CommandMenu = memo(function CommandMenu({
             aria-label={ariaLabel}
             className="overflow-y-auto max-h-65 py-1"
           >
-            {loading && <div className="px-3 py-2 text-xs text-gray-400">{loadingLabel}</div>}
+            {loading && (
+              /* A real loading row (spinner + status role), not grey body text:
+                 quick-run resolves after mount, so this row is often the first
+                 thing the user sees in the menu. */
+              <div data-testid="terminal-cmd-loading" className="px-3 py-1.5">
+                <LoadingState variant="inline" label={loadingLabel} />
+              </div>
+            )}
             {!loading && items.length === 0 && (
               <div className="px-3 py-2 text-xs text-gray-400">{emptyLabel}</div>
             )}

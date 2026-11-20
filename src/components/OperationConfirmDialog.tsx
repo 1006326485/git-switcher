@@ -4,6 +4,7 @@ import type { OperationPreview, OperationTarget } from "../lib/types";
 import { getOperationPreview } from "../lib/tauri";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Modal } from "./ui/primitives";
+import { LoadingState } from "./ui/loading";
 
 interface OperationConfirmDialogProps {
   open: boolean;
@@ -61,7 +62,7 @@ export function OperationConfirmDialog({
   if (!open || (!preview && !error)) {
     return (
       <Modal open={open} onClose={onCancel} title={t("common.preparingPreview")} width="sm">
-        <div className="px-6 py-5 text-sm text-gray-500 dark:text-gray-400"> {t("common.loadingTargets")} </div>
+        <LoadingState variant="block" label={t("common.loadingTargets")} />
       </Modal>
     );
   }

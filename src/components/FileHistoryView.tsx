@@ -5,6 +5,7 @@ import type { TFunction } from "i18next";
 import * as api from "../lib/tauri";
 import type { FileCommitEntry } from "../lib/types";
 import { parseError } from "../lib/types";
+import { LoadingState } from "./ui/loading";
 
 function formatRelativeTime(t: TFunction, timestamp: number): string {
   const now = Date.now() / 1000;
@@ -63,10 +64,7 @@ export const FileHistoryView = memo(function FileHistoryView({
 
         <div className="select-text flex-1 overflow-y-auto p-4">
           {loading && (
-            <div className="flex items-center justify-center py-8">
-              <div className="animate-spin rounded-full h-6 w-6 border-2 border-blue-500 border-t-transparent" />
-              <span className="ml-2 text-sm text-gray-500">{t("fileHistory.loading")}</span>
-            </div>
+            <LoadingState variant="block" label={t("fileHistory.loading")} />
           )}
 
           {error && (

@@ -6,16 +6,18 @@
 //! draws white on a dark menu bar and black on a light one.
 //!
 //! Rather than redraw the emblem, the tray reuses the icon's own geometry — a
-//! full-bleed rounded square with a dial ring and its hand, measured off
-//! `public/app-icon.png` — and inverts its tones:
+//! full-bleed rounded square with a dial ring and the bar across its bore,
+//! measured off `public/app-icon.png` — and inverts its tones:
 //!
 //! - the icon's dark plaque becomes the white silhouette, and
-//! - the icon's bright cyan ring and hand are punched out transparent.
+//! - the icon's bright cyan ring and the diagonal bar are punched out
+//!   transparent.
 //!
 //! That gives the same mark as the app icon, in the flat silhouette that a
-//! template image needs. It is rasterised at the pixel size the menu bar asks
-//! for, so the ring, the bore and the hand all stay crisp at 16pt; macOS is
-//! then told to treat it as a template image (see the tray setup in `lib.rs`).
+//! template image needs. It is rasterised at one bitmap pixel per device pixel
+//! of the 18pt menu-bar slot, so the ring, the bore and the bar all stay crisp
+//! on a Retina bar; macOS is then told to treat it as a template image (see
+//! the tray setup in `lib.rs`).
 
 /// View box of the app icon, in points of its 512×512 raster; the glyph fills
 /// it, since the icon's plaque is full bleed.
@@ -25,15 +27,29 @@ const PLAQUE_RADIUS: f64 = 116.0;
 /// Radius of the dial ring's centreline, and its stroke width.
 const RING_RADIUS: f64 = 160.0;
 const RING_STROKE: f64 = 48.0;
-/// The hand is a round-capped stroke from the dial's centre; its cap ends
-/// where the ring's bore begins, so the hand touches the ring.
-const HAND_STROKE: f64 = 48.0;
+/// The bar is a round-capped diagonal stroke that runs up-left to down-right
+/// through the centre of the bore: the icon centres it on the dial rather than
+/// hanging it off one side, so half of it shows on each side of the centre.
+/// `BAR_STROKE` is its width (thinner than the ring) and `BAR_HALF_SPAN` is
+/// half the distance between its two round caps' centres, measured along the
+/// diagonal — short enough that white bore separates it from the ring.
+const BAR_STROKE: f64 = 40.0;
+const BAR_HALF_SPAN: f64 = 30.0;
 /// Supersampling factor per axis used to anti-alias the vector shapes.
 const SUPERSAMPLE: u32 = 8;
 
-/// Default bitmap size for the menu-bar glyph, in device pixels. 22pt is the
-/// slot macOS gives menu-bar extras; at this size Tauri can scale the bitmap
-/// down cleanly for 1x (16pt) displays and other window managers.
+/// Bitmap size for the menu-bar glyph, in device pixels.
+///
+/// `tray-icon` lays a status item's image out 18pt tall on macOS whatever size
+/// it is handed, so 36px is that 18pt slot at 2x — one bitmap pixel per device
+/// pixel on a Retina bar. 22px (the old value) was upscaled to 36px there and
+/// went soft; the other window managers draw the bitmap closer to 1:1, so they
+/// keep the smaller one.
+#[cfg(target_os = "macos")]
+pub const MENU_BAR_ICON_SIZE: u32 = 36;
+
+/// Bitmap size for the menu-bar glyph, in device pixels.
+#[cfg(not(target_os = "macos"))]
 pub const MENU_BAR_ICON_SIZE: u32 = 22;
 
 /// Renders the glyph as a `size`×`size` [`Image`](tauri::image::Image). Covered
@@ -53,12 +69,12 @@ pub fn template_image(size: u32) -> tauri::image::Image<'static> {
 }
 
 /// Anti-aliased coverage mask (0–255), row-major, for a `size`×`size` bitmap.
-/// The plaque is covered; the ring and the hand are holes in it.
+/// The plaque is covered; the ring and the bar are holes in it.
 pub(crate) fn coverage(size: u32) -> Vec<u8> {
     let size = size.max(1);
     let scale = ICON_SIZE / size as f64;
     let centre = ICON_SIZE / 2.0;
-    let hand = hand_tip();
+    let (bar_start, bar_end) = bar_caps();
 
     let n = SUPERSAMPLE;
     let total = (n * n) as f64;
@@ -77,9 +93,9 @@ pub(crate) fn coverage(size: u32) -> Vec<u8> {
                         (RING_RADIUS - RING_STROKE / 2.0..=RING_RADIUS + RING_STROKE / 2.0)
                             .contains(&d)
                     };
-                    let in_hand = distance_to_segment((x - centre, y - centre), (0.0, 0.0), hand)
-                        <= HAND_STROKE / 2.0;
-                    if in_plaque && !in_ring && !in_hand {
+                    let in_bar = distance_to_segment((x - centre, y - centre), bar_start, bar_end)
+                        <= BAR_STROKE / 2.0;
+                    if in_plaque && !in_ring && !in_bar {
                         hits += 1;
                     }
                 }
@@ -103,11 +119,12 @@ fn rounded_square(x: f64, y: f64, c: f64, half: f64, radius: f64) -> bool {
     (x - c).abs() <= half && (y - c).abs() <= half && outside <= radius
 }
 
-/// Far end of the hand, relative to the dial's centre: the icon's hand points
-/// down-right, and its round cap ends where the ring's inner edge begins.
-fn hand_tip() -> (f64, f64) {
-    let step = (RING_RADIUS - RING_STROKE / 2.0) / std::f64::consts::SQRT_2;
-    (step, step)
+/// Near and far ends of the bar, relative to the dial's centre: the icon's bar
+/// points down-right and is centred on the dial, so its round caps sit
+/// symmetrically up-left and down-right of the centre.
+fn bar_caps() -> ((f64, f64), (f64, f64)) {
+    let step = BAR_HALF_SPAN / std::f64::consts::SQRT_2;
+    ((-step, -step), (step, step))
 }
 
 /// Shortest distance from `p` to the segment `a`–`b`.
@@ -159,10 +176,9 @@ mod tests {
     fn dark_regions_become_white_and_bright_regions_go_clear() {
         let size = 128;
         let c = ICON_SIZE / 2.0;
-        // Icon's dark plaque: the bore between the hand and the ring is white,
-        // and so is the outer margin between the dial and the plaque edge.
-        // (Down-left of the centre is clear of the hand, which points
-        // down-right.)
+        // Icon's dark plaque: the bore around the bar is white, and so is the
+        // outer margin between the dial and the plaque edge. (Up-left of the
+        // bar's cap is clear of it, since the bar stops short of the ring.)
         assert!(
             at(size, c - 60.0, c - 60.0) > 240,
             "the bore (dark in the icon) should be white, got {}",
@@ -174,18 +190,66 @@ mod tests {
             255,
             "the plaque margin (dark in the icon) should be white"
         );
-        // Icon's bright cyan: the ring and the hand are punched out.
+        // Icon's bright cyan: the ring and the bar are punched out.
         assert_eq!(
             at(size, c, c - RING_RADIUS),
             0,
             "the ring (bright in the icon) should be clear"
         );
-        let (tip_x, tip_y) = hand_tip();
+        let ((start_x, start_y), (end_x, end_y)) = bar_caps();
         assert_eq!(
-            at(size, c + tip_x * 0.6, c + tip_y * 0.6),
+            at(size, c + end_x * 0.6, c + end_y * 0.6),
             0,
-            "the hand (bright in the icon) should be clear"
+            "the bar's down-right half (bright in the icon) should be clear"
         );
+        assert_eq!(
+            at(size, c + start_x * 0.6, c + start_y * 0.6),
+            0,
+            "the bar's up-left half (bright in the icon) should be clear"
+        );
+    }
+
+    #[test]
+    fn the_bar_is_centred_on_the_dial() {
+        // The app icon's bar is a slash through the middle of the bore, not a
+        // hand hanging off the centre: the glyph therefore has 180° rotational
+        // symmetry about the dial's centre. Hanging the bar off one side (as an
+        // earlier version did) leaves only the other side white and breaks this.
+        for size in [MENU_BAR_ICON_SIZE, 64] {
+            let a = alpha(&template_image(size));
+            for py in 0..size {
+                for px in 0..size {
+                    let opposite = ((size - 1 - py) * size + (size - 1 - px)) as usize;
+                    let here = (py * size + px) as usize;
+                    assert!(
+                        (a[here] as i32 - a[opposite] as i32).abs() <= 2,
+                        "at {size}px pixel ({px}, {py}) is {} but its opposite is {}",
+                        a[here],
+                        a[opposite]
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_bar_keeps_clear_of_the_ring_on_both_sides() {
+        // White bore separates each of the bar's caps from the ring's inner
+        // edge, and the bar runs straight through the dial's centre.
+        let size = 128;
+        let c = ICON_SIZE / 2.0;
+        let bore = RING_RADIUS - RING_STROKE / 2.0;
+        let reach = BAR_HALF_SPAN + BAR_STROKE / 2.0;
+        assert!(reach < bore, "the bar must not touch the ring");
+        let between = (reach + bore) / 2.0 / std::f64::consts::SQRT_2;
+        for sign in [-1.0, 1.0] {
+            assert_eq!(
+                at(size, c + sign * between, c + sign * between),
+                255,
+                "the bore between the bar and the ring should be white (sign {sign})"
+            );
+        }
+        assert_eq!(at(size, c, c), 0, "the bar runs through the dial's centre");
     }
 
     #[test]

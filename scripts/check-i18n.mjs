@@ -102,6 +102,24 @@ if (!reference) {
   }
 }
 
+// Loading-copy convention: an in-progress label ends with the single-character
+// ellipsis "…", never three ASCII dots. The catalogue had drifted into both
+// side by side (`common.loading` = "Loading..." but `menu.loading` = "Loading…"),
+// and ASCII dots sit badly in CJK text. Typographic quality is usually a review
+// concern, but this one is mechanical enough to enforce here.
+const LOADING_LEAF =
+  /^(loading|working|saving|creating|starting|fetching|searching|analy[sz]ing|applying|reviewing|comparing|exporting|importing|refreshing|uploading|downloading)/i;
+for (const [language, catalogue] of catalogues) {
+  for (const [key, value] of catalogue) {
+    if (typeof value !== "string") continue;
+    const leaf = key.split(".").pop() ?? "";
+    if (!LOADING_LEAF.test(leaf)) continue;
+    if (value.trimEnd().endsWith("...")) {
+      fail(`${language}.json: "${key}" is a loading label but ends with "..." — use "…"`);
+    }
+  }
+}
+
 const html = readFileSync(HTML_SOURCE, "utf8");
 if (!html.includes(STORAGE_KEY)) {
   fail(`${HTML_SOURCE}: the pre-paint script must read the "${STORAGE_KEY}" key`);

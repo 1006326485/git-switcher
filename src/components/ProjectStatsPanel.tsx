@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import type { ProjectStats } from "../lib/types";
 import { getProjectStats } from "../lib/tauri";
+import { Skeleton, SkeletonGroup } from "./ui/loading";
 
 interface ProjectStatsPanelProps {
   path: string;
@@ -25,10 +26,18 @@ function formatRelativeTime(t: TFunction, timestamp: number): string {
   return t("stats.year", { count: diffYears });
 }
 
-function ActivityBar({ value, max }: { value: number; max: number }) {
+function ActivityBar({ value, max, label }: { value: number; max: number; label: string }) {
   const pct = max > 0 ? Math.min((value / max) * 100, 100) : 0;
   return (
-    <div className="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+    <div
+      role="progressbar"
+      aria-label={label}
+      aria-valuemin={0}
+      aria-valuemax={max}
+      aria-valuenow={value}
+      aria-valuetext={`${Math.round(pct)}%`}
+      className="w-full h-1.5 bg-[var(--loading-bar-track)] rounded-full overflow-hidden"
+    >
       <div
         className="h-full bg-emerald-500 dark:bg-emerald-400 rounded-full transition-[width] duration-500 ease-[var(--ease-spring)]"
         style={{ width: `${pct}%` }}
@@ -63,10 +72,10 @@ export const ProjectStatsPanel = memo(function ProjectStatsPanel({ path }: Proje
 
   if (loading) {
     return (
-      <div className="space-y-2 animate-pulse">
-        <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded w-24" />
-        <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded w-32" />
-      </div>
+      <SkeletonGroup className="space-y-2">
+        <Skeleton className="h-3 w-24" />
+        <Skeleton className="h-3 w-32" />
+      </SkeletonGroup>
     );
   }
 
@@ -105,12 +114,12 @@ export const ProjectStatsPanel = memo(function ProjectStatsPanel({ path }: Proje
       <div className="space-y-1">
         <div className="flex items-center gap-2">
           <span className="text-gray-500 dark:text-gray-400 w-7">7d</span>
-          <ActivityBar value={stats.commits_last_7_days} max={activityMax} />
+          <ActivityBar value={stats.commits_last_7_days} max={activityMax} label={t("stats.activity7Aria")} />
           <span className="font-medium text-gray-800 dark:text-gray-200 w-6 text-right">{stats.commits_last_7_days}</span>
         </div>
         <div className="flex items-center gap-2">
           <span className="text-gray-500 dark:text-gray-400 w-7">30d</span>
-          <ActivityBar value={stats.commits_last_30_days} max={activityMax} />
+          <ActivityBar value={stats.commits_last_30_days} max={activityMax} label={t("stats.activity30Aria")} />
           <span className="font-medium text-gray-800 dark:text-gray-200 w-6 text-right">{stats.commits_last_30_days}</span>
         </div>
       </div>

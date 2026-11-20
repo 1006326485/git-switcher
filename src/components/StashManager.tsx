@@ -8,6 +8,7 @@ import { MenuItem, Modal } from "./ui/primitives";
 import { ContextMenu, MenuSeparator } from "./ui/ContextMenu";
 import { useContextMenu } from "../hooks/useContextMenu";
 import { OperationConfirmDialog } from "./OperationConfirmDialog";
+import { LoadingState } from "./ui/loading";
 
 interface StashManagerProps {
   path: string;
@@ -222,10 +223,7 @@ export const StashManager = memo(function StashManager({
 
         {/* Stash list */}
         {loading ? (
-          <div className="flex items-center justify-center py-8 text-sm text-gray-400 dark:text-gray-500">
-            <span className="animate-spin mr-2">&#x21BB;</span>
-            {t("stash.loadingStashes")}
-          </div>
+          <LoadingState variant="block" label={t("stash.loadingStashes")} />
         ) : stashList.length === 0 ? (
           <div className="py-8 text-center text-sm text-gray-400 dark:text-gray-500 italic">
             {t("stash.noStashes")}
@@ -266,7 +264,7 @@ export const StashManager = memo(function StashManager({
                       } disabled:opacity-50`}
                       title={t("stash.showDiffTitle")}
                     >
-                      {loadingDiff.has(s.index) ? "..." : showDiff.has(s.index) ? t("stash.hide") : t("stash.show")}
+                      {loadingDiff.has(s.index) ? t("common.working") : showDiff.has(s.index) ? t("stash.hide") : t("stash.show")}
                     </button>
                     <button
                       onClick={() => handleApply(s.index)}
@@ -306,9 +304,8 @@ export const StashManager = memo(function StashManager({
                   </div>
                 )}
                 {showDiff.has(s.index) && !diffCache[s.index] && loadingDiff.has(s.index) && (
-                  <div className="border-t border-[var(--border-color)] px-3 py-3 text-center text-xs text-gray-400">
-                    <span className="animate-spin mr-1">&#x21BB;</span>
-                    {t("stash.loadingDiff")}
+                  <div className="border-t border-[var(--border-color)]">
+                    <LoadingState label={t("stash.loadingDiff")} className="justify-center py-3" />
                   </div>
                 )}
               </div>

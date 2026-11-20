@@ -7,6 +7,7 @@ import { Modal, Tabs } from "./ui/primitives";
 import { AiGenerateIcon } from "./ui/icons";
 import { BranchDropdown } from "./BranchDropdown";
 import { MarkdownViewer } from "./MarkdownViewer";
+import { LoadingState, Spinner } from "./ui/loading";
 
 type Tab = "review" | "history";
 
@@ -264,7 +265,7 @@ export const AiReviewDialog = memo(function AiReviewDialog({
             >
               {loading ? (
                 <>
-                  <span className="animate-spin">&#x21BB;</span>
+                  <Spinner size="xs" />
                   {t("aiReview.reviewing")}
                 </>
               ) : (
@@ -279,7 +280,7 @@ export const AiReviewDialog = memo(function AiReviewDialog({
           {/* Streaming progress deliberately avoids rendering partial Markdown. */}
           {loading && isStreaming && (
             <div className="flex flex-col items-center justify-center py-12 text-gray-500 dark:text-gray-400">
-              <div className="animate-spin text-3xl mb-3">&#x21BB;</div>
+              <Spinner size="lg" className="mb-3 text-[var(--accent)]" />
               <div className="text-sm font-medium">{t("aiReview.analyzing")}</div>
               <div className="text-xs mt-1">
                 {streamedChars > 0
@@ -321,10 +322,7 @@ export const AiReviewDialog = memo(function AiReviewDialog({
       {tab === "history" && (
         <div className="px-6 py-5">
           {historyLoading ? (
-            <div className="flex flex-col items-center justify-center py-12 text-gray-500 dark:text-gray-400">
-              <div className="animate-spin text-2xl mb-3">&#x21BB;</div>
-              <div className="text-sm">{t("aiReview.loadingHistory")}</div>
-            </div>
+            <LoadingState variant="block" label={t("aiReview.loadingHistory")} />
           ) : history.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-gray-400 dark:text-gray-500">
               <svg
@@ -431,7 +429,7 @@ export const AiReviewDialog = memo(function AiReviewDialog({
                         className="p-1.5 rounded-md text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors disabled:opacity-50"
                       >
                         {deletingId === review.id ? (
-                          <span className="animate-spin text-xs">&#x21BB;</span>
+                          <Spinner size="xs" />
                         ) : (
                           <svg
                             aria-hidden="true"

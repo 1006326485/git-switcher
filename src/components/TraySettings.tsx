@@ -1,5 +1,6 @@
 import { memo, useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { LoadingState } from "./ui/loading";
 import type { AppSettings, TraySettings as TrayConfig } from "../lib/types";
 import {
   getSettings,
@@ -132,7 +133,7 @@ export const TraySettings = memo(function TraySettings({ onError }: TraySettings
   );
 
   if (!settings || !tray) {
-    return <div className="text-sm text-gray-500 dark:text-gray-400">{t("common.loading")}</div>;
+    return <LoadingState variant="block" label={t("common.loading")} />;
   }
 
   return (

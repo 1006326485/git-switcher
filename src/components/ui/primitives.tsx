@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import { CloseIcon } from "./icons";
 import { isShortcutCapturing } from "../../lib/shortcutCapture";
+import { Skeleton, SkeletonGroup } from "./loading";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Design System Primitives — single source of truth
@@ -182,17 +183,49 @@ export function SegmentedControl<T extends string>({
   );
 }
 
+/**
+ * Placeholder rows shaped exactly like a `MenuItem`: `px-3 py-2` around a 20px
+ * line box (`h-5`, the height of `text-sm`/leading-5). Callers whose items have
+ * a description or a trailing action pass their own `loadingSkeleton`; the
+ * default covers the single-line case.
+ */
+export function MenuSkeletonRows({ widths = ["72%", "52%", "60%"] }: { widths?: string[] }) {
+  return (
+    <SkeletonGroup>
+      {widths.map((width, i) => (
+        <div key={i} className="px-3 py-2 flex items-center gap-3">
+          <div className="flex h-5 min-w-0 flex-1 items-center">
+            <Skeleton className="h-4 rounded-sm" style={{ width }} />
+          </div>
+        </div>
+      ))}
+    </SkeletonGroup>
+  );
+}
+
 // ── Dropdown Menu ─────────────────────────────────────────────────────────
 
 export const DropdownMenu = memo(function DropdownMenu({
   trigger,
   children,
   align = "right",
+  loading = false,
+  loadingLabel,
+  loadingSkeleton,
 }: {
   trigger: React.ReactNode;
   children: React.ReactNode;
   align?: "left" | "right";
+  /** The menu's items are still being fetched: say so instead of opening an
+   * empty panel (or one that only has the static items). */
+  loading?: boolean;
+  loadingLabel?: string;
+  /** Placeholder rows for the loading state. Defaults to single-line rows
+   * shaped like `MenuItem`; pass your own when items carry a description, an
+   * icon or a trailing action so the panel keeps its final geometry. */
+  loadingSkeleton?: React.ReactNode;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number; maxHeight: number }>({
     top: 0,
@@ -335,9 +368,19 @@ export const DropdownMenu = memo(function DropdownMenu({
             }}
             className={`origin-top-left bg-(--surface-1) border border-(--border-color) rounded-xl shadow-lg py-1.5 min-w-50 overflow-y-auto overscroll-contain ${closing ? popoverExitAnimation : popoverAnimation}`}
           >
-            <div onClick={() => setTimeout(() => setOpen(false), 0)}>
-              {children}
-            </div>
+            {/* Outside the click-to-close wrapper: clicking a status row is
+                not a selection and must not dismiss the menu. */}
+            {loading && (
+              <div data-testid="dropdown-menu-loading">
+                {loadingSkeleton ?? <MenuSkeletonRows />}
+                <span className="sr-only">{loadingLabel ?? t("ui.select.loading")}</span>
+              </div>
+            )}
+            {!loading && (
+              <div onClick={() => setTimeout(() => setOpen(false), 0)}>
+                {children}
+              </div>
+            )}
           </div>,
           document.body
         )}

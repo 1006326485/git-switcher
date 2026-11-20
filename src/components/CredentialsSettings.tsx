@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, memo } from "react";
 import { useTranslation } from "react-i18next";
 import type { GitCredential } from "../lib/types";
 import { getGitCredentials, upsertGitCredential, deleteGitCredential } from "../lib/tauri";
+import { LoadingState } from "./ui/loading";
 
 interface CredentialsSettingsProps {
   onError?: (msg: string) => void;
@@ -177,9 +178,7 @@ export const CredentialsSettings = memo(function CredentialsSettings({
 
       {/* Credentials list */}
       {loading ? (
-        <div className="flex items-center justify-center py-4">
-          <div className="animate-spin rounded-full h-4 w-4 border-2 border-blue-500 border-t-transparent" />
-        </div>
+        <LoadingState variant="block" label={t("settings.credentials.loading")} />
       ) : creds.length === 0 ? (
         <p className="text-xs text-gray-400 dark:text-gray-500 text-center py-4">
           {t("settings.credentials.empty")}

@@ -3,6 +3,7 @@ import type { CommitInfo } from "../lib/types";
 import { AiGenerateIcon } from "./ui/icons";
 import { useTranslation } from "react-i18next";
 import { isDirtyChord } from "../lib/heldKeys";
+import { Spinner } from "./ui/loading";
 
 const COMMIT_PREFIXES = ["feat: ", "fix: ", "chore: ", "docs: "] as const;
 
@@ -59,7 +60,7 @@ export const GitOpsCommitBar = memo(function GitOpsCommitBar({
               className="px-2 py-1.5 rounded-lg text-xs font-medium bg-purple-100 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/50 hover:bg-purple-200 dark:hover:bg-purple-900/40 disabled:opacity-50 transition-colors duration-150 active:scale-[0.98]"
             >
               {generatingMsg ? (
-                <span className="animate-spin inline-block">&#x21BB;</span>
+                <Spinner size="xs" />
               ) : (
                 <AiGenerateIcon />
               )}

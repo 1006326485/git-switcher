@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import TerminalWindowApp from "../TerminalWindowApp";
 import * as api from "../lib/tauri";
@@ -94,6 +94,21 @@ function windowRoot(): HTMLElement {
   return root;
 }
 
+/**
+ * A tab's label renders before the workspace commits that tab as `activeId`,
+ * and the close chord reads `activeId`: pressing it in that window is a
+ * silent no-op that nothing ever retries. Under a loaded suite the two
+ * commits can be far enough apart to lose that race, so wait for the pane to
+ * be the visible one before pressing anything.
+ */
+async function awaitActivePane(id: string) {
+  await waitFor(() =>
+    expect(within(windowRoot()).getByTestId(`terminal-canvas-${id}`).className).not.toContain(
+      "hidden"
+    )
+  );
+}
+
 function parkFocusOutside() {
   (document.body as HTMLElement).tabIndex = -1;
   (document.body as HTMLElement).focus();
@@ -135,11 +150,12 @@ describe("TerminalWindowApp wake chords", () => {
     vi.mocked(api.terminalList).mockResolvedValue(demoSessions);
     render(<TerminalWindowApp />);
     await screen.findByText("zsh");
+    await awaitActivePane("t1");
     parkFocusOutside();
 
     pressClose();
 
-    await waitFor(() => expect(api.terminalClose).toHaveBeenCalledWith("t1"));
+    await waitFor(() => expect(api.terminalClose).toHaveBeenCalledWith("t1"), { timeout: 5000 });
     // Handing the chord to the tab must suppress the window's own Ctrl+W.
     await act(async () => {});
     expect(dismiss()).not.toHaveBeenCalled();
@@ -150,15 +166,16 @@ describe("TerminalWindowApp wake chords", () => {
     vi.mocked(api.terminalList).mockResolvedValue(demoSessions);
     render(<TerminalWindowApp />);
     await screen.findByText("zsh");
-    await waitFor(() => expect(api.listProjects).toHaveBeenCalled());
+    await waitFor(() => expect(api.listProjects).toHaveBeenCalled(), { timeout: 5000 });
+    await awaitActivePane("t1");
     parkFocusOutside();
 
     pressClose();
 
-    await waitFor(() => expect(api.terminalClose).toHaveBeenCalledWith("t1"));
+    await waitFor(() => expect(api.terminalClose).toHaveBeenCalledWith("t1"), { timeout: 5000 });
     // Closing tabs never dismisses the window; it stays up on its empty
     // state, and the next close chord is what dismisses it.
-    await waitFor(() => expect(screen.getByText("No terminals open")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("No terminals open")).toBeInTheDocument(), { timeout: 5000 });
     await act(async () => {});
     expect(dismiss()).not.toHaveBeenCalled();
     expect(hide).not.toHaveBeenCalled();
@@ -173,7 +190,7 @@ describe("TerminalWindowApp wake chords", () => {
       fireEvent.click(screen.getByRole("button", { name: "Close zsh" }));
     });
 
-    await waitFor(() => expect(api.terminalClose).toHaveBeenCalledWith("t1"));
+    await waitFor(() => expect(api.terminalClose).toHaveBeenCalledWith("t1"), { timeout: 5000 });
     expect(dismiss()).not.toHaveBeenCalled();
   });
 
@@ -181,11 +198,12 @@ describe("TerminalWindowApp wake chords", () => {
     vi.mocked(api.terminalList).mockResolvedValue([demoSessions[0], secondSession]);
     render(<TerminalWindowApp />);
     await screen.findByText("node");
+    await awaitActivePane("t2");
     parkFocusOutside();
 
     pressClose();
 
-    await waitFor(() => expect(api.terminalClose).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(api.terminalClose).toHaveBeenCalledTimes(1), { timeout: 5000 });
     expect(dismiss()).not.toHaveBeenCalled();
     expect(hide).not.toHaveBeenCalled();
   });
@@ -198,7 +216,7 @@ describe("TerminalWindowApp wake chords", () => {
 
     pressClose();
 
-    await waitFor(() => expect(dismiss()).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(dismiss()).toHaveBeenCalledTimes(1), { timeout: 5000 });
     expect(api.terminalClose).not.toHaveBeenCalled();
   });
 });

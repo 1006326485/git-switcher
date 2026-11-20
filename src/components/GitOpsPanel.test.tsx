@@ -1,8 +1,9 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useCallback, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GitOpsPanel } from "./GitOpsPanel";
 import { CARD_EXPAND_MS } from "./ui/primitives";
-import { gitPush } from "../lib/tauri";
+import { gitGetFiles, gitPush, gitStashList } from "../lib/tauri";
 
 vi.mock("../lib/tauri", () => ({
   gitGetFiles: vi.fn().mockResolvedValue([]),
@@ -92,5 +93,52 @@ describe("GitOpsPanel", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Force push" }));
 
     await waitFor(() => expect(gitPush).toHaveBeenCalledWith("/repos/x", undefined, true));
+  });
+
+  it("reads the panel once per open, even when the parent re-renders with new callback identities", async () => {
+    // The app hands this panel a fresh `onError` whenever the shared refresh
+    // bookkeeping or the toast list changes — and the refresh fired on open
+    // changes exactly that bookkeeping. Keying the open-effect on those
+    // identities made a single expand re-read and re-refresh forever, which is
+    // what left the row's refresh spinner blinking and loading.
+    vi.mocked(gitGetFiles).mockClear();
+    vi.mocked(gitStashList).mockClear();
+    const onRefresh = vi.fn();
+    let renders = 0;
+
+    function Parent() {
+      const [, setTick] = useState(0);
+      renders += 1;
+      // Stable per mount; bumps the parent's own state like a real refresh does.
+      const refresh = useCallback(async () => {
+        onRefresh();
+        setTick((n) => (n < 3 ? n + 1 : n));
+      }, []);
+      // New identity on every render, like the context value used to be.
+      const churningError = (msg: string) => msg;
+      return (
+        <GitOpsPanel
+          path="/repos/x"
+          open
+          onRefresh={refresh}
+          onSuccess={noop}
+          onError={churningError}
+          onInfo={noop}
+        />
+      );
+    }
+
+    render(<Parent />);
+
+    await waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(1));
+    // Let the parent's post-refresh re-renders play out before counting.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    expect(renders).toBeGreaterThan(1);
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+    expect(gitGetFiles).toHaveBeenCalledTimes(1);
+    expect(gitStashList).toHaveBeenCalledTimes(1);
   });
 });

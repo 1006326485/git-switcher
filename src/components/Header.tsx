@@ -10,6 +10,8 @@ import { SearchIcon, PlusIcon, KebabIcon, TerminalIcon } from "./ui/icons";
 import { NotificationPanel } from "./NotificationPanel";
 import { OperationLogPanel } from "./OperationLogPanel";
 import { BatchOpsToolbar } from "./BatchOpsToolbar";
+import { RefreshStatus, type AutoFetchProgress } from "./RefreshStatus";
+import { BatchStatus } from "./BatchStatus";
 import type { BatchProgress } from "../hooks/useBatchOps";
 
 interface FilterCounts {
@@ -72,6 +74,19 @@ interface HeaderProps {
   needsAttention: number;
   onAttentionClick: () => void;
   onOpenShortcutsHelp: () => void;
+  /** Full-list re-read in flight (timer, focus, tray, Cmd+R, undo, import). */
+  isRefreshingAll: boolean;
+  /** Single-project re-reads in flight. */
+  refreshingProjectCount: number;
+  /** Launch auto-fetch progress, or null when idle. */
+  autoFetch: AutoFetchProgress | null;
+  /** When the last completed read landed. */
+  lastRefreshedAt: number | null;
+  /** Repositories in the running batch (0 while unknown). */
+  batchTotal: number;
+  /** Safety timeout fired without a matching `batch-done`. */
+  batchStalled: boolean;
+  onDismissBatch: () => void;
 }
 
 const DEFAULT_SHORTCUTS_HELP_HOTKEY = DEFAULT_IN_APP_SHORTCUTS.shortcutsHelp;
@@ -136,6 +151,13 @@ export const Header = memo(function Header({
   needsAttention,
   onAttentionClick,
   onOpenShortcutsHelp,
+  isRefreshingAll,
+  refreshingProjectCount,
+  autoFetch,
+  lastRefreshedAt,
+  batchTotal,
+  batchStalled,
+  onDismissBatch,
 }: HeaderProps) {
   const { t } = useTranslation();
   const currentSortLabel = SORT_OPTIONS.find((o) => o.value === sortBy)?.labelKey;
@@ -182,6 +204,19 @@ export const Header = memo(function Header({
                 ? `${totalCount}`
                 : `${projectCount}/${totalCount}`}
             </span>
+            <RefreshStatus
+              isRefreshingAll={isRefreshingAll}
+              refreshingProjectCount={refreshingProjectCount}
+              autoFetch={autoFetch}
+              lastRefreshedAt={lastRefreshedAt}
+            />
+            <BatchStatus
+              batchLoading={batchLoading}
+              batchProgress={batchProgress}
+              batchTotal={batchTotal}
+              batchStalled={batchStalled}
+              onDismiss={onDismissBatch}
+            />
             {needsAttention > 0 && (
               <button
                 onClick={onAttentionClick}
@@ -345,6 +380,7 @@ export const Header = memo(function Header({
               <BatchOpsToolbar
                 batchLoading={batchLoading}
                 batchProgress={batchProgress}
+                batchTotal={batchTotal}
                 onFetchAll={onFetchAll}
                 onPullAll={onPullAll}
                 onPushAll={onPushAll}

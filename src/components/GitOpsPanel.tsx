@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, memo, lazy, Suspense } from "react";
+import { useState, useCallback, useEffect, useRef, memo, lazy, Suspense } from "react";
 import { useTranslation } from "react-i18next";
 import * as api from "../lib/tauri";
 import type { GitFileEntry, StashInfo } from "../lib/types";
@@ -9,6 +9,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { ContextMenu, MenuSeparator } from "./ui/ContextMenu";
 import { MenuItem, expandBodyAnimation, expandBodyExitAnimation, usePresence } from "./ui/primitives";
 import { useContextMenu } from "../hooks/useContextMenu";
+import { Skeleton, SkeletonGroup, Spinner } from "./ui/loading";
 
 const StashManager = lazy(() => import("./StashManager").then((m) => ({ default: m.StashManager })));
 const FileHistoryView = lazy(() => import("./FileHistoryView").then((m) => ({ default: m.FileHistoryView })));
@@ -60,6 +61,12 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
   const { present: bodyPresent, closing: bodyClosing } = usePresence(open);
   const [commitMsg, setCommitMsg] = useState("");
   const [files, setFiles] = useState<GitFileEntry[]>([]);
+  // First load for a path shows a skeleton where the file list will appear;
+  // every later refresh keeps the stale rows on screen instead of flashing
+  // bars. `git_get_files` is fast but not instant, so an expanded panel used
+  // to look like "no changes" for its first few hundred milliseconds.
+  const [filesFirstLoading, setFilesFirstLoading] = useState(false);
+  const filesLoadedPathRef = useRef<string | null>(null);
   const [loadingOps, setLoadingOps] = useState<Set<string>>(new Set());
   const [stagingFiles, setStagingFiles] = useState<Set<string>>(new Set());
   const [generatingMsg, setGeneratingMsg] = useState(false);
@@ -79,23 +86,38 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
   const [historyFile, setHistoryFile] = useState<string | null>(null);
   const fileMenu = useContextMenu();
 
+  // The parent re-creates these callbacks whenever the shared refresh
+  // bookkeeping flips — which the refresh started by the effect below does.
+  // Reading them through refs keeps the "opened" effect keyed on `open`/`path`
+  // only; depending on their identity turned one open into an endless re-read
+  // loop (the row spinner never settled).
+  const onRefreshRef = useRef(onRefresh);
+  onRefreshRef.current = onRefresh;
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
+
   const loadFiles = useCallback(async () => {
+    const firstLoad = filesLoadedPathRef.current !== path;
+    if (firstLoad) setFilesFirstLoading(true);
     try {
       const f = await api.gitGetFiles(path);
       setFiles(f);
+      filesLoadedPathRef.current = path;
     } catch (e) {
-      onError(t("panelToast.loadFiles", { error: String(e) }));
+      onErrorRef.current(t("panelToast.loadFiles", { error: String(e) }));
+    } finally {
+      if (firstLoad) setFilesFirstLoading(false);
     }
-  }, [path, onError]);
+  }, [path, t]);
 
   const loadStashList = useCallback(async () => {
     try {
       const list = await api.gitStashList(path);
       setStashList(list);
     } catch (e) {
-      onError(t("panelToast.loadStash", { error: String(e) }));
+      onErrorRef.current(t("panelToast.loadStash", { error: String(e) }));
     }
-  }, [path, onError]);
+  }, [path, t]);
 
   const loadStagedDiff = useCallback(async () => {
     setLoadingDiff(true);
@@ -120,11 +142,14 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
   // Load panel data whenever it opens (controlled or self-managed).
   // Also refresh the card badges/branch state so external git changes made
   // while the panel was closed are visible immediately on open.
+  // Deliberately not keyed on `onRefresh`: it is a callback prop, and a parent
+  // that hands down a fresh identity on every render would otherwise re-read
+  // the whole panel (and re-refresh the project) on each of its renders.
   useEffect(() => {
     if (!open) return;
-    void onRefresh();
+    void onRefreshRef.current();
     void Promise.all([loadFiles(), loadStashList()]);
-  }, [open, loadFiles, loadStashList, onRefresh]);
+  }, [open, loadFiles, loadStashList]);
 
   const handleAction = useCallback(
     async (name: string, fn: () => Promise<void>, successMsg?: string) => {
@@ -449,7 +474,19 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
           )}
 
           {/* File list with stage/unstage */}
-          {files.length > 0 && (
+          {filesFirstLoading ? (
+            <div className="space-y-1" aria-busy="true" data-testid="gitops-files-skeleton">
+              <SkeletonGroup className="space-y-1.5">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <Skeleton className="h-4 w-14 rounded" />
+                    <Skeleton className="h-3 flex-1 max-w-[55%]" />
+                  </div>
+                ))}
+              </SkeletonGroup>
+              <span className="sr-only">{t("common.loading")}</span>
+            </div>
+          ) : files.length > 0 && (
             <div className="space-y-1">
               <div className="flex items-center gap-2 mb-1">
                 <span className="text-xs text-gray-500 dark:text-gray-400">{files.length} file{files.length !== 1 ? "s" : ""}</span>
@@ -563,7 +600,7 @@ export const GitOpsPanel = memo(function GitOpsPanel({ path, onRefresh, onSucces
                 className="px-2 py-1.5 rounded-lg text-xs font-medium bg-purple-100 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/50 hover:bg-purple-200 dark:hover:bg-purple-900/40 disabled:opacity-50 transition-colors duration-150 active:scale-[0.98]"
               >
                 {generatingMsg ? (
-                  <span className="animate-spin inline-block">&#x21BB;</span>
+                  <Spinner size="sm" />
                 ) : (
                   <AiGenerateIcon />
                 )}
